@@ -96,6 +96,7 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 		handler                 http.HandlerFunc
 	}{
 		{"POST", "/api/tasks", "createTaskDraft", h.createDraft},
+		{"GET", "/api/me/submissions", "listMySubmissions", h.listSubmissions},
 		{"GET", "/api/me/tasks/{taskId}", "getMyTaskSubmission", h.getDraft},
 		{"PUT", "/api/me/tasks/{taskId}", "replaceTaskDraft", h.replaceDraft},
 		{"GET", "/api/auth/google", "startGoogleLogin", h.start}, {"GET", "/api/auth/google/callback", "completeGoogleLogin", h.callback},
@@ -110,7 +111,12 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-		if len(r.RequestURI) > 8192 {
+		maxRequestURI := 8192
+		if r.URL.Path == "/api/me/submissions" {
+			// A legal UTF-8 category can expand to three URL-encoded bytes per byte.
+			maxRequestURI = 40 << 10
+		}
+		if len(r.RequestURI) > maxRequestURI {
 			problem(w, 414, "invalid_request")
 			return
 		}
@@ -177,6 +183,9 @@ func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc
 		w.Header().Set("X-Request-ID", requestID)
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-request-id", requestID)
 		timeout := 2 * time.Second
+		if name == "listMySubmissions" {
+			timeout = 5 * time.Second
+		}
 		if name == "completeGoogleLogin" {
 			timeout = 15 * time.Second
 		}
@@ -221,7 +230,11 @@ func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
 	case codes.AlreadyExists, codes.Aborted, codes.FailedPrecondition:
 		code = 409
 	case codes.ResourceExhausted:
-		code = 429
+		if reason == "too_many_requests" {
+			code = 429
+		} else {
+			reason = unavailable
+		}
 	default:
 		reason = unavailable
 	}

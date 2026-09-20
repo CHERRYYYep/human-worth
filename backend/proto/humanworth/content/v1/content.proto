@@ -10,6 +10,7 @@ option go_package = "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/cont
 service ContentService {
   rpc CreateTaskDraft(CreateTaskDraftRequest) returns (CreateTaskDraftResponse);
   rpc GetMyTaskSubmission(GetMyTaskSubmissionRequest) returns (GetMyTaskSubmissionResponse);
+  rpc ListMySubmissions(ListMySubmissionsRequest) returns (ListMySubmissionsResponse);
   rpc ReplaceTaskDraft(ReplaceTaskDraftRequest) returns (ReplaceTaskDraftResponse);
 }
 
@@ -68,6 +69,19 @@ message GetMyTaskSubmissionRequest {
   string task_id = 2;
 }
 message GetMyTaskSubmissionResponse { TaskSubmission submission = 1; }
+message ListMySubmissionsRequest {
+  string actor_assertion = 1;
+  // Empty values select the only implemented first-phase values.
+  string kind = 2;
+  string state = 3;
+  optional string category = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+message ListMySubmissionsResponse {
+  repeated TaskSubmission items = 1;
+  string next_cursor = 2;
+}
 message ReplaceTaskDraftRequest {
   string actor_assertion = 1;
   string task_id = 2;

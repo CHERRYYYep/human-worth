@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ContentService_CreateTaskDraft_FullMethodName     = "/humanworth.content.v1.ContentService/CreateTaskDraft"
 	ContentService_GetMyTaskSubmission_FullMethodName = "/humanworth.content.v1.ContentService/GetMyTaskSubmission"
+	ContentService_ListMySubmissions_FullMethodName   = "/humanworth.content.v1.ContentService/ListMySubmissions"
 	ContentService_ReplaceTaskDraft_FullMethodName    = "/humanworth.content.v1.ContentService/ReplaceTaskDraft"
 )
 
@@ -32,6 +33,7 @@ const (
 type ContentServiceClient interface {
 	CreateTaskDraft(ctx context.Context, in *CreateTaskDraftRequest, opts ...grpc.CallOption) (*CreateTaskDraftResponse, error)
 	GetMyTaskSubmission(ctx context.Context, in *GetMyTaskSubmissionRequest, opts ...grpc.CallOption) (*GetMyTaskSubmissionResponse, error)
+	ListMySubmissions(ctx context.Context, in *ListMySubmissionsRequest, opts ...grpc.CallOption) (*ListMySubmissionsResponse, error)
 	ReplaceTaskDraft(ctx context.Context, in *ReplaceTaskDraftRequest, opts ...grpc.CallOption) (*ReplaceTaskDraftResponse, error)
 }
 
@@ -63,6 +65,16 @@ func (c *contentServiceClient) GetMyTaskSubmission(ctx context.Context, in *GetM
 	return out, nil
 }
 
+func (c *contentServiceClient) ListMySubmissions(ctx context.Context, in *ListMySubmissionsRequest, opts ...grpc.CallOption) (*ListMySubmissionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMySubmissionsResponse)
+	err := c.cc.Invoke(ctx, ContentService_ListMySubmissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *contentServiceClient) ReplaceTaskDraft(ctx context.Context, in *ReplaceTaskDraftRequest, opts ...grpc.CallOption) (*ReplaceTaskDraftResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReplaceTaskDraftResponse)
@@ -81,6 +93,7 @@ func (c *contentServiceClient) ReplaceTaskDraft(ctx context.Context, in *Replace
 type ContentServiceServer interface {
 	CreateTaskDraft(context.Context, *CreateTaskDraftRequest) (*CreateTaskDraftResponse, error)
 	GetMyTaskSubmission(context.Context, *GetMyTaskSubmissionRequest) (*GetMyTaskSubmissionResponse, error)
+	ListMySubmissions(context.Context, *ListMySubmissionsRequest) (*ListMySubmissionsResponse, error)
 	ReplaceTaskDraft(context.Context, *ReplaceTaskDraftRequest) (*ReplaceTaskDraftResponse, error)
 	mustEmbedUnimplementedContentServiceServer()
 }
@@ -97,6 +110,9 @@ func (UnimplementedContentServiceServer) CreateTaskDraft(context.Context, *Creat
 }
 func (UnimplementedContentServiceServer) GetMyTaskSubmission(context.Context, *GetMyTaskSubmissionRequest) (*GetMyTaskSubmissionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMyTaskSubmission not implemented")
+}
+func (UnimplementedContentServiceServer) ListMySubmissions(context.Context, *ListMySubmissionsRequest) (*ListMySubmissionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMySubmissions not implemented")
 }
 func (UnimplementedContentServiceServer) ReplaceTaskDraft(context.Context, *ReplaceTaskDraftRequest) (*ReplaceTaskDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReplaceTaskDraft not implemented")
@@ -158,6 +174,24 @@ func _ContentService_GetMyTaskSubmission_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ContentService_ListMySubmissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMySubmissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ListMySubmissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ListMySubmissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ListMySubmissions(ctx, req.(*ListMySubmissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ContentService_ReplaceTaskDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReplaceTaskDraftRequest)
 	if err := dec(in); err != nil {
@@ -190,6 +224,10 @@ var ContentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetMyTaskSubmission",
 			Handler:    _ContentService_GetMyTaskSubmission_Handler,
+		},
+		{
+			MethodName: "ListMySubmissions",
+			Handler:    _ContentService_ListMySubmissions_Handler,
 		},
 		{
 			MethodName: "ReplaceTaskDraft",

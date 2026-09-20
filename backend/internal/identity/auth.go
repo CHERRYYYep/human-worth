@@ -22,6 +22,7 @@ type policy struct {
 var policies = map[string]policy{
 	contentpb.ContentService_CreateTaskDraft_FullMethodName:     {Audience: "content", Write: true},
 	contentpb.ContentService_GetMyTaskSubmission_FullMethodName: {Audience: "content"},
+	contentpb.ContentService_ListMySubmissions_FullMethodName:   {Audience: "content"},
 	contentpb.ContentService_ReplaceTaskDraft_FullMethodName:    {Audience: "content", Write: true},
 	pb.IdentityService_GetCurrentSession_FullMethodName:         {Audience: "identity"},
 	pb.IdentityService_LogoutCurrentSession_FullMethodName:      {Audience: "identity", Write: true},

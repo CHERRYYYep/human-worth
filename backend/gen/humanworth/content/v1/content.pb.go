@@ -659,6 +659,143 @@ func (x *GetMyTaskSubmissionResponse) GetSubmission() *TaskSubmission {
 	return nil
 }
 
+type ListMySubmissionsRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	// Empty values select the only implemented first-phase values.
+	Kind          string  `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	State         string  `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	Category      *string `protobuf:"bytes,4,opt,name=category,proto3,oneof" json:"category,omitempty"`
+	Limit         int32   `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string  `protobuf:"bytes,6,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMySubmissionsRequest) Reset() {
+	*x = ListMySubmissionsRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMySubmissionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMySubmissionsRequest) ProtoMessage() {}
+
+func (x *ListMySubmissionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMySubmissionsRequest.ProtoReflect.Descriptor instead.
+func (*ListMySubmissionsRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListMySubmissionsRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *ListMySubmissionsRequest) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ListMySubmissionsRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ListMySubmissionsRequest) GetCategory() string {
+	if x != nil && x.Category != nil {
+		return *x.Category
+	}
+	return ""
+}
+
+func (x *ListMySubmissionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListMySubmissionsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListMySubmissionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*TaskSubmission      `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMySubmissionsResponse) Reset() {
+	*x = ListMySubmissionsResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMySubmissionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMySubmissionsResponse) ProtoMessage() {}
+
+func (x *ListMySubmissionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMySubmissionsResponse.ProtoReflect.Descriptor instead.
+func (*ListMySubmissionsResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListMySubmissionsResponse) GetItems() []*TaskSubmission {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListMySubmissionsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
 type ReplaceTaskDraftRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	ActorAssertion   string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
@@ -671,7 +808,7 @@ type ReplaceTaskDraftRequest struct {
 
 func (x *ReplaceTaskDraftRequest) Reset() {
 	*x = ReplaceTaskDraftRequest{}
-	mi := &file_humanworth_content_v1_content_proto_msgTypes[10]
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -683,7 +820,7 @@ func (x *ReplaceTaskDraftRequest) String() string {
 func (*ReplaceTaskDraftRequest) ProtoMessage() {}
 
 func (x *ReplaceTaskDraftRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_humanworth_content_v1_content_proto_msgTypes[10]
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -696,7 +833,7 @@ func (x *ReplaceTaskDraftRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplaceTaskDraftRequest.ProtoReflect.Descriptor instead.
 func (*ReplaceTaskDraftRequest) Descriptor() ([]byte, []int) {
-	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{10}
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ReplaceTaskDraftRequest) GetActorAssertion() string {
@@ -736,7 +873,7 @@ type ReplaceTaskDraftResponse struct {
 
 func (x *ReplaceTaskDraftResponse) Reset() {
 	*x = ReplaceTaskDraftResponse{}
-	mi := &file_humanworth_content_v1_content_proto_msgTypes[11]
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +885,7 @@ func (x *ReplaceTaskDraftResponse) String() string {
 func (*ReplaceTaskDraftResponse) ProtoMessage() {}
 
 func (x *ReplaceTaskDraftResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_humanworth_content_v1_content_proto_msgTypes[11]
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +898,7 @@ func (x *ReplaceTaskDraftResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplaceTaskDraftResponse.ProtoReflect.Descriptor instead.
 func (*ReplaceTaskDraftResponse) Descriptor() ([]byte, []int) {
-	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{11}
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ReplaceTaskDraftResponse) GetSubmission() *TaskSubmission {
@@ -841,6 +978,18 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\n" +
 	"submission\x18\x01 \x01(\v2%.humanworth.content.v1.TaskSubmissionR\n" +
 	"submission\"\xc9\x01\n" +
+	"\x18ListMySubmissionsRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\x12\x1f\n" +
+	"\bcategory\x18\x04 \x01(\tH\x00R\bcategory\x88\x01\x01\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x06 \x01(\tR\x06cursorB\v\n" +
+	"\t_category\"y\n" +
+	"\x19ListMySubmissionsResponse\x12;\n" +
+	"\x05items\x18\x01 \x03(\v2%.humanworth.content.v1.TaskSubmissionR\x05items\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xc9\x01\n" +
 	"\x17ReplaceTaskDraftRequest\x12'\n" +
 	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12+\n" +
@@ -849,10 +998,11 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\x18ReplaceTaskDraftResponse\x12E\n" +
 	"\n" +
 	"submission\x18\x01 \x01(\v2%.humanworth.content.v1.TaskSubmissionR\n" +
-	"submission2\xf5\x02\n" +
+	"submission2\xed\x03\n" +
 	"\x0eContentService\x12p\n" +
 	"\x0fCreateTaskDraft\x12-.humanworth.content.v1.CreateTaskDraftRequest\x1a..humanworth.content.v1.CreateTaskDraftResponse\x12|\n" +
-	"\x13GetMyTaskSubmission\x121.humanworth.content.v1.GetMyTaskSubmissionRequest\x1a2.humanworth.content.v1.GetMyTaskSubmissionResponse\x12s\n" +
+	"\x13GetMyTaskSubmission\x121.humanworth.content.v1.GetMyTaskSubmissionRequest\x1a2.humanworth.content.v1.GetMyTaskSubmissionResponse\x12v\n" +
+	"\x11ListMySubmissions\x12/.humanworth.content.v1.ListMySubmissionsRequest\x1a0.humanworth.content.v1.ListMySubmissionsResponse\x12s\n" +
 	"\x10ReplaceTaskDraft\x12..humanworth.content.v1.ReplaceTaskDraftRequest\x1a/.humanworth.content.v1.ReplaceTaskDraftResponseBMZKgithub.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1;contentv1b\x06proto3"
 
 var (
@@ -867,7 +1017,7 @@ func file_humanworth_content_v1_content_proto_rawDescGZIP() []byte {
 	return file_humanworth_content_v1_content_proto_rawDescData
 }
 
-var file_humanworth_content_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_humanworth_content_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_humanworth_content_v1_content_proto_goTypes = []any{
 	(*ArtifactInput)(nil),               // 0: humanworth.content.v1.ArtifactInput
 	(*PermissionsInput)(nil),            // 1: humanworth.content.v1.PermissionsInput
@@ -879,12 +1029,14 @@ var file_humanworth_content_v1_content_proto_goTypes = []any{
 	(*CreateTaskDraftResponse)(nil),     // 7: humanworth.content.v1.CreateTaskDraftResponse
 	(*GetMyTaskSubmissionRequest)(nil),  // 8: humanworth.content.v1.GetMyTaskSubmissionRequest
 	(*GetMyTaskSubmissionResponse)(nil), // 9: humanworth.content.v1.GetMyTaskSubmissionResponse
-	(*ReplaceTaskDraftRequest)(nil),     // 10: humanworth.content.v1.ReplaceTaskDraftRequest
-	(*ReplaceTaskDraftResponse)(nil),    // 11: humanworth.content.v1.ReplaceTaskDraftResponse
-	(*structpb.Struct)(nil),             // 12: google.protobuf.Struct
+	(*ListMySubmissionsRequest)(nil),    // 10: humanworth.content.v1.ListMySubmissionsRequest
+	(*ListMySubmissionsResponse)(nil),   // 11: humanworth.content.v1.ListMySubmissionsResponse
+	(*ReplaceTaskDraftRequest)(nil),     // 12: humanworth.content.v1.ReplaceTaskDraftRequest
+	(*ReplaceTaskDraftResponse)(nil),    // 13: humanworth.content.v1.ReplaceTaskDraftResponse
+	(*structpb.Struct)(nil),             // 14: google.protobuf.Struct
 }
 var file_humanworth_content_v1_content_proto_depIdxs = []int32{
-	12, // 0: humanworth.content.v1.AgentConfigurationInput.parameters:type_name -> google.protobuf.Struct
+	14, // 0: humanworth.content.v1.AgentConfigurationInput.parameters:type_name -> google.protobuf.Struct
 	0,  // 1: humanworth.content.v1.EntryInput.artifacts:type_name -> humanworth.content.v1.ArtifactInput
 	1,  // 2: humanworth.content.v1.EntryInput.permissions:type_name -> humanworth.content.v1.PermissionsInput
 	2,  // 3: humanworth.content.v1.EntryInput.agent_configuration:type_name -> humanworth.content.v1.AgentConfigurationInput
@@ -893,19 +1045,22 @@ var file_humanworth_content_v1_content_proto_depIdxs = []int32{
 	4,  // 6: humanworth.content.v1.CreateTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
 	5,  // 7: humanworth.content.v1.CreateTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
 	5,  // 8: humanworth.content.v1.GetMyTaskSubmissionResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
-	4,  // 9: humanworth.content.v1.ReplaceTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
-	5,  // 10: humanworth.content.v1.ReplaceTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
-	6,  // 11: humanworth.content.v1.ContentService.CreateTaskDraft:input_type -> humanworth.content.v1.CreateTaskDraftRequest
-	8,  // 12: humanworth.content.v1.ContentService.GetMyTaskSubmission:input_type -> humanworth.content.v1.GetMyTaskSubmissionRequest
-	10, // 13: humanworth.content.v1.ContentService.ReplaceTaskDraft:input_type -> humanworth.content.v1.ReplaceTaskDraftRequest
-	7,  // 14: humanworth.content.v1.ContentService.CreateTaskDraft:output_type -> humanworth.content.v1.CreateTaskDraftResponse
-	9,  // 15: humanworth.content.v1.ContentService.GetMyTaskSubmission:output_type -> humanworth.content.v1.GetMyTaskSubmissionResponse
-	11, // 16: humanworth.content.v1.ContentService.ReplaceTaskDraft:output_type -> humanworth.content.v1.ReplaceTaskDraftResponse
-	14, // [14:17] is the sub-list for method output_type
-	11, // [11:14] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	5,  // 9: humanworth.content.v1.ListMySubmissionsResponse.items:type_name -> humanworth.content.v1.TaskSubmission
+	4,  // 10: humanworth.content.v1.ReplaceTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
+	5,  // 11: humanworth.content.v1.ReplaceTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
+	6,  // 12: humanworth.content.v1.ContentService.CreateTaskDraft:input_type -> humanworth.content.v1.CreateTaskDraftRequest
+	8,  // 13: humanworth.content.v1.ContentService.GetMyTaskSubmission:input_type -> humanworth.content.v1.GetMyTaskSubmissionRequest
+	10, // 14: humanworth.content.v1.ContentService.ListMySubmissions:input_type -> humanworth.content.v1.ListMySubmissionsRequest
+	12, // 15: humanworth.content.v1.ContentService.ReplaceTaskDraft:input_type -> humanworth.content.v1.ReplaceTaskDraftRequest
+	7,  // 16: humanworth.content.v1.ContentService.CreateTaskDraft:output_type -> humanworth.content.v1.CreateTaskDraftResponse
+	9,  // 17: humanworth.content.v1.ContentService.GetMyTaskSubmission:output_type -> humanworth.content.v1.GetMyTaskSubmissionResponse
+	11, // 18: humanworth.content.v1.ContentService.ListMySubmissions:output_type -> humanworth.content.v1.ListMySubmissionsResponse
+	13, // 19: humanworth.content.v1.ContentService.ReplaceTaskDraft:output_type -> humanworth.content.v1.ReplaceTaskDraftResponse
+	16, // [16:20] is the sub-list for method output_type
+	12, // [12:16] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_humanworth_content_v1_content_proto_init() }
@@ -918,13 +1073,14 @@ func file_humanworth_content_v1_content_proto_init() {
 	file_humanworth_content_v1_content_proto_msgTypes[2].OneofWrappers = []any{}
 	file_humanworth_content_v1_content_proto_msgTypes[3].OneofWrappers = []any{}
 	file_humanworth_content_v1_content_proto_msgTypes[4].OneofWrappers = []any{}
+	file_humanworth_content_v1_content_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_humanworth_content_v1_content_proto_rawDesc), len(file_humanworth_content_v1_content_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

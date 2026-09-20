@@ -79,7 +79,7 @@ func run() error {
 		shutdown(ctx)
 	}()
 	runtime.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "human_worth_database_connections", Help: "Open connections in this replica's pool"}, func() float64 { return float64(db.Stat().TotalConns()) }))
-	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, content.Authorization), grpc.StreamInterceptor(content.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(65536), grpc.MaxSendMsgSize(131072), grpc.MaxConcurrentStreams(64))
+	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, content.Authorization), grpc.StreamInterceptor(content.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(65536), grpc.MaxSendMsgSize(4<<20), grpc.MaxConcurrentStreams(64))
 	pb.RegisterContentServiceServer(server, &content.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn)})
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
