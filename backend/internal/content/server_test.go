@@ -145,18 +145,26 @@ func TestSubmissionPageUsesProtobufBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Date(2026, 9, 20, 12, 34, 56, 123456000, time.UTC)
-	items := make([]listedSubmission, 101)
-	for i := range items {
-		id := fmt.Sprintf("tsk_%032x", 101-i)
-		items[i] = listedSubmission{submission: &pb.TaskSubmission{Id: id, AuthorId: "acct_alice", Revision: 1, State: "draft", Content: content}, createdAt: created}
-	}
 	filter := submissionFilter{Kind: "task", State: "draft"}
-	page, err := buildSubmissionPage("acct_alice", filter, items, 100)
-	if err != nil {
-		t.Fatal(err)
+	builder := newSubmissionPage("acct_alice", filter, 100)
+	attempted := 0
+	for i := 0; i < 101; i++ {
+		id := fmt.Sprintf("tsk_%032x", 101-i)
+		attempted++
+		added, err := builder.add(&pb.TaskSubmission{Id: id, AuthorId: "acct_alice", Revision: 1, State: "draft", Content: content}, created)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !added {
+			break
+		}
 	}
+	page := builder.finish(true)
 	if len(page.Items) == 0 || len(page.Items) >= 100 || page.NextCursor == "" {
 		t.Fatalf("page was not bounded by encoded size: items=%d cursor=%q", len(page.Items), page.NextCursor)
+	}
+	if attempted != len(page.Items)+1 {
+		t.Fatalf("page decoded beyond first non-fitting item: attempted=%d items=%d", attempted, len(page.Items))
 	}
 	if size := proto.Size(page); size > maxSubmissionPageBytes {
 		t.Fatalf("page exceeds protobuf budget: %d > %d", size, maxSubmissionPageBytes)

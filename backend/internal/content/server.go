@@ -344,53 +344,67 @@ func (s *Server) ListMySubmissions(ctx context.Context, r *pb.ListMySubmissionsR
 		return nil, storage(err)
 	}
 	defer rows.Close()
-	items := make([]listedSubmission, 0, limit+1)
+	page := newSubmissionPage(author, filter, limit)
 	for rows.Next() {
+		if len(page.response.Items) == int(limit) {
+			return page.finish(true), nil
+		}
 		var hash []byte
 		var itemCreated time.Time
 		item, scanErr := scan(rows, &hash, &itemCreated)
 		if scanErr != nil {
 			return nil, scanErr
 		}
-		items = append(items, listedSubmission{submission: item, createdAt: itemCreated})
+		added, addErr := page.add(item, itemCreated)
+		if addErr != nil {
+			return nil, addErr
+		}
+		if !added {
+			return page.finish(true), nil
+		}
 	}
 	if err = rows.Err(); err != nil {
 		return nil, storage(err)
 	}
-	return buildSubmissionPage(author, filter, items, limit)
+	return page.finish(false), nil
 }
 
-type listedSubmission struct {
-	submission *pb.TaskSubmission
-	createdAt  time.Time
+type submissionPageBuilder struct {
+	response  *pb.ListMySubmissionsResponse
+	author    string
+	filter    submissionFilter
+	itemsSize int
 }
 
-func buildSubmissionPage(author string, filter submissionFilter, items []listedSubmission, limit int32) (*pb.ListMySubmissionsResponse, error) {
-	response := &pb.ListMySubmissionsResponse{Items: make([]*pb.TaskSubmission, 0, min(len(items), int(limit)))}
-	itemsSize := 0
-	for i := 0; i < len(items) && i < int(limit); i++ {
-		itemSize := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(items[i].submission))
-		nextCursor := ""
-		if i+1 < len(items) {
-			nextCursor = encodeSubmissionCursor(author, filter, items[i].createdAt, items[i].submission.Id)
-		}
-		nextSize := 0
-		if nextCursor != "" {
-			nextSize = protowire.SizeTag(2) + protowire.SizeBytes(len(nextCursor))
-		}
-		if itemsSize+itemSize+nextSize > maxSubmissionPageBytes {
-			if len(response.Items) == 0 {
-				return nil, status.Error(codes.Internal, "stored_submission_too_large")
-			}
-			last := items[i-1]
-			response.NextCursor = encodeSubmissionCursor(author, filter, last.createdAt, last.submission.Id)
-			break
-		}
-		response.Items = append(response.Items, items[i].submission)
-		response.NextCursor = nextCursor
-		itemsSize += itemSize
+func newSubmissionPage(author string, filter submissionFilter, limit int32) *submissionPageBuilder {
+	return &submissionPageBuilder{
+		response: &pb.ListMySubmissionsResponse{Items: make([]*pb.TaskSubmission, 0, limit)},
+		author:   author,
+		filter:   filter,
 	}
-	return response, nil
+}
+
+func (p *submissionPageBuilder) add(item *pb.TaskSubmission, created time.Time) (bool, error) {
+	itemSize := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(item))
+	nextCursor := encodeSubmissionCursor(p.author, p.filter, created, item.Id)
+	nextSize := protowire.SizeTag(2) + protowire.SizeBytes(len(nextCursor))
+	if p.itemsSize+itemSize+nextSize > maxSubmissionPageBytes {
+		if len(p.response.Items) == 0 {
+			return false, status.Error(codes.Internal, "stored_submission_too_large")
+		}
+		return false, nil
+	}
+	p.response.Items = append(p.response.Items, item)
+	p.response.NextCursor = nextCursor
+	p.itemsSize += itemSize
+	return true, nil
+}
+
+func (p *submissionPageBuilder) finish(hasMore bool) *pb.ListMySubmissionsResponse {
+	if !hasMore {
+		p.response.NextCursor = ""
+	}
+	return p.response
 }
 
 func (s *Server) ReplaceTaskDraft(ctx context.Context, r *pb.ReplaceTaskDraftRequest) (*pb.ReplaceTaskDraftResponse, error) {

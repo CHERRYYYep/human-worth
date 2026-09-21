@@ -85,7 +85,10 @@ func (r *Runtime) Unary(ctx context.Context, request any, info *grpc.UnaryServer
 		return nil, status.Error(codes.ResourceExhausted, "too_many_requests")
 	}
 	timeout := 2 * time.Second
-	if info.FullMethod == "/humanworth.identity.v1.IdentityService/CompleteGoogleLogin" {
+	switch info.FullMethod {
+	case "/humanworth.content.v1.ContentService/ListMySubmissions":
+		timeout = 5 * time.Second
+	case "/humanworth.identity.v1.IdentityService/CompleteGoogleLogin":
 		timeout = 15 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)

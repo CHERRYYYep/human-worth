@@ -93,7 +93,7 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 3. 用 owner/管理员执行 [grants.sql](../ops/content/grants.sql)。运行账号只有 Content schema USAGE、迁移版本/草稿 SELECT、草稿 INSERT，以及 content/revision/updated_at 三列 UPDATE；不能改 author/state/key，不能 DELETE 或 DDL，也不授予 Identity 权限。
 4. 运行 `cmd/content` 改用 `content_runtime` DSN 文件，不与迁移进程共用权限。Identity 运行账号也不能读 Content。
 
-初始化脚本明确是一次性管理员动作；角色已存在时失败，不隐式覆盖密码或扩大既有权限。应用数据库及 public schema 不应向 PUBLIC 授予 CREATE（PG18 新库默认如此，旧库须管理员核对）。迁移使用独立 advisory transaction lock、文件摘要与版本记录，可重复执行、拒绝修改已应用文件；不修改已应用的 001。002 只增加 `(author_id, created_at DESC, id DESC)` 且限定 `state = 'draft'` 的 partial index。category 仍在数据库 WHERE 中过滤，但不把完整分类值放入 B-tree：001 曾允许仅受草稿整体 12000 字节约束的长分类，表达式索引会让这类旧数据因 PostgreSQL 索引项上限而阻塞升级。服务运行时不执行迁移。
+初始化脚本明确是一次性管理员动作；角色已存在时失败，不隐式覆盖密码或扩大既有权限。应用数据库及 public schema 不应向 PUBLIC 授予 CREATE（PG18 新库默认如此，旧库须管理员核对）。迁移使用独立 advisory transaction lock、文件摘要与版本记录，可重复执行、拒绝修改已应用文件；不修改已应用的 001。002 只增加 `(author_id, created_at DESC, id DESC)` 且限定 `state = 'draft'` 的 partial index。category 仍在数据库 WHERE 中过滤，但不把完整分类值放入 B-tree：001 曾允许仅受草稿整体 12000 字节约束的长分类，表达式索引会让这类旧数据因 PostgreSQL 索引项上限而阻塞升级。升级测试同时保存重复中文和确定性摘要串组成的难压缩长分类，并先确认旧完整分类索引以 SQLSTATE 54000 失败，再执行当前迁移。服务运行时不执行迁移。
 
 服务配置和构建命令见 [Go README](../backend/README.md)。已有 Dockerfile 的 SERVICE 参数可构建 content，不必复制镜像脚本。**未修改生产/kind 部署和 NetworkPolicy，不在本阶段自动部署。**
 
@@ -106,7 +106,7 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 - kind/state 缺省归一为当前唯一支持的 task/draft；明确传入其他值或空值返回 400 `unsupported_submission_filter`。category 非法返回 `invalid_category`，损坏/版本错误/跨 scope/超过 2048 字符的游标返回 `invalid_cursor`；未知参数、重复参数和非法 limit 返回 `invalid_request`。非法游标不退化为第一页。
 - 游标为版本化 Base64URL JSON，保存精确 RFC3339Nano 排序时间、ID 和账号/有效筛选/排序的 scope 摘要。它没有签名，不能作为授权凭据；Content 始终用 VerifyActor 的 author_id 形成 SQL 条件，并复核 scope，因此跨账号或换筛选复用会被拒绝。若未来需要隐藏或抵抗主动改写边界，再引入多副本共享的独立游标签名密钥。
 - 不查询 totalCount，也不跨 HTTP 请求保持数据库快照。静态数据可连续翻页且无重复遗漏；翻页期间改变 category 会按新筛选成员关系影响后续页，客户端改变 category/kind/state 时必须从第一页开始。
-- `limit` 是条数上限，不保证每个非末页都填满。Content 在加入每条完整对象后按 `proto.Size` 检查 2 MiB 单页预算；达到预算时停止，`nextCursor` 指向最后一条实际返回记录，后续记录由下一页继续读取，不截断单条对象或字段。Content 发送与 gateway 接收上限一致为 4 MiB，给应用预算留出一倍传输余量；单条草稿仍受 12000 字节 JSON 上限约束。
+- `limit` 是条数上限，不保证每个非末页都填满。Content 逐行读取并把当前 JSONB 解码为完整 Proto 后立即用 `proto.Size` 检查 2 MiB 单页预算；达到条数或字节预算即停止并关闭结果集，不再先解码整批 `limit + 1`。字节边界最多额外解码第一条放不下的记录，`nextCursor` 指向最后一条实际返回记录，后续记录由下一页继续读取，不截断单条对象或字段。Content 发送与 gateway 接收上限一致为 4 MiB，给应用预算留出一倍传输余量；单条草稿仍受 12000 字节 JSON 上限约束。
 
 ### 创建
 
@@ -121,7 +121,7 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 - 先 VerifyActor，再打开本地事务，以 `id + author_id` 查询并 `FOR UPDATE` 锁住任务；检查状态和 expectedRevision，原子替换整个聚合，revision+1。
 - 同版本并发编辑恰有一个成功，其余 409；作品与任务不会部分写入。没有数据库锁内的外部 RPC。
 - 重复 PUT 的旧 revision 返回 409，不悄悄当作新编辑，也不伪称可以精确找回历史编辑响应。超时后 GET 当前快照核对；并发编辑已发生时需客户端明确合并，不能盲目更新 expectedRevision 后覆盖。
-- gateway 和 Content 的 gRPC 客户端关闭自动应用重试；列表因需批量解码完整投稿使用 5 秒 HTTP/RPC deadline，其他普通操作仍为 2 秒，Google 回调为 15 秒；容量上限和数据库 timeout 保留。超时不等于事务一定未提交。
+- gateway 和 Content 的 gRPC 客户端关闭自动应用重试；`ListMySubmissions` 在 gateway HTTP 操作层和 Content gRPC 中间件均使用方法级 5 秒 deadline，其他普通操作仍为 2 秒，Google 回调为 15 秒。数据库仍保留 5 秒 statement timeout、2 秒 lock timeout 等更窄的资源保护子预算；5 秒不是取消这些数据库限制。超时不等于事务一定未提交。
 
 ## 6. 验收与证据范围
 
@@ -134,7 +134,8 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 | B 不能访问 A | GET/PUT 均 404；列表只返回各自作者行，管理员也不能借“我的列表”读取他人；同键不同账号不串数据 |
 | 撤销立即影响后续认证 | 真实 logout 后 HTTP 401；撤销前已签发的读/写断言也不能通过新的 VerifyActor |
 | 持久化 | 停止实际 Content 进程，启动新的进程，重新 HTTP 读取相同内容、revision 与列表 |
-| 分页/筛选 | 空页、limit 前后边界、多页静态数据、同 created_at、末页 null、category 精确/未命中/变更、非法参数和跨账号/跨筛选游标均走真实 HTTP→gRPC→PostgreSQL |
+| 分页/筛选 | 空页、limit 前后边界、多页静态数据、同 created_at、末页 null、category 精确/未命中/变更、非法参数和跨账号/跨筛选游标均走真实 HTTP→gRPC→PostgreSQL；数字 Struct 触发字节分页，预算边界后的坏存储行不污染当前页 |
+| 超时预算 | 临时 PostgreSQL RLS 测试函数把真实列表 SQL 稳定延迟 2.5 秒；列表经 gateway 与 Content 后仍成功，普通 RPC 的 2 秒中间件预算由单元测试保持 |
 | 并发/重试 | 两个进程同键创建只有一行；竞争版本只有一个200；旧版本重试409；创建重试不回滚编辑；真实锁等待超时不部分写入，释放锁后可继续编辑 |
 | 不自动公开 | state 数据库约束；无公开读取路由；公开 ID 访问不泄露草稿 |
 | 信任边界 | 错误服务、错误 CA、跨方法断言、直接 RPC 非法输入拒绝；Identity 依赖中断时不放行 |
@@ -148,17 +149,17 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 
 ### 本轮实际验收记录（2026-09-20）
 
-本机 Go 1.27.1、Buf 1.72.0、PostgreSQL 18.0。Docker socket 无权访问；复用 `/tmp` 中既有的 PostgreSQL 18 本地构建，每次 `initdb` 新建隔离数据目录，仅监听 `127.0.0.1:25432`，测试结束自动停止并删除数据目录与权限 600 的 DSN 文件。它不是产品数据库。以下结果不代表远端 GitHub CI 已运行或服务已上线：
+本机 Go 1.27.1、Buf 1.72.0、PostgreSQL 18.0。Docker socket 无权访问；复用 `/tmp` 中既有的 PostgreSQL 18 本地构建，每次 `initdb` 新建隔离数据目录，本次优化复验仅监听 `127.0.0.1:25434`，测试结束自动停止并删除数据目录与权限 600 的 DSN 文件。它不是产品数据库。以下结果不代表远端 GitHub CI 已运行或服务已上线：
 
 | 实际命令 / 动作 | 结果 |
 | --- | --- |
 | `cd backend && /tmp/hw-submissions-buf lint` | 退出 0 |
 | `cd backend && /tmp/hw-submissions-buf generate`；生成前复制 `gen/`，生成后 `diff -ru` | 退出 0；生成代码与 Proto 一致 |
 | `cd backend && test -z "$(gofmt -l cmd internal)" && go vet ./... && go build ./cmd/... && node --check internal/gateway/web/account.js` | 退出 0；四个程序入口可构建 |
-| `cd backend && go test -race ./... -count=1` | 退出 0；Content、Gateway、Identity 单元/回归测试通过 |
-| `cd backend && IDENTITY_TEST_DATABASE_URL_FILE=<临时文件> go test -race -tags=integration ./... -count=1 -timeout=120s` | 退出 0；Identity 包 22.878 秒，覆盖真实 HTTPS→gateway→mTLS Content 进程→VerifyActor→受限 PostgreSQL、3000 数字嵌套 Struct 的 100 条按字节分页、长分类写入/幂等重试/精确筛选、重启与依赖故障拒绝 |
-| 集成夹具从 001 schema 与 6300 UTF-8 字节旧分类升级，再重复执行 `content.Migrate` 并检查 schema 版本、排序索引、owner/runtime 权限与跨 schema 拒绝 | 退出 0；001 未修改，002 可重复执行且不为完整 category 建 B-tree，旧值保持不变 |
+| `cd backend && go test -race ./... -count=1` | 退出 0；Content、Gateway、Identity 及 platform 单元/回归测试通过；受控 2.5 秒 handler 延迟确认仅列表使用 5 秒 Content 中间件预算，普通 RPC 仍为 2 秒 |
+| `cd backend && IDENTITY_TEST_DATABASE_URL_FILE=<临时文件> go test -race -tags=integration ./... -count=1 -timeout=120s` | 退出 0；Identity 包 23.383 秒，覆盖真实 HTTPS→gateway→mTLS Content 进程→VerifyActor→受限 PostgreSQL、列表 SQL 受控延迟 2.5 秒、3000 数字嵌套 Struct 的 100 条逐行按字节分页、预算边界后坏存储行隔离、长分类写入/幂等重试/精确筛选、重启与依赖故障拒绝 |
+| 集成夹具从 001 schema 与 6300 UTF-8 字节重复中文、6400 字节确定性摘要串分类升级，再重复执行 `content.Migrate` 并检查 schema 版本、排序索引、owner/runtime 权限与跨 schema 拒绝 | 退出 0；旧完整 category B-tree 探针以 SQLSTATE 54000 失败；001 未修改，002 可重复执行且不建该索引，两种旧值均保持不变 |
 | 根目录 `npm run ci` | 退出 0；可信场景/链接、Swagger 构建、5 个 Node HTTP 测试、11 个 Python 测试通过 |
 | `git diff --check` | 退出 0 |
 
-必要说明：第一次一次性 PostgreSQL 初始化沿用了操作系统用户名，测试 DSN 指定的 `postgres` 角色不存在，因此测试立即失败；改为 `initdb --username=postgres` 后按 120 秒门槛重跑通过。响应预算修复后的首次集成重跑发现 8 KiB Request-URI 无法承载兼容长分类，调整为列表路由 40 KiB、HTTP header 48 KiB；随后两次重跑发现数字 Struct 大页在 `-race` 下超过原 2 秒 deadline，先将累计大小计算从 O(n²) 改为逐项 O(n)，再为列表设置 5 秒 deadline，最终通过。上述失败实例、进程和临时凭据均已清理，不计为 PASS。第一次在受限沙箱运行 `npm run ci` 时 Node HTTP 测试无法完成本地监听，已停止进程并在获准环境重跑通过。没有运行远端 GitHub CI、kind 故障实验、Google 真人授权、公网部署或数据库主备切换。
+必要说明：第一次一次性 PostgreSQL 初始化沿用了操作系统用户名，测试 DSN 指定的 `postgres` 角色不存在，因此测试立即失败；改为 `initdb --username=postgres` 后按 120 秒门槛重跑通过。响应预算修复后的首次集成重跑发现 8 KiB Request-URI 无法承载兼容长分类，调整为列表路由 40 KiB、HTTP header 48 KiB；随后两次重跑发现数字 Struct 大页在 `-race` 下超过原 2 秒 deadline，先将累计大小计算从 O(n²) 改为逐项 O(n)，再为列表设置 5 秒 deadline。此次端到端超时复验最初使用表锁，但被既有 2 秒 `lock_timeout` 先行终止，不能证明 RPC context；改用只在测试期启用、每条 SQL 仅睡眠一次的 RLS 函数后通过。逐行解码夹具第一次写入的数据不满足既有 `entries` 数据库约束，改为“满足 schema 但无法解码为 Proto”的对象后通过。Buf generate 首次在沙箱内不能访问固定版本插件，按正式权限机制联网重跑通过。最终 Go 检查链首次使用默认 `~/.cache/go-build` 时遇到只读缓存，改用隔离的 `GOCACHE=/tmp/hw-go-cache` 后同一命令通过。上述失败实例、进程和临时凭据均已清理，不计为 PASS。没有运行远端 GitHub CI、kind 故障实验、Google 真人授权、公网部署或数据库主备切换。

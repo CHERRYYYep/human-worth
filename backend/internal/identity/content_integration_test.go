@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,6 +32,7 @@ import (
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -89,14 +91,33 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	_, err = ownerDB.Exec(ctx, `INSERT INTO content.schema_migrations(version,checksum) VALUES('001_content.sql',$1)`, fmt.Sprintf("%x", initialChecksum))
 	must(t, err)
 	legacyCategory := strings.Repeat("绘", 2100)
-	legacyContent, err := json.Marshal(map[string]any{"title": "legacy", "summary": "", "description": "", "category": legacyCategory, "entries": []any{}})
-	must(t, err)
-	if len(legacyContent) >= 12000 {
-		t.Fatalf("legacy upgrade fixture is not old-version legal: %d bytes", len(legacyContent))
+	var hardCategory strings.Builder
+	for i := 0; hardCategory.Len() < 6400; i++ {
+		digest := sha256.Sum256([]byte(strconv.Itoa(i)))
+		fmt.Fprintf(&hardCategory, "%x", digest)
 	}
-	legacyHash := sha256.Sum256(legacyContent)
-	_, err = ownerDB.Exec(ctx, `INSERT INTO content.task_drafts(id,author_id,create_key,create_hash,content) VALUES('tsk_ffffffffffffffffffffffffffffffff','legacy-upgrade-account','legacy-upgrade-key-0001',$1,$2)`, legacyHash[:], legacyContent)
-	must(t, err)
+	hardLegacyCategory := hardCategory.String()[:6400]
+	legacyRows := []struct {
+		id, key, category string
+	}{
+		{"tsk_ffffffffffffffffffffffffffffffff", "legacy-upgrade-key-0001", legacyCategory},
+		{"tsk_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "legacy-upgrade-key-0002", hardLegacyCategory},
+	}
+	for _, row := range legacyRows {
+		legacyContent, marshalErr := json.Marshal(map[string]any{"title": "legacy", "summary": "", "description": "", "category": row.category, "entries": []any{}})
+		must(t, marshalErr)
+		if len(legacyContent) >= 12000 {
+			t.Fatalf("legacy upgrade fixture is not old-version legal: %d bytes", len(legacyContent))
+		}
+		legacyHash := sha256.Sum256(legacyContent)
+		_, err = ownerDB.Exec(ctx, `INSERT INTO content.task_drafts(id,author_id,create_key,create_hash,content) VALUES($1,'legacy-upgrade-account',$2,$3,$4)`, row.id, row.key, legacyHash[:], legacyContent)
+		must(t, err)
+	}
+	_, err = ownerDB.Exec(ctx, `CREATE INDEX legacy_full_category_index_probe ON content.task_drafts(author_id,(content->>'category'),created_at DESC,id DESC) WHERE state='draft'`)
+	var indexError *pgconn.PgError
+	if err == nil || !errors.As(err, &indexError) || indexError.Code != "54000" {
+		t.Fatalf("legacy full-category index did not fail with an oversized entry: %v", err)
+	}
 	must(t, content.Migrate(ctx, ownerDB))
 	must(t, content.Migrate(ctx, ownerDB))
 	var migrationCount, indexCount int
@@ -105,12 +126,14 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	if migrationCount != 2 || indexCount != 1 {
 		t.Fatalf("Content list migration missing: migrations=%d indexes=%d", migrationCount, indexCount)
 	}
-	var migratedCategory string
-	must(t, ownerDB.QueryRow(ctx, `SELECT content->>'category' FROM content.task_drafts WHERE id='tsk_ffffffffffffffffffffffffffffffff'`).Scan(&migratedCategory))
-	if migratedCategory != legacyCategory {
-		t.Fatal("list migration changed legacy category")
+	for _, row := range legacyRows {
+		var migratedCategory string
+		must(t, ownerDB.QueryRow(ctx, `SELECT content->>'category' FROM content.task_drafts WHERE id=$1`, row.id).Scan(&migratedCategory))
+		if migratedCategory != row.category {
+			t.Fatalf("list migration changed legacy category %s", row.id)
+		}
 	}
-	_, err = ownerDB.Exec(ctx, `DELETE FROM content.task_drafts WHERE id='tsk_ffffffffffffffffffffffffffffffff'`)
+	_, err = ownerDB.Exec(ctx, `DELETE FROM content.task_drafts WHERE author_id='legacy-upgrade-account'`)
 	must(t, err)
 	for _, query := range []string{"SELECT * FROM identity.accounts", "CREATE SCHEMA unauthorized"} {
 		if _, err := ownerDB.Exec(ctx, query); err == nil {
@@ -410,6 +433,50 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 			t.Fatalf("incomplete list item: %+v", item)
 		}
 	}
+	// Add a temporary row-level policy that sleeps once per list statement. This
+	// delays the real PostgreSQL query beyond the ordinary two-second RPC budget
+	// without changing the production lock_timeout or widening other RPCs.
+	const delayPolicy = `
+CREATE FUNCTION content.test_delay_task_drafts() RETURNS boolean
+LANGUAGE plpgsql VOLATILE AS $$
+BEGIN
+    IF current_setting('humanworth.test_delay_done', true) IS DISTINCT FROM '1' THEN
+        PERFORM set_config('humanworth.test_delay_done', '1', true);
+        PERFORM pg_sleep(2.5);
+    END IF;
+    RETURN true;
+END
+$$;
+ALTER TABLE content.task_drafts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY test_delay_task_drafts ON content.task_drafts FOR SELECT TO PUBLIC
+USING (content.test_delay_task_drafts());`
+	const removeDelayPolicy = `
+DROP POLICY IF EXISTS test_delay_task_drafts ON content.task_drafts;
+ALTER TABLE content.task_drafts DISABLE ROW LEVEL SECURITY;
+DROP FUNCTION IF EXISTS content.test_delay_task_drafts();`
+	_, err = ownerDB.Exec(ctx, delayPolicy)
+	must(t, err)
+	delayRemoved := false
+	defer func() {
+		if !delayRemoved {
+			ownerDB.Exec(context.Background(), removeDelayPolicy)
+		}
+	}()
+	delayBegan := time.Now()
+	delayedResponse := request(0, "GET", "/api/me/submissions?limit=100", "", alice, "", "")
+	elapsed := time.Since(delayBegan)
+	_, removeErr := ownerDB.Exec(ctx, removeDelayPolicy)
+	must(t, removeErr)
+	delayRemoved = true
+	if delayedResponse.StatusCode != 200 {
+		body, _ := io.ReadAll(delayedResponse.Body)
+		delayedResponse.Body.Close()
+		t.Fatalf("list failed after controlled database delay: status=%d elapsed=%v response=%s", delayedResponse.StatusCode, elapsed, body)
+	}
+	delayedResponse.Body.Close()
+	if elapsed < 2500*time.Millisecond || elapsed >= 5*time.Second {
+		t.Fatalf("list deadline was not end-to-end: elapsed=%v", elapsed)
+	}
 	equalPage := page("/api/me/submissions?limit=5", alice)
 	if len(equalPage.Items) != 5 || equalPage.NextCursor != nil {
 		t.Fatalf("exact limit page mismatch: %+v", equalPage)
@@ -577,7 +644,15 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	must(t, largeTx.Commit(ctx))
 	sort.Sort(sort.Reverse(sort.StringSlice(largeIDs)))
 
+	// The first byte-bounded page must stop decoding after the first item that
+	// does not fit. A malformed stored row beyond that boundary must not poison
+	// an otherwise valid page; restore it before traversing the remaining pages.
+	deferredID := largeIDs[len(largeIDs)-1]
+	_, err = lab.db.Exec(ctx, `UPDATE content.task_drafts SET content=$1 WHERE id=$2`, json.RawMessage(`{"title":1,"entries":[]}`), deferredID)
+	must(t, err)
 	largePage := page("/api/me/submissions?limit=100", charlie)
+	_, err = lab.db.Exec(ctx, `UPDATE content.task_drafts SET content=$1 WHERE id=$2`, largeDraft.Content, deferredID)
+	must(t, err)
 	if len(largePage.Items) == 0 || len(largePage.Items) >= 100 || largePage.NextCursor == nil {
 		t.Fatalf("protobuf budget did not split large page: items=%d cursor=%v", len(largePage.Items), largePage.NextCursor)
 	}
@@ -778,5 +853,5 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	if count != 0 {
 		t.Fatal("draft automatically published")
 	}
-	t.Log("PASS: real HTTPS → gateway → mTLS Content process → VerifyActor → restricted PostgreSQL; private list keyset pagination/filtering, two replicas, concurrent writes, process restart and refusal paths")
+	t.Log("PASS: real HTTPS → gateway → mTLS Content process → VerifyActor → restricted PostgreSQL; private list keyset/byte pagination, method deadline, legacy-data migration, two replicas, restart and refusal paths")
 }
