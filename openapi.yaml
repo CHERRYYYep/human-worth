@@ -6,8 +6,8 @@ info:
   description: |
     行为依据为 docs/prd.md 中的可信场景 S1～S6、2026-09-18 人类修订 H1～H3，以及 AGENTS.md 的发帖、评论、投票目标。
     健康检查与 Identity 的登录、会话和 MCP 凭据管理已在 worth.oopsbox.cn 上线；真人 Google 登录已由用户确认，部署状态见 x-deployment-status。
-    Content 的三个本人草稿操作已有本地实现，尚未公开部署；仅支持文本与外链作品草稿，文件材料仍待 Asset 接入。
-    其他业务 operation 仍为 planned；implemented 不等于已部署，具体运行状态见 docs/deployment.md。
+    Content 的三个本人草稿操作已在 worth.oopsbox.cn 上线；仅支持文本与外链作品草稿，文件材料仍待 Asset 接入。
+    本人投稿分页列表已本地实现，尚未发布；其余未实现的业务 operation 仍为 planned。implemented 不等于已部署，具体运行状态见 docs/deployment.md。
     路径、字段、状态枚举、认证载体和分页等具体选择属于 Agent Self-Claimed，详见 docs/references.md。
 
     作品以审核结果决定展示，没有独立的公开/私有或公开授权开关；云端使用授权另行检查。
@@ -397,6 +397,7 @@ paths:
           schema: {type: string, pattern: '^[A-Za-z0-9_-]{16,128}$', minLength: 16, maxLength: 128}
       x-scenarios: [S2]
       x-implementation-status: implemented
+      x-deployment-status: published
       requestBody:
         required: true
         content:
@@ -488,6 +489,7 @@ paths:
         分页请求之间不保持数据库快照；编辑不改变 created_at，但翻页期间改变 category 会使草稿按新类别进入或离开后续结果。
       x-scenarios: [S2, S3]
       x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: []}]
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
@@ -525,6 +527,7 @@ paths:
       description: 首阶段仅存在作者私有 draft；MCP、其他账号（含管理员）均不能读取。
       x-scenarios: [S2]
       x-implementation-status: implemented
+      x-deployment-status: published
       security: [{WebSession: []}]
       responses:
         '200':
@@ -545,6 +548,7 @@ paths:
         与创建共用文件拒绝、内容/作品数量上限，写入成功不公开、不送审。
       x-scenarios: [S2]
       x-implementation-status: implemented
+      x-deployment-status: published
       requestBody:
         required: true
         content:
@@ -1404,6 +1408,11 @@ components:
         service: {type: string, const: human-worth}
         stage: {type: string, enum: [foundation, identity]}
         revision: {type: string, description: 发布版本为 Git SHA；实验镜像为 local-源码摘要，开发可为 development}
+        deploymentRevision: {type: string, pattern: '^[a-f0-9]{40}$', description: 可选；部署控制器在全部登记模块滚动和检查通过后写入的完成版本，可能暂时落后于当前 gateway revision}
+        deployedServices:
+          type: array
+          items: {type: string}
+          description: 可选；deploymentRevision 对应的已完成部署模块清单，不表示其他业务模块已实现
     Problem:
       type: object
       required: [type, title, status, code, detail]

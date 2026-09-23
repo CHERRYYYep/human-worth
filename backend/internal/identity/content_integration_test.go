@@ -230,9 +230,13 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	}
 	// Separate HTTP gateways connected to different Content replicas. The same
 	// fixed public Origin is used by Identity's CSRF checks.
+	// The merged gateway must retain deployment metadata and private list routes.
+	deploymentFile := filepath.Join(t.TempDir(), "deployment-status.json")
+	deploymentRevision := strings.Repeat("a", 40)
+	must(t, os.WriteFile(deploymentFile, []byte(`{"revision":"`+deploymentRevision+`","services":["identity","content","gateway"]}`), 0600))
 	var web [2]*httptest.Server
 	for i := range web {
-		handler, err := gateway.New(lab.clients[i], gateway.Options{Origin: lab.origin, Content: clients[i], Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		handler, err := gateway.New(lab.clients[i], gateway.Options{Origin: lab.origin, Content: clients[i], DeploymentStatusFile: deploymentFile, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 		must(t, err)
 		web[i] = httptest.NewTLSServer(handler)
 		t.Cleanup(web[i].Close)
@@ -292,6 +296,18 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 		var result submissionPage
 		readJSON(t, response, &result)
 		return result
+	}
+	for i := range web {
+		health := request(i, "GET", "/api/health", "", nil, "", "")
+		httpStatus(t, health, 200)
+		var status struct {
+			Revision string   `json:"deploymentRevision"`
+			Services []string `json:"deployedServices"`
+		}
+		readJSON(t, health, &status)
+		if status.Revision != deploymentRevision || !reflect.DeepEqual(status.Services, []string{"identity", "content", "gateway"}) {
+			t.Fatalf("merged gateway lost deployment metadata: %+v", status)
+		}
 	}
 	check(request(0, "GET", "/api/me/submissions", "", nil, "", ""), 401)
 	emptyPage := page("/api/me/submissions", alice)

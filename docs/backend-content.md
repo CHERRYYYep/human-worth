@@ -95,7 +95,7 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 
 初始化脚本明确是一次性管理员动作；角色已存在时失败，不隐式覆盖密码或扩大既有权限。应用数据库及 public schema 不应向 PUBLIC 授予 CREATE（PG18 新库默认如此，旧库须管理员核对）。迁移使用独立 advisory transaction lock、文件摘要与版本记录，可重复执行、拒绝修改已应用文件；不修改已应用的 001。002 只增加 `(author_id, created_at DESC, id DESC)` 且限定 `state = 'draft'` 的 partial index。category 仍在数据库 WHERE 中过滤，但不把完整分类值放入 B-tree：001 曾允许仅受草稿整体 12000 字节约束的长分类，表达式索引会让这类旧数据因 PostgreSQL 索引项上限而阻塞升级。升级测试同时保存重复中文和确定性摘要串组成的难压缩长分类，并先确认旧完整分类索引以 SQLSTATE 54000 失败，再执行当前迁移。服务运行时不执行迁移。
 
-服务配置和构建命令见 [Go README](../backend/README.md)。已有 Dockerfile 的 SERVICE 参数可构建 content，不必复制镜像脚本。**未修改生产/kind 部署和 NetworkPolicy，不在本阶段自动部署。**
+服务配置和构建命令见 [Go README](../backend/README.md)。已有 Dockerfile 的 SERVICE 参数可构建 content，不必复制镜像脚本。2026-09-20 首阶段没有接入部署；2026-09-21 已通过 [统一模块自动部署](deployment.md#module-deployment)发布到 `https://worth.oopsbox.cn`。三个本人草稿接口已验证真实公网 HTTPS、Identity、Content 和 PostgreSQL 链路，仍须网站会话及写操作 CSRF 校验。
 
 ## 5. 分页、并发、超时与重试
 
@@ -147,7 +147,7 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 
 先对接 Asset 的上传/归属/授权检查，再设计提交审核的版本快照、稳定作品 ID、Content 与 Moderation 决定应用协议。随后才能打通公开可见性；投票与统计仍归 Voting。不要复用草稿读取方法实现公开查询，也不要在 Content 内直接读取身份数据库来省 RPC。
 
-### 本轮实际验收记录（2026-09-20）
+### 本地草稿与列表阶段验收记录（2026-09-20 起）
 
 本机 Go 1.27.1、Buf 1.72.0、PostgreSQL 18.0。Docker socket 无权访问；复用 `/tmp` 中既有的 PostgreSQL 18 本地构建，每次 `initdb` 新建隔离数据目录，本次优化复验仅监听 `127.0.0.1:25434`，测试结束自动停止并删除数据目录与权限 600 的 DSN 文件。它不是产品数据库。以下结果不代表远端 GitHub CI 已运行或服务已上线：
 
@@ -163,3 +163,36 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 | `git diff --check` | 退出 0 |
 
 必要说明：第一次一次性 PostgreSQL 初始化沿用了操作系统用户名，测试 DSN 指定的 `postgres` 角色不存在，因此测试立即失败；改为 `initdb --username=postgres` 后按 120 秒门槛重跑通过。响应预算修复后的首次集成重跑发现 8 KiB Request-URI 无法承载兼容长分类，调整为列表路由 40 KiB、HTTP header 48 KiB；随后两次重跑发现数字 Struct 大页在 `-race` 下超过原 2 秒 deadline，先将累计大小计算从 O(n²) 改为逐项 O(n)，再为列表设置 5 秒 deadline。此次端到端超时复验最初使用表锁，但被既有 2 秒 `lock_timeout` 先行终止，不能证明 RPC context；改用只在测试期启用、每条 SQL 仅睡眠一次的 RLS 函数后通过。逐行解码夹具第一次写入的数据不满足既有 `entries` 数据库约束，改为“满足 schema 但无法解码为 Proto”的对象后通过。Buf generate 首次在沙箱内不能访问固定版本插件，按正式权限机制联网重跑通过。最终 Go 检查链首次使用默认 `~/.cache/go-build` 时遇到只读缓存，改用隔离的 `GOCACHE=/tmp/hw-go-cache` 后同一命令通过。上述失败实例、进程和临时凭据均已清理，不计为 PASS。没有运行远端 GitHub CI、kind 故障实验、Google 真人授权、公网部署或数据库主备切换。
+
+### 上游保留的首阶段验收与发布记录
+
+本机 Go 1.27.1、Buf 1.72.0、临时 PostgreSQL 18.0。Docker socket 不可用，改用官方源码校验后编译到 `/tmp` 的独立 PostgreSQL，监听仅限本机；不是产品数据库。以下是实际执行结果，不代表 CI 远端已运行或服务已上线：
+
+| 实际命令 / 动作 | 结果 |
+| --- | --- |
+| `cd backend && /tmp/hw-content-buf lint` | 退出0 |
+| `cd backend && /tmp/hw-content-buf generate`；生成前后对全部生成文件做 SHA-256 比对 | 退出0；一致，既有 Identity 生成文件未改变 |
+| `cd backend && go vet ./... && go build ./cmd/...` | 退出0；四个程序入口可构建 |
+| `cd backend && go test -race ./...` | 退出0 |
+| `cd backend && IDENTITY_TEST_DATABASE_URL_FILE=/tmp/hw-content-test-dsn go test -race -tags=integration ./... -count=1 -timeout=120s` | 退出0；包含上述真实链路、双 Content 进程、实际进程重启与数据库隔离检查 |
+| 实际执行 bootstrap.sql → `go run ./cmd/content migrate` 两次 → owner 执行 grants.sql → SQL 权限断言 | 退出0；临时数据库及两角色已清理 |
+| 根目录 `npm run ci` | 退出0；可信场景/链接、Swagger 构建、5个 Node HTTP 测试、11个 Python 测试通过 |
+| `git diff --check` | 退出0 |
+
+首阶段验收说明：第一次在受限沙箱运行 Node HTTP 测试无法完成，已停止该测试进程并在允许本地监听的环境重跑通过；未把受限运行算作 PASS。2026-09-20 的实现验收没有运行 kind 故障实验、Google 真人授权、公网部署或数据库主备切换。2026-09-21 后续发布已由统一控制器配置 Content 数据库账号、服务证书、CONTENT_TARGET 和网络规则，并完成隔离 kind 实验及公网接口验收，证据见[部署记录](deployment.md#module-deployment)。
+
+### 2026-09-23 上游合并范围
+
+本次合并保留上游 `c0ab947` 的模块自动部署、Gateway 部署完成状态、首批三个草稿操作的发布记录，同时保留本地 `208599b` 的本人列表、分类筛选、逐行字节预算分页及 5 秒列表 deadline。两个初始 Content 提交 `a721f1d` 与 `5b9de6c` 的文件树完全一致，冲突按该共同内容核对双方后续改动，而不是整批选择某一侧。
+
+`GET /api/me/submissions` 仅声明本地实现与验证，未因接入部署代码就标为已发布；本次未执行 push、PR、集群发布或公网验收。新环境上线前应执行包含 `002_task_draft_list.sql` 的 Content 迁移，再滚动服务并验证列表；仅检查旧详情接口不能证明新列表已发布。
+
+合并后本地验证（2026-09-23）：
+
+- `gofmt -l cmd internal` 无输出；`go vet ./...`、`go build ./cmd/...`、`go test -race ./... -count=1` 均退出 0。
+- 固定版本 Buf 1.72.0 `lint` 与 `generate --output <临时目录>` 均退出 0；所有生成 Go 文件与仓库逐字节一致。
+- 专用 PostgreSQL 18.0 上 `go test -race -tags=integration ./... -count=1 -timeout=120s -v` 退出 0；Identity 包 23.978 秒。合并新增断言确认同一个真实 HTTPS Gateway 同时返回部署完成元信息并保留私有分页链路；测试元信息是隔离夹具，不是公网部署证据。
+- `go test -race -tags=integration ./internal/identity -run '^TestContentDraftHTTPGRPCPersistence$' -count=3 -timeout=120s -v` 退出 0，三次均通过。
+- `npm run ci` 退出 0，包括 5 个 Node 测试和 18 个 Python 测试（含上游模块部署控制器回归）。部署控制器测试中的模拟发布输出不代表本次执行过发布。
+- `go test -tags=lab ./internal/identity -run '^$'` 退出 0，仅证明上游 lab 测试可编译，没有执行 kind 测试；`git diff --cached --check` 退出 0。
+- 证据保存在本机 `/tmp/hw-merge-validation/`；临时 PostgreSQL 已停止，测试 DSN/密码文件已删除。原临时工具已不存在，Docker 无访问权限，因此本轮重新下载并校验固定版本 Buf 与 PostgreSQL 源码，只在 `/tmp` 构建使用。未连接业务数据库，也未执行远端 CI、Google 真人登录或公网验收。
