@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+package humanworth.asset.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1;assetv1";
+
+// Private user-owned files. Content owns task references and visibility.
+service AssetService {
+  rpc CreateUploadSession(CreateUploadSessionRequest) returns (CreateUploadSessionResponse);
+  rpc UploadAsset(stream UploadAssetRequest) returns (UploadAssetResponse);
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+  rpc AbortUpload(AbortUploadRequest) returns (AbortUploadResponse);
+  rpc GetUploadSession(GetUploadSessionRequest) returns (GetUploadSessionResponse);
+  rpc GetAssetMetadata(GetAssetMetadataRequest) returns (GetAssetMetadataResponse);
+  rpc ListMyAssets(ListMyAssetsRequest) returns (ListMyAssetsResponse);
+  rpc CheckAssetOwnership(CheckAssetOwnershipRequest) returns (CheckAssetOwnershipResponse);
+  rpc DownloadAsset(DownloadAssetRequest) returns (stream DownloadAssetChunk);
+}
+
+enum AssetState {
+  ASSET_STATE_UNSPECIFIED = 0;
+  ASSET_STATE_UPLOADING = 1;
+  ASSET_STATE_UPLOADED = 2;
+  ASSET_STATE_AVAILABLE = 3;
+  ASSET_STATE_FAILED = 4;
+  ASSET_STATE_ABORTED = 5;
+  ASSET_STATE_EXPIRED = 6;
+}
+
+enum UploadSessionState {
+  UPLOAD_SESSION_STATE_UNSPECIFIED = 0;
+  UPLOAD_SESSION_STATE_UPLOADING = 1;
+  UPLOAD_SESSION_STATE_UPLOADED = 2;
+  UPLOAD_SESSION_STATE_COMPLETING = 3;
+  UPLOAD_SESSION_STATE_COMPLETED = 4;
+  UPLOAD_SESSION_STATE_FAILED = 5;
+  UPLOAD_SESSION_STATE_ABORTED = 6;
+  UPLOAD_SESSION_STATE_EXPIRED = 7;
+}
+
+message AssetMetadata {
+  string id = 1;
+  string owner_id = 2;
+  string original_filename = 3;
+  string media_type = 4;
+  int64 bytes = 5;
+  string sha256 = 6;
+  AssetState state = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp completed_at = 9;
+}
+
+message UploadSession {
+  string id = 1;
+  string asset_id = 2;
+  int64 received_bytes = 3;
+  int64 expected_bytes = 4;
+  UploadSessionState state = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+message CreateUploadSessionRequest {
+  string actor_assertion = 1;
+  string idempotency_key = 2;
+  string original_filename = 3;
+  string declared_media_type = 4;
+  int64 expected_bytes = 5;
+  string expected_sha256 = 6;
+}
+message CreateUploadSessionResponse {
+  AssetMetadata asset = 1;
+  UploadSession upload_session = 2;
+}
+
+message UploadAssetRequest {
+  oneof message {
+    UploadStart start = 1;
+    UploadChunk chunk = 2;
+  }
+}
+message UploadStart {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+  int64 offset = 3;
+  string upload_attempt_id = 4;
+}
+message UploadChunk {
+  int64 offset = 1;
+  bytes data = 2;
+  string chunk_id = 3;
+}
+message UploadAssetResponse {
+  string upload_session_id = 1;
+  int64 received_bytes = 2;
+  int64 next_offset = 3;
+  AssetState state = 4;
+}
+
+message CompleteUploadRequest {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+}
+message CompleteUploadResponse { AssetMetadata asset = 1; }
+
+message AbortUploadRequest {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+}
+message AbortUploadResponse { UploadSession upload_session = 1; }
+
+message GetUploadSessionRequest {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+}
+message GetUploadSessionResponse { UploadSession upload_session = 1; }
+
+message GetAssetMetadataRequest {
+  string actor_assertion = 1;
+  string asset_id = 2;
+}
+message GetAssetMetadataResponse { AssetMetadata asset = 1; }
+
+message ListMyAssetsRequest {
+  string actor_assertion = 1;
+  int32 limit = 2;
+  string cursor = 3;
+}
+message ListMyAssetsResponse {
+  repeated AssetMetadata items = 1;
+  string next_cursor = 2;
+}
+
+message CheckAssetOwnershipRequest {
+  string actor_assertion = 1;
+  repeated string asset_ids = 2;
+}
+message CheckAssetOwnershipResponse { repeated AssetMetadata assets = 1; }
+
+message DownloadAssetRequest {
+  string actor_assertion = 1;
+  string asset_id = 2;
+  // When present, Asset asks Content to verify the private draft reference.
+  optional string task_id = 3;
+}
+message DownloadAssetChunk {
+  int64 offset = 1;
+  bytes data = 2;
+}
