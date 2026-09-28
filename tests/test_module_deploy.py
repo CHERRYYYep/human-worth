@@ -117,6 +117,23 @@ class ModuleDeployTest(unittest.TestCase):
         with patch.object(verify_deployment,'require_current_ci'),patch.object(verify_deployment,'healthy',return_value=False):
             with self.assertRaisesRegex(RuntimeError,'timed out'):verify_deployment.wait_for_deployment(sha,checks,timeout=0)
 
+    def test_public_gate_checks_private_submission_list(self):
+        checks = [check for spec in services.load_services(ROOT).values() for check in spec['checks']]
+        self.assertIn({'path':'/api/me/submissions','status':401,'code':'unauthenticated'}, checks)
+        sha = 'a'*40
+        ready = (200, {'status':'ok','service':'human-worth','revision':sha})
+
+        def response(path, options=()):
+            if path == '/api/health':
+                return ready
+            return 401, {'code':'unauthenticated'}
+
+        for failure in [(503,{'code':'content_unavailable'}), (404,{'code':'not_found'}), (401,{'code':'wrong_error'})]:
+            with patch.object(deployment_health,'response',side_effect=lambda path, options=():failure if path == '/api/me/submissions' else response(path, options)):
+                self.assertFalse(deployment_health.healthy(sha, checks))
+        with patch.object(deployment_health,'response',side_effect=response):
+            self.assertTrue(deployment_health.healthy(sha, checks))
+
     def test_superseded_or_failed_ci_never_reports_deployment_success(self):
         sha='a'*40
         with patch.object(verify_deployment,'github_json',return_value={'object':{'sha':'b'*40}}):
