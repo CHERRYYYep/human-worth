@@ -2,11 +2,19 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+const maxSubmissionCursorLength = 2048
+const maxCategoryBytes = 12000
 
 // HTTP remains handwritten. Do not accept protobuf snake_case aliases, enum
 // numbers, omitted required values, or a client-provided author/actor/state.
@@ -98,6 +106,81 @@ func (h *Handler) createDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	taskResponse(w, 201, response.Submission)
 }
+func submissionListRequest(rawQuery string) (*pb.ListMySubmissionsRequest, string) {
+	query, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return nil, "invalid_request"
+	}
+	allowed := map[string]bool{"cursor": true, "limit": true, "kind": true, "state": true, "category": true}
+	for name, values := range query {
+		if !allowed[name] || len(values) != 1 {
+			return nil, "invalid_request"
+		}
+	}
+	request := &pb.ListMySubmissionsRequest{Limit: 20, Cursor: query.Get("cursor")}
+	if len(request.Cursor) > maxSubmissionCursorLength {
+		return nil, "invalid_cursor"
+	}
+	if query.Has("limit") {
+		limit, err := strconv.Atoi(query.Get("limit"))
+		if err != nil || limit < 1 || limit > 100 {
+			return nil, "invalid_request"
+		}
+		request.Limit = int32(limit)
+	}
+	if query.Has("kind") {
+		request.Kind = query.Get("kind")
+		if request.Kind != "task" {
+			return nil, "unsupported_submission_filter"
+		}
+	}
+	if query.Has("state") {
+		request.State = query.Get("state")
+		if request.State != "draft" {
+			return nil, "unsupported_submission_filter"
+		}
+	}
+	if query.Has("category") {
+		category := query.Get("category")
+		if category == "" || !utf8.ValidString(category) || len(category) > maxCategoryBytes || strings.ContainsRune(category, 0) {
+			return nil, "invalid_category"
+		}
+		request.Category = &category
+	}
+	return request, ""
+}
+func (h *Handler) listSubmissions(w http.ResponseWriter, r *http.Request) {
+	actor, ok := h.contentActor(w, r, pb.ContentService_ListMySubmissions_FullMethodName)
+	if !ok {
+		return
+	}
+	request, reason := submissionListRequest(r.URL.RawQuery)
+	if reason != "" {
+		problem(w, 400, reason)
+		return
+	}
+	request.ActorAssertion = actor
+	response, err := h.options.Content.ListMySubmissions(r.Context(), request)
+	if err != nil {
+		contentError(w, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(response.Items))
+	for _, item := range response.Items {
+		value, err := taskJSON(item)
+		if err != nil {
+			problem(w, 500, "internal_error")
+			return
+		}
+		items = append(items, value)
+	}
+	var cursor any
+	if response.NextCursor != "" {
+		cursor = response.NextCursor
+	}
+	jsonResponse(w, 200, map[string]any{"items": items, "nextCursor": cursor})
+}
+
 func (h *Handler) getDraft(w http.ResponseWriter, r *http.Request) {
 	actor, ok := h.contentActor(w, r, pb.ContentService_GetMyTaskSubmission_FullMethodName)
 	if !ok {
@@ -134,13 +217,23 @@ func (h *Handler) replaceDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	taskResponse(w, 200, response.Submission)
 }
-func taskResponse(w http.ResponseWriter, code int, task *pb.TaskSubmission) {
+func taskJSON(task *pb.TaskSubmission) (map[string]any, error) {
+	if task == nil || task.Content == nil {
+		return nil, errors.New("missing task submission")
+	}
 	data, err := (protojson.MarshalOptions{EmitDefaultValues: true}).Marshal(task.Content)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"kind": "task", "id": task.Id, "authorId": task.AuthorId, "revision": task.Revision, "state": task.State, "content": json.RawMessage(data), "reviewId": nil, "rejectionReason": nil}, nil
+}
+func taskResponse(w http.ResponseWriter, code int, task *pb.TaskSubmission) {
+	value, err := taskJSON(task)
 	if err != nil {
 		problem(w, 500, "internal_error")
 		return
 	}
-	jsonResponse(w, code, map[string]any{"kind": "task", "id": task.Id, "authorId": task.AuthorId, "revision": task.Revision, "state": task.State, "content": json.RawMessage(data), "reviewId": nil, "rejectionReason": nil})
+	jsonResponse(w, code, value)
 }
 func contentError(w http.ResponseWriter, err error) {
 	rpcErrorFor(w, err, "content_unavailable")

@@ -1,6 +1,6 @@
 # Go 后端
 
-当前实现 `gateway`、`IdentityService`、`ContentService` 首批作者私有草稿接口和受限账号运维命令。设计见 [Identity](../docs/backend-identity.md)，集群运行命令见[部署文档](../docs/deployment.md#identity-lab)。Content 接口与使用见 [Content 草稿设计](../docs/backend-content.md)，三个本人草稿操作已于 2026-09-21 在公网启用；其余五个业务模块尚未实现。
+当前实现 `gateway`、`IdentityService`、`ContentService` 首批作者私有草稿接口和受限账号运维命令。设计见 [Identity](../docs/backend-identity.md)，集群运行命令见[部署文档](../docs/deployment.md#identity-lab)。Content 接口与使用见 [Content 草稿设计](../docs/backend-content.md)，三个本人草稿操作已于 2026-09-21 在公网启用；本人分页列表已本地实现，尚未发布；其余五个业务模块尚未实现。
 
 ## 开发与检查
 
@@ -65,9 +65,9 @@ docker build --provenance=false --sbom=false -f backend/Dockerfile \
 2. 运行 Content 时使用 **content 服务证书**、运行账号的 DSN 文件、`IDENTITY_TARGET`；不提供 Identity 签名密钥、加密密钥或数据库密码。
 3. gateway 设置 `CONTENT_TARGET`（例如 `dns:///content:8443`），客户端同时校验 DNS SAN `content` 和 SPIFFE 服务身份 `content`。没有设置时保留 Identity-only 启动，草稿请求明确返回 503；设置后 gateway 就绪检查也包括 Content。
 4. 本机并排运行多个程序时为 `GRPC_LISTEN` / `HEALTH_LISTEN` 分配不同端口，不能直接共用默认端口。
-5. 使用登录 Cookie，写操作再带 `Origin`、`X-CSRF-Token`；三个 HTTP 路径与 JSON 示例见 Content 文档。没有前端页面改动。
+5. 使用登录 Cookie，写操作再带 `Origin`、`X-CSRF-Token`；四个 HTTP 路径、分页参数与 JSON 示例见 Content 文档。没有前端页面改动。
 
-Content 集成测试复用 Identity 测试供应方与登录流程，启动 **两个实际 Content OS 进程**、两个 HTTPS gateway、mTLS RPC 及受限 PostgreSQL 账号；停止并重启一个 Content 后再次读取。入口是 `internal/identity/content_integration_test.go`（放在 Identity 测试包仅为复用现有真实 OIDC/证书/数据库 fixture，生产 Content 不导入 Identity 实现）。既有 `go test -race -tags=integration ./...` 自动包含此检查。
+Content 集成测试复用 Identity 测试供应方与登录流程，启动 **两个实际 Content OS 进程**、两个 HTTPS gateway、mTLS RPC 及受限 PostgreSQL 账号；停止并重启一个 Content 后再次读取详情与本人分页列表。入口是 `internal/identity/content_integration_test.go`（放在 Identity 测试包仅为复用现有真实 OIDC/证书/数据库 fixture，生产 Content 不导入 Identity 实现）。既有 `go test -race -tags=integration ./...` 自动包含此检查。
 
 Content 已接入 [模块自动部署](../docs/deployment.md#module-deployment)：数据库角色、证书、网络规则、迁移、双副本及部署检查进入同一 CI 后流程。2026-09-21 首次发布 `cbca132` 的 Deploy Action 与公网草稿创建、读取、更新和权限验收均通过；完整记录见部署文档。
 

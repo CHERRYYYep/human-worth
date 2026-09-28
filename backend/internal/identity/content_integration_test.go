@@ -4,7 +4,11 @@ package identity
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -15,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,20 +32,29 @@ import (
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 type draftResult struct {
-	ID       string          `json:"id"`
-	Author   string          `json:"authorId"`
-	Revision int64           `json:"revision"`
-	State    string          `json:"state"`
-	Content  json.RawMessage `json:"content"`
+	Kind            string          `json:"kind"`
+	ID              string          `json:"id"`
+	Author          string          `json:"authorId"`
+	Revision        int64           `json:"revision"`
+	State           string          `json:"state"`
+	Content         json.RawMessage `json:"content"`
+	ReviewID        *string         `json:"reviewId"`
+	RejectionReason *string         `json:"rejectionReason"`
+}
+type submissionPage struct {
+	Items      []draftResult `json:"items"`
+	NextCursor *string       `json:"nextCursor"`
 }
 
 // Reuse real Google-like HTTP OIDC + Identity + restricted database fixtures.
@@ -64,8 +78,63 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	ownerDB, err := pgxpool.NewWithConfig(ctx, cfg)
 	must(t, err)
 	t.Cleanup(ownerDB.Close)
+	// Reproduce an upgrade from the released 001 schema with data that the old
+	// aggregate-size validation accepted. The list migration must not index the
+	// complete category value and fail before the service can become ready.
+	initialMigration, err := os.ReadFile(filepath.Join("..", "content", "migrations", "001_content.sql"))
+	must(t, err)
+	_, err = ownerDB.Exec(ctx, `CREATE TABLE content.schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT clock_timestamp())`)
+	must(t, err)
+	_, err = ownerDB.Exec(ctx, string(initialMigration))
+	must(t, err)
+	initialChecksum := sha256.Sum256(initialMigration)
+	_, err = ownerDB.Exec(ctx, `INSERT INTO content.schema_migrations(version,checksum) VALUES('001_content.sql',$1)`, fmt.Sprintf("%x", initialChecksum))
+	must(t, err)
+	legacyCategory := strings.Repeat("绘", 2100)
+	var hardCategory strings.Builder
+	for i := 0; hardCategory.Len() < 6400; i++ {
+		digest := sha256.Sum256([]byte(strconv.Itoa(i)))
+		fmt.Fprintf(&hardCategory, "%x", digest)
+	}
+	hardLegacyCategory := hardCategory.String()[:6400]
+	legacyRows := []struct {
+		id, key, category string
+	}{
+		{"tsk_ffffffffffffffffffffffffffffffff", "legacy-upgrade-key-0001", legacyCategory},
+		{"tsk_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "legacy-upgrade-key-0002", hardLegacyCategory},
+	}
+	for _, row := range legacyRows {
+		legacyContent, marshalErr := json.Marshal(map[string]any{"title": "legacy", "summary": "", "description": "", "category": row.category, "entries": []any{}})
+		must(t, marshalErr)
+		if len(legacyContent) >= 12000 {
+			t.Fatalf("legacy upgrade fixture is not old-version legal: %d bytes", len(legacyContent))
+		}
+		legacyHash := sha256.Sum256(legacyContent)
+		_, err = ownerDB.Exec(ctx, `INSERT INTO content.task_drafts(id,author_id,create_key,create_hash,content) VALUES($1,'legacy-upgrade-account',$2,$3,$4)`, row.id, row.key, legacyHash[:], legacyContent)
+		must(t, err)
+	}
+	_, err = ownerDB.Exec(ctx, `CREATE INDEX legacy_full_category_index_probe ON content.task_drafts(author_id,(content->>'category'),created_at DESC,id DESC) WHERE state='draft'`)
+	var indexError *pgconn.PgError
+	if err == nil || !errors.As(err, &indexError) || indexError.Code != "54000" {
+		t.Fatalf("legacy full-category index did not fail with an oversized entry: %v", err)
+	}
 	must(t, content.Migrate(ctx, ownerDB))
 	must(t, content.Migrate(ctx, ownerDB))
+	var migrationCount, indexCount int
+	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM content.schema_migrations`).Scan(&migrationCount))
+	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='content' AND indexname='task_drafts_author_created_id'`).Scan(&indexCount))
+	if migrationCount != 2 || indexCount != 1 {
+		t.Fatalf("Content list migration missing: migrations=%d indexes=%d", migrationCount, indexCount)
+	}
+	for _, row := range legacyRows {
+		var migratedCategory string
+		must(t, ownerDB.QueryRow(ctx, `SELECT content->>'category' FROM content.task_drafts WHERE id=$1`, row.id).Scan(&migratedCategory))
+		if migratedCategory != row.category {
+			t.Fatalf("list migration changed legacy category %s", row.id)
+		}
+	}
+	_, err = ownerDB.Exec(ctx, `DELETE FROM content.task_drafts WHERE author_id='legacy-upgrade-account'`)
+	must(t, err)
 	for _, query := range []string{"SELECT * FROM identity.accounts", "CREATE SCHEMA unauthorized"} {
 		if _, err := ownerDB.Exec(ctx, query); err == nil {
 			t.Fatalf("content owner escaped its schema: %s", query)
@@ -161,9 +230,13 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	}
 	// Separate HTTP gateways connected to different Content replicas. The same
 	// fixed public Origin is used by Identity's CSRF checks.
+	// The merged gateway must retain deployment metadata and private list routes.
+	deploymentFile := filepath.Join(t.TempDir(), "deployment-status.json")
+	deploymentRevision := strings.Repeat("a", 40)
+	must(t, os.WriteFile(deploymentFile, []byte(`{"revision":"`+deploymentRevision+`","services":["identity","content","gateway"]}`), 0600))
 	var web [2]*httptest.Server
 	for i := range web {
-		handler, err := gateway.New(lab.clients[i], gateway.Options{Origin: lab.origin, Content: clients[i], Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		handler, err := gateway.New(lab.clients[i], gateway.Options{Origin: lab.origin, Content: clients[i], DeploymentStatusFile: deploymentFile, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 		must(t, err)
 		web[i] = httptest.NewTLSServer(handler)
 		t.Cleanup(web[i].Close)
@@ -213,6 +286,51 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	check := func(response *http.Response, want int) { httpStatus(t, response, want); response.Body.Close() }
+	page := func(path string, session *http.Cookie) submissionPage {
+		response := request(0, "GET", path, "", session, "", "")
+		if response.StatusCode != 200 {
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("GET %s: HTTP status=%d want=200 response=%s", path, response.StatusCode, body)
+		}
+		var result submissionPage
+		readJSON(t, response, &result)
+		return result
+	}
+	for i := range web {
+		health := request(i, "GET", "/api/health", "", nil, "", "")
+		httpStatus(t, health, 200)
+		var status struct {
+			Revision string   `json:"deploymentRevision"`
+			Services []string `json:"deployedServices"`
+		}
+		readJSON(t, health, &status)
+		if status.Revision != deploymentRevision || !reflect.DeepEqual(status.Services, []string{"identity", "content", "gateway"}) {
+			t.Fatalf("merged gateway lost deployment metadata: %+v", status)
+		}
+	}
+	check(request(0, "GET", "/api/me/submissions", "", nil, "", ""), 401)
+	emptyPage := page("/api/me/submissions", alice)
+	if len(emptyPage.Items) != 0 || emptyPage.NextCursor != nil {
+		t.Fatalf("non-empty initial list: %+v", emptyPage)
+	}
+	for _, path := range []string{
+		"/api/me/submissions?kind=entry",
+		"/api/me/submissions?kind=",
+		"/api/me/submissions?state=published",
+		"/api/me/submissions?state=",
+		"/api/me/submissions?category=",
+		"/api/me/submissions?category=" + strings.Repeat("a", 12001),
+		"/api/me/submissions?limit=0",
+		"/api/me/submissions?limit=101",
+		"/api/me/submissions?limit=nope",
+		"/api/me/submissions?limit=1&limit=2",
+		"/api/me/submissions?category=a&category=b",
+		"/api/me/submissions?unknown=value",
+		"/api/me/submissions?cursor=" + strings.Repeat("a", 2049),
+	} {
+		check(request(0, "GET", path, "", alice, "", ""), 400)
+	}
 	check(request(0, "POST", "/api/tasks", initial, nil, "", createKey), 401)
 	check(request(0, "POST", "/api/tasks", initial, alice, "", createKey), 403)
 	check(request(0, "POST", "/api/tasks", initial, alice, aliceSession.CsrfToken, ""), 400)
@@ -239,6 +357,13 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 		must(t, err)
 		check(response, 403)
 	}
+	req, err := http.NewRequestWithContext(ctx, "GET", web[0].URL+"/api/me/submissions", nil)
+	must(t, err)
+	req.Host = strings.TrimPrefix(lab.origin, "https://")
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	response, err := web[0].Client().Do(req)
+	must(t, err)
+	check(response, 403)
 	for _, body := range []string{
 		`{"title":"forged","summary":"","description":"","entries":[],"authorId":"` + bobSession.Account.Id + `"}`,
 		`{"title":"forged","summary":"","description":"","entries":[],"state":"published"}`,
@@ -283,13 +408,288 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	check(request(0, "GET", "/api/tasks", "", alice, "", ""), 405)
 	check(request(0, "POST", "/api/tasks", strings.Replace(initial, "private draft", "different", 1), alice, aliceSession.CsrfToken, createKey), 409)
 	// Same key belongs to another author's namespace, without access to Alice's row.
-	response := request(1, "POST", "/api/tasks", initial, bob, bobSession.CsrfToken, createKey)
+	response = request(1, "POST", "/api/tasks", initial, bob, bobSession.CsrfToken, createKey)
 	httpStatus(t, response, 201)
 	var bobDraft draftResult
 	readJSON(t, response, &bobDraft)
 	if bobDraft.ID == draft.ID || bobDraft.Author != bobSession.Account.Id {
 		t.Fatal("idempotency key crossed accounts")
 	}
+
+	createExtra := func(replica int, body, key string) draftResult {
+		response := request(replica, "POST", "/api/tasks", body, alice, aliceSession.CsrfToken, key)
+		httpStatus(t, response, 201)
+		var result draftResult
+		readJSON(t, response, &result)
+		return result
+	}
+	drawingOne := createExtra(0, `{"title":"drawing one","summary":"","description":"","category":"绘画","entries":[]}`, "content-list-drawing-01")
+	drawingTwo := createExtra(1, `{"title":"drawing two","summary":"","description":"","category":"绘画","entries":[]}`, "content-list-drawing-02")
+	drawingThree := createExtra(0, `{"title":"drawing three","summary":"","description":"","category":"绘画","entries":[]}`, "content-list-drawing-03")
+	codeDraft := createExtra(1, `{"title":"code draft","summary":"","description":"","category":"代码","entries":[]}`, "content-list-code-0001")
+	fixedCreated := time.Date(2026, 9, 20, 12, 34, 56, 123456000, time.UTC)
+	_, err = lab.db.Exec(ctx, `UPDATE content.task_drafts SET created_at=$1 WHERE author_id=$2`, fixedCreated, aliceSession.Account.Id)
+	must(t, err)
+
+	expectedIDs := []string{draft.ID, drawingOne.ID, drawingTwo.ID, drawingThree.ID, codeDraft.ID}
+	sort.Sort(sort.Reverse(sort.StringSlice(expectedIDs)))
+	ids := func(items []draftResult) []string {
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			result = append(result, item.ID)
+		}
+		return result
+	}
+	fullPage := page("/api/me/submissions?limit=100", alice)
+	if fullPage.NextCursor != nil || !reflect.DeepEqual(ids(fullPage.Items), expectedIDs) {
+		t.Fatalf("full list mismatch: ids=%v cursor=%v want=%v", ids(fullPage.Items), fullPage.NextCursor, expectedIDs)
+	}
+	for _, item := range fullPage.Items {
+		if item.Kind != "task" || item.Author != aliceSession.Account.Id || item.State != "draft" || item.Revision < 1 || len(item.Content) == 0 || item.ReviewID != nil || item.RejectionReason != nil {
+			t.Fatalf("incomplete list item: %+v", item)
+		}
+	}
+	// Add a temporary row-level policy that sleeps once per list statement. This
+	// delays the real PostgreSQL query beyond the ordinary two-second RPC budget
+	// without changing the production lock_timeout or widening other RPCs.
+	const delayPolicy = `
+CREATE FUNCTION content.test_delay_task_drafts() RETURNS boolean
+LANGUAGE plpgsql VOLATILE AS $$
+BEGIN
+    IF current_setting('humanworth.test_delay_done', true) IS DISTINCT FROM '1' THEN
+        PERFORM set_config('humanworth.test_delay_done', '1', true);
+        PERFORM pg_sleep(2.5);
+    END IF;
+    RETURN true;
+END
+$$;
+ALTER TABLE content.task_drafts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY test_delay_task_drafts ON content.task_drafts FOR SELECT TO PUBLIC
+USING (content.test_delay_task_drafts());`
+	const removeDelayPolicy = `
+DROP POLICY IF EXISTS test_delay_task_drafts ON content.task_drafts;
+ALTER TABLE content.task_drafts DISABLE ROW LEVEL SECURITY;
+DROP FUNCTION IF EXISTS content.test_delay_task_drafts();`
+	_, err = ownerDB.Exec(ctx, delayPolicy)
+	must(t, err)
+	delayRemoved := false
+	defer func() {
+		if !delayRemoved {
+			ownerDB.Exec(context.Background(), removeDelayPolicy)
+		}
+	}()
+	delayBegan := time.Now()
+	delayedResponse := request(0, "GET", "/api/me/submissions?limit=100", "", alice, "", "")
+	elapsed := time.Since(delayBegan)
+	_, removeErr := ownerDB.Exec(ctx, removeDelayPolicy)
+	must(t, removeErr)
+	delayRemoved = true
+	if delayedResponse.StatusCode != 200 {
+		body, _ := io.ReadAll(delayedResponse.Body)
+		delayedResponse.Body.Close()
+		t.Fatalf("list failed after controlled database delay: status=%d elapsed=%v response=%s", delayedResponse.StatusCode, elapsed, body)
+	}
+	delayedResponse.Body.Close()
+	if elapsed < 2500*time.Millisecond || elapsed >= 5*time.Second {
+		t.Fatalf("list deadline was not end-to-end: elapsed=%v", elapsed)
+	}
+	equalPage := page("/api/me/submissions?limit=5", alice)
+	if len(equalPage.Items) != 5 || equalPage.NextCursor != nil {
+		t.Fatalf("exact limit page mismatch: %+v", equalPage)
+	}
+	firstPage := page("/api/me/submissions?limit=2", alice)
+	if len(firstPage.Items) != 2 || firstPage.NextCursor == nil {
+		t.Fatalf("first page mismatch: %+v", firstPage)
+	}
+	emptyCursorPage := page("/api/me/submissions?cursor=&limit=2", alice)
+	if !reflect.DeepEqual(ids(firstPage.Items), ids(emptyCursorPage.Items)) {
+		t.Fatalf("empty cursor changed first page: %v vs %v", ids(firstPage.Items), ids(emptyCursorPage.Items))
+	}
+	collect := func(values url.Values, session *http.Cookie) []string {
+		seen := map[string]bool{}
+		var result []string
+		pageNumber := 0
+		for {
+			current := page("/api/me/submissions?"+values.Encode(), session)
+			for _, item := range current.Items {
+				if seen[item.ID] {
+					t.Fatalf("duplicate across pages: %s", item.ID)
+				}
+				seen[item.ID] = true
+				result = append(result, item.ID)
+			}
+			if current.NextCursor == nil {
+				return result
+			}
+			values.Set("cursor", *current.NextCursor)
+			pageNumber++
+			if pageNumber == 1 {
+				// Omitted and explicit first-phase values are the same effective filter.
+				values.Set("kind", "task")
+				values.Set("state", "draft")
+			}
+			if pageNumber > 10 {
+				t.Fatal("pagination did not terminate")
+			}
+		}
+	}
+	if got := collect(url.Values{"limit": {"2"}}, alice); !reflect.DeepEqual(got, expectedIDs) {
+		t.Fatalf("static pagination mismatch: got=%v want=%v", got, expectedIDs)
+	}
+	cursorQuery := url.Values{"limit": {"2"}, "cursor": {*firstPage.NextCursor}}
+	check(request(0, "GET", "/api/me/submissions?"+cursorQuery.Encode(), "", bob, "", ""), 400)
+	cursorQuery.Set("category", "绘画")
+	check(request(0, "GET", "/api/me/submissions?"+cursorQuery.Encode(), "", alice, "", ""), 400)
+	cursorQuery = url.Values{"cursor": {*firstPage.NextCursor + "!"}}
+	check(request(0, "GET", "/api/me/submissions?"+cursorQuery.Encode(), "", alice, "", ""), 400)
+	decodedCursor, err := base64.RawURLEncoding.DecodeString(*firstPage.NextCursor)
+	must(t, err)
+	var cursorPayload map[string]any
+	must(t, json.Unmarshal(decodedCursor, &cursorPayload))
+	cursorPayload["v"] = float64(2)
+	decodedCursor, err = json.Marshal(cursorPayload)
+	must(t, err)
+	cursorQuery = url.Values{"cursor": {base64.RawURLEncoding.EncodeToString(decodedCursor)}}
+	check(request(0, "GET", "/api/me/submissions?"+cursorQuery.Encode(), "", alice, "", ""), 400)
+
+	expectedDrawing := []string{drawingOne.ID, drawingTwo.ID, drawingThree.ID}
+	sort.Sort(sort.Reverse(sort.StringSlice(expectedDrawing)))
+	drawingValues := url.Values{"category": {"绘画"}, "limit": {"2"}}
+	drawingFirst := page("/api/me/submissions?"+drawingValues.Encode(), alice)
+	if len(drawingFirst.Items) != 2 || drawingFirst.NextCursor == nil {
+		t.Fatalf("category first page mismatch: %+v", drawingFirst)
+	}
+	if got := collect(url.Values{"category": {"绘画"}, "limit": {"2"}}, alice); !reflect.DeepEqual(got, expectedDrawing) {
+		t.Fatalf("category pagination mismatch: got=%v want=%v", got, expectedDrawing)
+	}
+	unmatched := page("/api/me/submissions?"+url.Values{"category": {"绘畫"}}.Encode(), alice)
+	if len(unmatched.Items) != 0 || unmatched.NextCursor != nil {
+		t.Fatalf("unmatched category was not empty: %+v", unmatched)
+	}
+	bobPage := page("/api/me/submissions?limit=100", bob)
+	if len(bobPage.Items) != 1 || bobPage.Items[0].ID != bobDraft.ID || bobPage.Items[0].Author != bobSession.Account.Id {
+		t.Fatalf("admin list crossed authors: %+v", bobPage)
+	}
+
+	// There is no cross-request snapshot. Changing category leaves created_at
+	// unchanged but removes the item from the old filter and adds it to the new one.
+	movingID := expectedDrawing[len(expectedDrawing)-1]
+	var movingCreated time.Time
+	must(t, lab.db.QueryRow(ctx, `SELECT created_at FROM content.task_drafts WHERE id=$1`, movingID).Scan(&movingCreated))
+	movedBody := `{"title":"moved drawing","summary":"","description":"","category":"代码","entries":[]}`
+	response = request(0, "PUT", "/api/me/tasks/"+movingID, `{"expectedRevision":1,"content":`+movedBody+`}`, alice, aliceSession.CsrfToken, "")
+	httpStatus(t, response, 200)
+	response.Body.Close()
+	var movingCreatedAfter time.Time
+	must(t, lab.db.QueryRow(ctx, `SELECT created_at FROM content.task_drafts WHERE id=$1`, movingID).Scan(&movingCreatedAfter))
+	if !movingCreated.Equal(movingCreatedAfter) {
+		t.Fatalf("edit changed created_at: before=%v after=%v", movingCreated, movingCreatedAfter)
+	}
+	drawingValues.Set("cursor", *drawingFirst.NextCursor)
+	oldSecondPage := page("/api/me/submissions?"+drawingValues.Encode(), alice)
+	if len(oldSecondPage.Items) != 0 || oldSecondPage.NextCursor != nil {
+		t.Fatalf("mutable filter unexpectedly kept moved item: %+v", oldSecondPage)
+	}
+	freshDrawing := page("/api/me/submissions?"+url.Values{"category": {"绘画"}, "limit": {"100"}}.Encode(), alice)
+	if len(freshDrawing.Items) != 2 {
+		t.Fatalf("fresh drawing filter mismatch: %+v", freshDrawing)
+	}
+	freshCode := page("/api/me/submissions?"+url.Values{"category": {"代码"}, "limit": {"100"}}.Encode(), alice)
+	if len(freshCode.Items) != 2 {
+		t.Fatalf("fresh code filter mismatch: %+v", freshCode)
+	}
+
+	// Long categories accepted by the released draft implementation remain
+	// writable, idempotently replayable, and exactly filterable after upgrade.
+	charlie, charlieSession := lab.login(t, "content-large-page", nil)
+	legacyBody, err := json.Marshal(map[string]any{"title": "legacy category", "summary": "", "description": "", "category": legacyCategory, "entries": []any{}})
+	must(t, err)
+	response = request(0, "POST", "/api/tasks", string(legacyBody), charlie, charlieSession.CsrfToken, "legacy-category-key-0001")
+	httpStatus(t, response, 201)
+	var legacyDraft draftResult
+	readJSON(t, response, &legacyDraft)
+	response = request(0, "POST", "/api/tasks", string(legacyBody), charlie, charlieSession.CsrfToken, "legacy-category-key-0001")
+	httpStatus(t, response, 201)
+	var legacyReplay draftResult
+	readJSON(t, response, &legacyReplay)
+	if legacyReplay.ID != legacyDraft.ID {
+		t.Fatal("long-category idempotency replay changed task")
+	}
+	legacyPage := page("/api/me/submissions?"+url.Values{"category": {legacyCategory}}.Encode(), charlie)
+	if len(legacyPage.Items) != 1 || legacyPage.Items[0].ID != legacyDraft.ID || legacyPage.NextCursor != nil {
+		t.Fatalf("long-category filter mismatch: %+v", legacyPage)
+	}
+	_, err = lab.db.Exec(ctx, `DELETE FROM content.task_drafts WHERE author_id=$1`, charlieSession.Account.Id)
+	must(t, err)
+
+	// Struct numbers are much larger in protobuf than in JSON. Create one through
+	// HTTP, prepare 100 legal rows, and verify the real HTTP -> gRPC -> PostgreSQL
+	// path splits by encoded response bytes without truncating a submission.
+	numbers := make([]int, 3000)
+	for i := range numbers {
+		numbers[i] = i % 10
+	}
+	largeContent, err := json.Marshal(map[string]any{
+		"title": "large", "summary": "", "description": "", "entries": []any{map[string]any{
+			"side": "agent", "title": "work", "source": "model",
+			"artifacts":          []any{map[string]any{"kind": "link", "url": "https://example.com/work"}},
+			"permissions":        map[string]any{"cloudUse": false},
+			"agentConfiguration": map[string]any{"model": "example", "parameters": map[string]any{"nested": map[string]any{"values": numbers}}},
+		}},
+	})
+	must(t, err)
+	if len(largeContent) >= 12000 {
+		t.Fatalf("large page fixture exceeds legal JSON size: %d", len(largeContent))
+	}
+	response = request(0, "POST", "/api/tasks", string(largeContent), charlie, charlieSession.CsrfToken, "content-large-create-0001")
+	httpStatus(t, response, 201)
+	var largeDraft draftResult
+	readJSON(t, response, &largeDraft)
+	largeHash := sha256.Sum256(largeDraft.Content)
+	largeTx, err := lab.db.Begin(ctx)
+	must(t, err)
+	largeIDs := []string{largeDraft.ID}
+	for i := 0; i < 99; i++ {
+		id := fmt.Sprintf("tsk_%032x", i+1)
+		largeIDs = append(largeIDs, id)
+		_, err = largeTx.Exec(ctx, `INSERT INTO content.task_drafts(id,author_id,create_key,create_hash,content,created_at) VALUES($1,$2,$3,$4,$5,$6)`, id, charlieSession.Account.Id, fmt.Sprintf("large-page-key-%04d", i), largeHash[:], largeDraft.Content, fixedCreated)
+		must(t, err)
+	}
+	_, err = largeTx.Exec(ctx, `UPDATE content.task_drafts SET created_at=$1 WHERE author_id=$2`, fixedCreated, charlieSession.Account.Id)
+	must(t, err)
+	must(t, largeTx.Commit(ctx))
+	sort.Sort(sort.Reverse(sort.StringSlice(largeIDs)))
+
+	// The first byte-bounded page must stop decoding after the first item that
+	// does not fit. A malformed stored row beyond that boundary must not poison
+	// an otherwise valid page; restore it before traversing the remaining pages.
+	deferredID := largeIDs[len(largeIDs)-1]
+	_, err = lab.db.Exec(ctx, `UPDATE content.task_drafts SET content=$1 WHERE id=$2`, json.RawMessage(`{"title":1,"entries":[]}`), deferredID)
+	must(t, err)
+	largePage := page("/api/me/submissions?limit=100", charlie)
+	_, err = lab.db.Exec(ctx, `UPDATE content.task_drafts SET content=$1 WHERE id=$2`, largeDraft.Content, deferredID)
+	must(t, err)
+	if len(largePage.Items) == 0 || len(largePage.Items) >= 100 || largePage.NextCursor == nil {
+		t.Fatalf("protobuf budget did not split large page: items=%d cursor=%v", len(largePage.Items), largePage.NextCursor)
+	}
+	var returnedLarge contentpb.TaskDraftInput
+	must(t, protojson.Unmarshal(largePage.Items[0].Content, &returnedLarge))
+	returnedValues := returnedLarge.Entries[0].AgentConfiguration.Parameters.Fields["nested"].GetStructValue().Fields["values"].GetListValue().Values
+	if len(returnedValues) != 3000 {
+		t.Fatalf("large submission was truncated: %d values", len(returnedValues))
+	}
+	if got := collect(url.Values{"limit": {"100"}}, charlie); !reflect.DeepEqual(got, largeIDs) {
+		t.Fatalf("size-bounded pagination mismatch: got=%v want=%v", got, largeIDs)
+	}
+	largeActor, err := lab.clients[0].ResolvePrincipal(ctx, &pb.ResolvePrincipalRequest{Credential: &pb.ResolvePrincipalRequest_SessionCookie{SessionCookie: charlie.Value}, Audience: "content", FullMethod: contentpb.ContentService_ListMySubmissions_FullMethodName})
+	must(t, err)
+	largeRPC, err := clients[0].ListMySubmissions(ctx, &contentpb.ListMySubmissionsRequest{ActorAssertion: largeActor.ActorAssertion, Limit: 100})
+	must(t, err)
+	if proto.Size(largeRPC) > 2<<20 || len(largeRPC.Items) != len(largePage.Items) || largeRPC.NextCursor == "" {
+		t.Fatalf("RPC page budget mismatch: bytes=%d rpc_items=%d http_items=%d cursor=%q", proto.Size(largeRPC), len(largeRPC.Items), len(largePage.Items), largeRPC.NextCursor)
+	}
+	_, err = lab.db.Exec(ctx, `DELETE FROM content.task_drafts WHERE author_id=$1`, charlieSession.Account.Id)
+	must(t, err)
 
 	// Force a real database lock wait through HTTP. A deadline is not permission
 	// to blindly overwrite; after releasing the lock, confirm no revision changed.
@@ -376,10 +776,33 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	if persisted.ID != draft.ID || persisted.Revision != 3 || !reflect.DeepEqual(before, after) {
 		t.Fatal("restart lost draft")
 	}
+	persistedPage := page("/api/me/submissions?limit=100", alice)
+	if len(persistedPage.Items) != 5 {
+		t.Fatalf("restart lost list entries: %+v", persistedPage)
+	}
 
 	// mTLS identifies the caller; a valid assertion does not grant other services access.
 	actor, err := lab.clients[0].ResolvePrincipal(ctx, &pb.ResolvePrincipalRequest{Credential: &pb.ResolvePrincipalRequest_SessionCookie{SessionCookie: alice.Value}, Audience: "content", FullMethod: contentpb.ContentService_GetMyTaskSubmission_FullMethodName})
 	must(t, err)
+	listActor, err := lab.clients[0].ResolvePrincipal(ctx, &pb.ResolvePrincipalRequest{Credential: &pb.ResolvePrincipalRequest_SessionCookie{SessionCookie: alice.Value}, Audience: "content", FullMethod: contentpb.ContentService_ListMySubmissions_FullMethodName})
+	must(t, err)
+	listRPC, err := clients[0].ListMySubmissions(ctx, &contentpb.ListMySubmissionsRequest{ActorAssertion: listActor.ActorAssertion, Limit: 2})
+	must(t, err)
+	if len(listRPC.Items) != 2 || listRPC.NextCursor == "" {
+		t.Fatalf("direct list RPC mismatch: %+v", listRPC)
+	}
+	_, err = lab.clients[0].ResolvePrincipal(ctx, &pb.ResolvePrincipalRequest{Credential: &pb.ResolvePrincipalRequest_SessionCookie{SessionCookie: alice.Value}, Audience: "identity", FullMethod: contentpb.ContentService_ListMySubmissions_FullMethodName})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("wrong list audience allowed: %v", err)
+	}
+	_, err = clients[0].ListMySubmissions(ctx, &contentpb.ListMySubmissionsRequest{ActorAssertion: actor.ActorAssertion})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("detail assertion crossed into list: %v", err)
+	}
+	_, err = clients[0].ListMySubmissions(ctx, &contentpb.ListMySubmissionsRequest{ActorAssertion: listActor.ActorAssertion, Kind: "entry"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("unsupported RPC filter accepted: %v", err)
+	}
 	_, err = contentpb.NewContentServiceClient(dial(0, "asset", lab.pki)).GetMyTaskSubmission(ctx, &contentpb.GetMyTaskSubmissionRequest{ActorAssertion: actor.ActorAssertion, TaskId: draft.ID})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("wrong service allowed: %v", err)
@@ -403,10 +826,15 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	}
 	check(lab.request(t, 0, "POST", "/api/auth/logout", []*http.Cookie{alice}, "", map[string]string{"Origin": lab.origin, "X-CSRF-Token": aliceSession.CsrfToken}), 204)
 	check(request(0, "GET", path, "", alice, "", ""), 401)
+	check(request(0, "GET", "/api/me/submissions", "", alice, "", ""), 401)
 	check(request(0, "POST", "/api/tasks", initial, alice, aliceSession.CsrfToken, createKey), 401)
 	_, err = clients[0].GetMyTaskSubmission(ctx, &contentpb.GetMyTaskSubmissionRequest{ActorAssertion: actor.ActorAssertion, TaskId: draft.ID})
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("pre-revocation assertion survived: %v", err)
+	}
+	_, err = clients[0].ListMySubmissions(ctx, &contentpb.ListMySubmissionsRequest{ActorAssertion: listActor.ActorAssertion})
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("pre-revocation list assertion survived: %v", err)
 	}
 	var input contentpb.TaskDraftInput
 	must(t, protojson.Unmarshal([]byte(initial), &input))
@@ -418,20 +846,28 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	// VerifyActor must fail closed independently of gateway authentication.
 	bobActor, err := lab.clients[1].ResolvePrincipal(ctx, &pb.ResolvePrincipalRequest{Credential: &pb.ResolvePrincipalRequest_SessionCookie{SessionCookie: bob.Value}, Audience: "content", FullMethod: contentpb.ContentService_GetMyTaskSubmission_FullMethodName})
 	must(t, err)
+	bobListActor, err := lab.clients[1].ResolvePrincipal(ctx, &pb.ResolvePrincipalRequest{Credential: &pb.ResolvePrincipalRequest_SessionCookie{SessionCookie: bob.Value}, Audience: "content", FullMethod: contentpb.ContentService_ListMySubmissions_FullMethodName})
+	must(t, err)
 	lab.grpc[0].Stop()
 	_, err = clients[0].GetMyTaskSubmission(ctx, &contentpb.GetMyTaskSubmissionRequest{ActorAssertion: bobActor.ActorAssertion, TaskId: bobDraft.ID})
 	if err == nil {
 		t.Fatal("Content continued when its Identity was unavailable")
 	}
+	_, err = clients[0].ListMySubmissions(ctx, &contentpb.ListMySubmissionsRequest{ActorAssertion: bobListActor.ActorAssertion})
+	if err == nil {
+		t.Fatal("Content list continued when its Identity was unavailable")
+	}
+	check(request(0, "GET", "/api/me/submissions", "", bob, "", ""), 503)
 	check(request(1, "GET", "/api/me/tasks/"+bobDraft.ID, "", bob, "", ""), 200)
+	check(request(1, "GET", "/api/me/submissions", "", bob, "", ""), 200)
 	var count int
 	must(t, lab.db.QueryRow(ctx, "SELECT count(*) FROM content.task_drafts").Scan(&count))
-	if count != 2 {
-		t.Fatalf("denied/retried requests created rows: %d", count)
+	if count != 6 {
+		t.Fatalf("denied/retried requests changed row count: %d", count)
 	}
 	must(t, lab.db.QueryRow(ctx, "SELECT count(*) FROM content.task_drafts WHERE state <> 'draft'").Scan(&count))
 	if count != 0 {
 		t.Fatal("draft automatically published")
 	}
-	t.Log("PASS: real HTTPS → gateway → mTLS Content process → VerifyActor → restricted PostgreSQL; two replicas, concurrent writes, process restart and refusal paths")
+	t.Log("PASS: real HTTPS → gateway → mTLS Content process → VerifyActor → restricted PostgreSQL; private list keyset/byte pagination, method deadline, legacy-data migration, two replicas, restart and refusal paths")
 }

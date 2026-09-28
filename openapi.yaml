@@ -7,7 +7,7 @@ info:
     行为依据为 docs/prd.md 中的可信场景 S1～S6、2026-09-18 人类修订 H1～H3，以及 AGENTS.md 的发帖、评论、投票目标。
     健康检查与 Identity 的登录、会话和 MCP 凭据管理已在 worth.oopsbox.cn 上线；真人 Google 登录已由用户确认，部署状态见 x-deployment-status。
     Content 的三个本人草稿操作已在 worth.oopsbox.cn 上线；仅支持文本与外链作品草稿，文件材料仍待 Asset 接入。
-    其他业务 operation 仍为 planned；implemented 不等于已部署，具体运行状态见 docs/deployment.md。
+    本人投稿分页列表已本地实现，尚未发布；其余未实现的业务 operation 仍为 planned。implemented 不等于已部署，具体运行状态见 docs/deployment.md。
     路径、字段、状态枚举、认证载体和分页等具体选择属于 Agent Self-Claimed，详见 docs/references.md。
 
     作品以审核结果决定展示，没有独立的公开/私有或公开授权开关；云端使用授权另行检查。
@@ -480,18 +480,42 @@ paths:
       tags: [Account]
       operationId: listMySubmissions
       summary: 找回本人的任务草稿、投稿与审核结果
+      description: |
+        首阶段只返回当前网站会话账号自己的完整 TaskSubmission 草稿；不查询 EntrySubmission、审核或公开内容。
+        kind 缺省等同 task，state 缺省等同 draft；明确传入其他值或空 kind/state 返回 400 unsupported_submission_filter，未知或重复参数返回 400 invalid_request。
+        category 按草稿写入值精确匹配，不 trim、不改变大小写、不做 Unicode 归一化；缺省不筛选，显式空值返回 400。为容纳合法 UTF-8 值的 URL 编码，该路由允许最多 40 KiB Request-URI；超过时返回 414 invalid_request。
+        固定按 created_at DESC、id DESC 排序并使用键集游标。省略 cursor 或 cursor= 都表示第一页；游标最长 2048 字符，绑定账号、有效筛选和排序，损坏、跨账号或换筛选复用返回 400 invalid_cursor。category 为空、含 NUL、不是有效 UTF-8 或超过 12000 个 UTF-8 字节返回 400 invalid_category；该字节上限覆盖所有满足草稿整体 12000 字节约束的既有分类。
+        单页最多 limit 条，以 limit+1 查询判断 nextCursor；响应还受 2 MiB 的实际 Protobuf 编码预算约束，因此合法完整对象较大时可少于 limit 条，并以最后一条实际返回记录生成 nextCursor。空结果为 items: []、nextCursor: null，不查询 totalCount。
+        分页请求之间不保持数据库快照；编辑不改变 created_at，但翻页期间改变 category 会使草稿按新类别进入或离开后续结果。
       x-scenarios: [S2, S3]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: []}]
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
         - {$ref: '#/components/parameters/Limit'}
+        - name: kind
+          in: query
+          description: 首阶段唯一支持 task；缺省也表示 task。
+          schema: {type: string, enum: [task]}
+        - name: state
+          in: query
+          description: 首阶段唯一支持 draft；缺省也表示 draft。
+          schema: {type: string, enum: [draft]}
+        - name: category
+          in: query
+          description: 按任务草稿 category 精确筛选；显式空值非法，最长 12000 个 UTF-8 字节，不建立分类枚举或分类表。
+          schema: {type: string, minLength: 1}
       responses:
         '200':
-          description: 仅本人投稿；包括驳回原因及审核状态
+          description: 首阶段仅含本人完整任务草稿；nextCursor 为 null 时没有下一页
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SubmissionPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
         default: {$ref: '#/components/responses/Problem'}
 
   /api/me/tasks/{taskId}:
@@ -1282,8 +1306,8 @@ components:
     Cursor:
       name: cursor
       in: query
-      description: 服务端返回的不透明游标；首屏省略，后续保持原筛选。无效或过期返回 400。
-      schema: {type: string, minLength: 1}
+      description: 服务端返回的不透明游标；省略或显式空值表示首屏，后续保持原筛选。无效、过期或超过 2048 字符返回 400。
+      schema: {type: string, maxLength: 2048}
     Limit:
       name: limit
       in: query
@@ -1525,7 +1549,7 @@ components:
         title: {type: string, minLength: 1}
         summary: {type: string}
         description: {type: string}
-        category: {type: [string, 'null']}
+        category: {type: [string, 'null'], description: 保存原值；不 trim、不改变大小写、不做 Unicode 归一化；没有独立字符数限制，仍计入草稿整体 12000 字节上限}
         entries:
           type: array
           description: 草稿允许空列表或仅一方；送审时服务端要求至少各一件及完整来源、授权和适用配置
@@ -1933,6 +1957,7 @@ components:
       properties:
         items:
           type: array
+          maxItems: 100
           items:
             oneOf:
               - {$ref: '#/components/schemas/TaskSubmission'}

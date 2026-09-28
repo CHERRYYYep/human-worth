@@ -5,12 +5,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
@@ -23,6 +26,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 )
 
 type Server struct {
@@ -79,6 +84,23 @@ func (s *Server) actor(ctx context.Context, assertion, method string) (string, e
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
 var taskPattern = regexp.MustCompile(`^tsk_[a-f0-9]{32}$`)
 
+const maxDraftBytes = 12000
+const maxSubmissionCursorLength = 2048
+const maxSubmissionPageBytes = 2 << 20
+const submissionSort = "created_at_desc_id_desc"
+
+type submissionFilter struct {
+	Kind     string  `json:"kind"`
+	State    string  `json:"state"`
+	Category *string `json:"category,omitempty"`
+}
+type submissionCursor struct {
+	Version   int    `json:"v"`
+	Scope     string `json:"scope"`
+	CreatedAt string `json:"createdAt"`
+	ID        string `json:"id"`
+}
+
 func invalid(reason string) error { return status.Error(codes.InvalidArgument, reason) }
 func storage(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -90,9 +112,13 @@ func storage(err error) error {
 	return status.Error(codes.Unavailable, "content_unavailable")
 }
 
+func validCategory(value string) bool {
+	return utf8.ValidString(value) && len(value) <= maxDraftBytes && !strings.ContainsRune(value, 0)
+}
+
 // Validation is repeated at the gRPC boundary, not trusted to the gateway.
 func validate(input *pb.TaskDraftInput) ([]byte, error) {
-	if input == nil || strings.TrimSpace(input.Title) == "" || input.Summary == nil || input.Description == nil || len(input.Entries) > 32 {
+	if input == nil || strings.TrimSpace(input.Title) == "" || input.Summary == nil || input.Description == nil || len(input.Entries) > 32 || (input.Category != nil && !validCategory(input.GetCategory())) {
 		return nil, invalid("invalid_draft")
 	}
 	for _, e := range input.Entries {
@@ -123,7 +149,7 @@ func validate(input *pb.TaskDraftInput) ([]byte, error) {
 		}
 	}
 	data, err := (protojson.MarshalOptions{EmitDefaultValues: true}).Marshal(input)
-	if err != nil || !utf8.Valid(data) || len(data) > 12000 {
+	if err != nil || !utf8.Valid(data) || len(data) > maxDraftBytes {
 		return nil, invalid("draft_too_large")
 	}
 	// encoding/json sorts parameter object keys for a stable semantic create fingerprint.
@@ -138,7 +164,7 @@ func validate(input *pb.TaskDraftInput) ([]byte, error) {
 	if err != nil {
 		return nil, invalid("invalid_draft")
 	}
-	if len(canonical) > 12000 {
+	if len(canonical) > maxDraftBytes {
 		return nil, invalid("draft_too_large")
 	}
 	return canonical, nil
@@ -185,10 +211,17 @@ func (s *Server) CreateTaskDraft(ctx context.Context, r *pb.CreateTaskDraftReque
 	// Replay returns the same task's current snapshot, never rolls back later edits.
 	return &pb.CreateTaskDraftResponse{Submission: submission}, nil
 }
-func scan(row pgx.Row, hash *[]byte) (*pb.TaskSubmission, error) {
+
+type rowScanner interface {
+	Scan(...any) error
+}
+
+func scan(row rowScanner, hash *[]byte, extra ...any) (*pb.TaskSubmission, error) {
 	result := &pb.TaskSubmission{Content: &pb.TaskDraftInput{}}
 	var data []byte
-	err := row.Scan(&result.Id, &result.AuthorId, &result.Revision, &result.State, &data, hash)
+	values := []any{&result.Id, &result.AuthorId, &result.Revision, &result.State, &data, hash}
+	values = append(values, extra...)
+	err := row.Scan(values...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.NotFound, "task_not_found")
 	}
@@ -215,6 +248,165 @@ func (s *Server) GetMyTaskSubmission(ctx context.Context, r *pb.GetMyTaskSubmiss
 	}
 	return &pb.GetMyTaskSubmissionResponse{Submission: result}, nil
 }
+func effectiveSubmissionFilter(r *pb.ListMySubmissionsRequest) (submissionFilter, int32, error) {
+	if r == nil {
+		return submissionFilter{}, 0, invalid("invalid_request")
+	}
+	filter := submissionFilter{Kind: r.Kind, State: r.State}
+	if filter.Kind == "" {
+		filter.Kind = "task"
+	}
+	if filter.State == "" {
+		filter.State = "draft"
+	}
+	if filter.Kind != "task" || filter.State != "draft" {
+		return submissionFilter{}, 0, invalid("unsupported_submission_filter")
+	}
+	if r.Category != nil {
+		category := r.GetCategory()
+		if category == "" || !validCategory(category) {
+			return submissionFilter{}, 0, invalid("invalid_category")
+		}
+		filter.Category = &category
+	}
+	limit := r.Limit
+	if limit == 0 {
+		limit = 20
+	}
+	if limit < 1 || limit > 100 {
+		return submissionFilter{}, 0, invalid("invalid_request")
+	}
+	return filter, limit, nil
+}
+func submissionScope(author string, filter submissionFilter) string {
+	data, _ := json.Marshal(struct {
+		Author string           `json:"author"`
+		Filter submissionFilter `json:"filter"`
+		Sort   string           `json:"sort"`
+	}{Author: author, Filter: filter, Sort: submissionSort})
+	sum := sha256.Sum256(data)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+func encodeSubmissionCursor(author string, filter submissionFilter, created time.Time, id string) string {
+	data, _ := json.Marshal(submissionCursor{Version: 1, Scope: submissionScope(author, filter), CreatedAt: created.UTC().Format(time.RFC3339Nano), ID: id})
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+func decodeSubmissionCursor(raw, author string, filter submissionFilter) (time.Time, string, bool, error) {
+	if raw == "" {
+		return time.Time{}, "", false, nil
+	}
+	if len(raw) > maxSubmissionCursorLength {
+		return time.Time{}, "", false, invalid("invalid_cursor")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil || len(data) > 1024 {
+		return time.Time{}, "", false, invalid("invalid_cursor")
+	}
+	var cursor submissionCursor
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&cursor) != nil || decoder.Decode(new(any)) != io.EOF || cursor.Version != 1 || cursor.Scope != submissionScope(author, filter) || !taskPattern.MatchString(cursor.ID) {
+		return time.Time{}, "", false, invalid("invalid_cursor")
+	}
+	created, err := time.Parse(time.RFC3339Nano, cursor.CreatedAt)
+	if err != nil || cursor.CreatedAt != created.UTC().Format(time.RFC3339Nano) {
+		return time.Time{}, "", false, invalid("invalid_cursor")
+	}
+	return created, cursor.ID, true, nil
+}
+func (s *Server) ListMySubmissions(ctx context.Context, r *pb.ListMySubmissionsRequest) (*pb.ListMySubmissionsResponse, error) {
+	author, err := s.actor(ctx, r.GetActorAssertion(), pb.ContentService_ListMySubmissions_FullMethodName)
+	if err != nil {
+		return nil, err
+	}
+	filter, limit, err := effectiveSubmissionFilter(r)
+	if err != nil {
+		return nil, err
+	}
+	created, cursorID, hasCursor, err := decodeSubmissionCursor(r.Cursor, author, filter)
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT id,author_id,revision,state,content,create_hash,created_at FROM content.task_drafts WHERE author_id=$1 AND state='draft'`
+	args := []any{author}
+	if filter.Category != nil {
+		args = append(args, *filter.Category)
+		query += fmt.Sprintf(` AND content->>'category'=$%d`, len(args))
+	}
+	if hasCursor {
+		args = append(args, created, cursorID)
+		query += fmt.Sprintf(` AND (created_at,id)<($%d,$%d)`, len(args)-1, len(args))
+	}
+	args = append(args, limit+1)
+	query += fmt.Sprintf(` ORDER BY created_at DESC,id DESC LIMIT $%d`, len(args))
+	rows, err := s.DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, storage(err)
+	}
+	defer rows.Close()
+	page := newSubmissionPage(author, filter, limit)
+	for rows.Next() {
+		if len(page.response.Items) == int(limit) {
+			return page.finish(true), nil
+		}
+		var hash []byte
+		var itemCreated time.Time
+		item, scanErr := scan(rows, &hash, &itemCreated)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		added, addErr := page.add(item, itemCreated)
+		if addErr != nil {
+			return nil, addErr
+		}
+		if !added {
+			return page.finish(true), nil
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, storage(err)
+	}
+	return page.finish(false), nil
+}
+
+type submissionPageBuilder struct {
+	response  *pb.ListMySubmissionsResponse
+	author    string
+	filter    submissionFilter
+	itemsSize int
+}
+
+func newSubmissionPage(author string, filter submissionFilter, limit int32) *submissionPageBuilder {
+	return &submissionPageBuilder{
+		response: &pb.ListMySubmissionsResponse{Items: make([]*pb.TaskSubmission, 0, limit)},
+		author:   author,
+		filter:   filter,
+	}
+}
+
+func (p *submissionPageBuilder) add(item *pb.TaskSubmission, created time.Time) (bool, error) {
+	itemSize := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(item))
+	nextCursor := encodeSubmissionCursor(p.author, p.filter, created, item.Id)
+	nextSize := protowire.SizeTag(2) + protowire.SizeBytes(len(nextCursor))
+	if p.itemsSize+itemSize+nextSize > maxSubmissionPageBytes {
+		if len(p.response.Items) == 0 {
+			return false, status.Error(codes.Internal, "stored_submission_too_large")
+		}
+		return false, nil
+	}
+	p.response.Items = append(p.response.Items, item)
+	p.response.NextCursor = nextCursor
+	p.itemsSize += itemSize
+	return true, nil
+}
+
+func (p *submissionPageBuilder) finish(hasMore bool) *pb.ListMySubmissionsResponse {
+	if !hasMore {
+		p.response.NextCursor = ""
+	}
+	return p.response
+}
+
 func (s *Server) ReplaceTaskDraft(ctx context.Context, r *pb.ReplaceTaskDraftRequest) (*pb.ReplaceTaskDraftResponse, error) {
 	author, err := s.actor(ctx, r.ActorAssertion, pb.ContentService_ReplaceTaskDraft_FullMethodName)
 	if err != nil {

@@ -227,7 +227,7 @@ Nginx 已启用经 CA 验证的私有 HTTPS 上游，其他站点配置摘要保
 3. [模块清单](../ops/lab/services.json) 随该 SHA 读取。目前登记 Identity、Content、gateway；其余服务没有条目，不生成空壳部署。控制器按清单构建镜像、生成各自证书、准备隔离数据库角色及 schema、运行迁移和授权，再按依赖顺序滚动；gateway 始终最后。原 `identity-admin` 运维镜像继续构建，不作为常驻模块。
 4. 每个模块的应用 YAML 同样来自该 SHA，经 [模块校验](../ops/lab/services.py) 限定为自身命名空间资源、固定镜像、双副本、健康探针及允许的凭据引用；不接受 RBAC、跨模块 Secret、其他命名空间或新增公网 NodePort。控制器不执行归档内的 shell/Python 部署脚本。基础设施模板和部署程序仍是仓库外安装的可信代码。
 5. 数据库模块使用 `<module>_owner` 迁移、`<module>_runtime` 运行；密码保存在私有状态目录和 Secret。授权 SQL 在数据库内以模块 owner 连接执行，不获得 postgres 管理员权限，不允许 psql 元命令。CNPG 的新增角色、HBA 和数据库 NetworkPolicy 由登记模块生成，保留 Identity 原有运行与运维角色。
-6. 所有模块滚动和 API 检查通过、再次确认 dev/CI 后，控制器更新 `release-status` ConfigMap。gateway 通过目录挂载读取完成状态，在 `/api/health` 增加可选 `deploymentRevision` / `deployedServices`。Action 必须同时确认当前 gateway SHA、完成 SHA、完整模块集合与登记的只读 API 检查；仅 gateway 已更新，或遗漏没有公开 API 的 worker，都不能标记部署完成。ConfigMap 更新可能延迟，控制器最多等待 180 秒传播。
+6. 所有模块滚动和 API 检查通过、再次确认 dev/CI 后，控制器更新 `release-status` ConfigMap。gateway 通过目录挂载读取完成状态，在 `/api/health` 增加可选 `deploymentRevision` / `deployedServices`。Action 必须同时确认当前 gateway SHA、完成 SHA、完整模块集合与登记的只读 API 检查；Content 的检查覆盖本人草稿详情和列表的无会话 401 响应。仅 gateway 已更新，或遗漏没有公开 API 的 worker，都不能标记部署完成。ConfigMap 更新可能延迟，控制器最多等待 180 秒传播。
 7. 迁移或滚动失败时，恢复原有 Deployment、NetworkPolicy 和完成标记；首次加入的失败模块缩为 0 副本。保留数据库迁移和数据。失败迁移 Job 在下次同 SHA 重试时重建，已完成的 Job 不重复运行。删除已有模块不等于普通发布，需另外执行明确的退役操作。
 
 后续新增模块在实现任务中同时提交以下内容，合入 dev 并通过 CI 后进入同一流程，**无需再新增 Action 或在控制器里追加服务名循环**：

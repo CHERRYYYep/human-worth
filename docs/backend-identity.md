@@ -176,6 +176,8 @@ Identity 沿用同一套 lab 配置：两个 Pod，连接同一 PostgreSQL 主�
 
 MCP 管理已补 `CreateMcpToken(name, create_request_id)`、`ListMyMcpTokens(cursor)`、`RevokeMcpToken(credential_id)`，都以网站 Principal 决定所有者；列表返回元信息，创建额外返回一次明文。账号运维暂用本模块 Job 用例，不新增公开 RPC。公开入口为 `POST/GET /api/me/mcp-tokens` 与 `DELETE /api/me/mcp-tokens/{credentialId}`；MCP 工具本身仍待 Content/Voting 等模块实现。
 
+Content 的 `ListMySubmissions` 已加入 audience/method 策略，规则与私有详情一致：仅网站会话可取得绑定 `content` audience 和该完整 RPC 方法的 ActorAssertion；MCP token、匿名主体、错误 audience/method 均拒绝。Content 收到后仍调用 `VerifyActor` 复核当前凭据，管理员角色不会改变“我的”作者账号。该接入不新增 Identity Proto 字段，也不允许 Content 查询 Identity 表。
+
 错误延续既有映射：格式/流程问题 400，凭据无效 401，来源/CSRF/用途/角色禁止 403，依赖不可用 503。未知账号与无效凭据不返回可枚举的资料；错误只包含稳定原因和 request ID，不包含 Google 原始响应体。回调所有响应使用 no-store/no-referrer。
 
 <a id="platform"></a>
