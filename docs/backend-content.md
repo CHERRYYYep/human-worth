@@ -41,6 +41,18 @@ HTTP 单项及列表元素都保持 `kind: task`、`authorId`、数值 revision�
 
 公网列表、公开详情、送审、审核结果和独立作品投稿列表仍未实现；`GET /api/me/submissions` 首阶段只查询本人 task/draft 聚合，不把草稿读成公开任务，也不伪造 EntrySubmission。
 
+### 2026-09-28 本地分页复验
+
+本轮仅完成本地验证，没有访问公网 Nginx、执行发布或使用真实登录会话。测试使用从 PostgreSQL 官方源码校验并构建的 PostgreSQL 18.0 临时实例，仅监听 `127.0.0.1`；实例和测试结束后已停止。以下命令均退出 0：
+
+- `cd backend && env CC=/usr/bin/gcc go vet ./...`、`env CC=/usr/bin/gcc go build ./cmd/...`。
+- `cd backend && go test -race ./... -count=1`。
+- `cd backend && IDENTITY_TEST_DATABASE_URL='postgres://cherry@127.0.0.1:25439/postgres?sslmode=disable' go test -race -tags=integration ./... -count=1 -timeout=120s`：真实 HTTP → gateway → gRPC → PostgreSQL 链路通过，包含 Content 双进程、重启和权限隔离验证。
+- `cd backend && IDENTITY_TEST_DATABASE_URL='postgres://cherry@127.0.0.1:25439/postgres?sslmode=disable' go test -race -tags=integration ./internal/identity -run '^TestContentDraftHTTPGRPCPersistence$' -count=3 -timeout=120s`：分页主测试连续三次通过。
+- 根目录 `npm run ci`：5 个 Node 测试和 19 个 Python 测试通过。
+
+这些结果证明本地分页实现和服务间链路正常，不证明公网代理已接受长 Request-URI，也不证明新版本已经发布。后续发布后仍需使用真实会话从公网跨页读取，检查游标、本人隔离和分类筛选。
+
 ### 请求示例
 
 在已有本地 HTTPS gateway 和登录会话下，创建正文：
