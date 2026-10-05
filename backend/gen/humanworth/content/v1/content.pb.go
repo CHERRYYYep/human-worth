@@ -464,8 +464,10 @@ type CreateTaskDraftRequest struct {
 	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
 	IdempotencyKey string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	Content        *TaskDraftInput        `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Gateway obtains this assertion for the same web session and Asset method.
+	AssetActorAssertion string `protobuf:"bytes,4,opt,name=asset_actor_assertion,json=assetActorAssertion,proto3" json:"asset_actor_assertion,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *CreateTaskDraftRequest) Reset() {
@@ -517,6 +519,13 @@ func (x *CreateTaskDraftRequest) GetContent() *TaskDraftInput {
 		return x.Content
 	}
 	return nil
+}
+
+func (x *CreateTaskDraftRequest) GetAssetActorAssertion() string {
+	if x != nil {
+		return x.AssetActorAssertion
+	}
+	return ""
 }
 
 type CreateTaskDraftResponse struct {
@@ -797,13 +806,14 @@ func (x *ListMySubmissionsResponse) GetNextCursor() string {
 }
 
 type ReplaceTaskDraftRequest struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	ActorAssertion   string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
-	TaskId           string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	ExpectedRevision int64                  `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	Content          *TaskDraftInput        `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion      string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId              string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ExpectedRevision    int64                  `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	Content             *TaskDraftInput        `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	AssetActorAssertion string                 `protobuf:"bytes,5,opt,name=asset_actor_assertion,json=assetActorAssertion,proto3" json:"asset_actor_assertion,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ReplaceTaskDraftRequest) Reset() {
@@ -862,6 +872,13 @@ func (x *ReplaceTaskDraftRequest) GetContent() *TaskDraftInput {
 		return x.Content
 	}
 	return nil
+}
+
+func (x *ReplaceTaskDraftRequest) GetAssetActorAssertion() string {
+	if x != nil {
+		return x.AssetActorAssertion
+	}
+	return ""
 }
 
 type ReplaceTaskDraftResponse struct {
@@ -962,11 +979,12 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\tauthor_id\x18\x02 \x01(\tR\bauthorId\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x03R\brevision\x12\x14\n" +
 	"\x05state\x18\x04 \x01(\tR\x05state\x12?\n" +
-	"\acontent\x18\x05 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\"\xab\x01\n" +
+	"\acontent\x18\x05 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\"\xdf\x01\n" +
 	"\x16CreateTaskDraftRequest\x12'\n" +
 	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12?\n" +
-	"\acontent\x18\x03 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\"`\n" +
+	"\acontent\x18\x03 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\x122\n" +
+	"\x15asset_actor_assertion\x18\x04 \x01(\tR\x13assetActorAssertion\"`\n" +
 	"\x17CreateTaskDraftResponse\x12E\n" +
 	"\n" +
 	"submission\x18\x01 \x01(\v2%.humanworth.content.v1.TaskSubmissionR\n" +
@@ -989,12 +1007,13 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\x19ListMySubmissionsResponse\x12;\n" +
 	"\x05items\x18\x01 \x03(\v2%.humanworth.content.v1.TaskSubmissionR\x05items\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursor\"\xc9\x01\n" +
+	"nextCursor\"\xfd\x01\n" +
 	"\x17ReplaceTaskDraftRequest\x12'\n" +
 	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12+\n" +
 	"\x11expected_revision\x18\x03 \x01(\x03R\x10expectedRevision\x12?\n" +
-	"\acontent\x18\x04 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\"a\n" +
+	"\acontent\x18\x04 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\x122\n" +
+	"\x15asset_actor_assertion\x18\x05 \x01(\tR\x13assetActorAssertion\"a\n" +
 	"\x18ReplaceTaskDraftResponse\x12E\n" +
 	"\n" +
 	"submission\x18\x01 \x01(\v2%.humanworth.content.v1.TaskSubmissionR\n" +

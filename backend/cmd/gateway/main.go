@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
@@ -63,6 +64,20 @@ func run() error {
 		defer contentConn.Close()
 		contentClient = contentpb.NewContentServiceClient(contentConn)
 	}
+	var assetClient assetpb.AssetServiceClient
+	var assetConn *grpc.ClientConn
+	if target := os.Getenv("ASSET_TARGET"); target != "" {
+		config, e := platform.TLS(os.Getenv("SERVICE_CERT_FILE"), os.Getenv("SERVICE_KEY_FILE"), os.Getenv("SERVICE_CA_FILE"), "asset")
+		if e != nil {
+			return e
+		}
+		assetConn, e = grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(512<<10), grpc.MaxCallSendMsgSize(512<<10)))
+		if e != nil {
+			return errors.New("asset client initialization failed")
+		}
+		defer assetConn.Close()
+		assetClient = assetpb.NewAssetServiceClient(assetConn)
+	}
 	runtime := platform.NewRuntime("gateway")
 	shutdown, err := platform.Trace(ctx, "gateway")
 	if err != nil {
@@ -97,13 +112,19 @@ func run() error {
 				return errors.New("content unavailable")
 			}
 		}
+		if assetConn != nil {
+			health, e := healthpb.NewHealthClient(assetConn).Check(ctx, &healthpb.HealthCheckRequest{})
+			if e != nil || health.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+				return errors.New("asset unavailable")
+			}
+		}
 		return nil
 	}
-	handler, err := gateway.New(pb.NewIdentityServiceClient(conn), gateway.Options{Content: contentClient, DeploymentStatusFile: os.Getenv("DEPLOYMENT_STATUS_FILE"), Origin: origin, LogoPath: platform.Value("SITE_LOGO_FILE", "../public/brand/logo.png"), TrustedProxies: proxies, Logger: runtime.Log, Registry: runtime.Registry, Ready: ready})
+	handler, err := gateway.New(pb.NewIdentityServiceClient(conn), gateway.Options{Content: contentClient, Asset: assetClient, DeploymentStatusFile: os.Getenv("DEPLOYMENT_STATUS_FILE"), Origin: origin, LogoPath: platform.Value("SITE_LOGO_FILE", "../public/brand/logo.png"), TrustedProxies: proxies, Logger: runtime.Log, Registry: runtime.Registry, Ready: ready})
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: platform.Value("HTTP_LISTEN", ":8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 48 << 10}
+	server := &http.Server{Addr: platform.Value("HTTP_LISTEN", ":8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 48 << 10}
 	probe := runtime.Health(platform.Value("HEALTH_LISTEN", ":8081"), ready)
 	failures := make(chan error, 2)
 	go func() {

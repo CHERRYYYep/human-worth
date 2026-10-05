@@ -1,11 +1,43 @@
 package gateway
 
 import (
+	"bytes"
 	"crypto/tls"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
 )
+
+func TestContentRange(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		rangeValue string
+		body       int64
+		wantOffset int64
+		wantTotal  int64
+		wantErr    bool
+	}{
+		{"valid first chunk", "bytes 0-2/3", 3, 0, 3, false},
+		{"valid max chunk", "bytes 0-262143/33554432", 262144, 0, 33554432, false},
+		{"duplicate header", "bytes 0-2/3", 3, 0, 0, true},
+		{"wrong body length", "bytes 0-2/3", 2, 0, 0, true},
+		{"chunk too large", "bytes 0-262144/33554433", 262145, 0, 0, true},
+		{"total too large", "bytes 0-2/33554433", 3, 0, 0, true},
+		{"invalid range", "bytes 3-2/3", 0, 0, 0, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest("PUT", "https://worth.example.test/", bytes.NewReader(bytes.Repeat([]byte{'x'}, int(test.body))))
+			r.Header.Add("Content-Range", test.rangeValue)
+			if test.name == "duplicate header" {
+				r.Header.Add("Content-Range", test.rangeValue)
+			}
+			offset, _, total, err := contentRange(r)
+			if (err != nil) != test.wantErr || offset != test.wantOffset || total != test.wantTotal {
+				t.Fatalf("offset=%d total=%d err=%v", offset, total, err)
+			}
+		})
+	}
+}
 
 func TestForwardedHeadersRequireTrustedPeerAndFixedHost(t *testing.T) {
 	h, err := New(nil, Options{Origin: "https://worth.example.test", TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.8/32")}})

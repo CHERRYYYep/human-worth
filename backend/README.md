@@ -1,6 +1,6 @@
 # Go 后端
 
-当前实现 `gateway`、`IdentityService`、`ContentService` 首批作者私有草稿接口和受限账号运维命令。设计见 [Identity](../docs/backend-identity.md)，集群运行命令见[部署文档](../docs/deployment.md#identity-lab)。Content 接口与使用见 [Content 草稿设计](../docs/backend-content.md)，三个本人草稿操作已于 2026-09-21 在公网启用；本人分页列表已本地实现，尚未发布；其余五个业务模块尚未实现。
+当前实现 `gateway`、`IdentityService`、`ContentService` 和本地验证用的 `AssetService`。Asset 支持私有上传会话、分块上传、SHA-256/媒体类型校验、本人元数据/下载及 Content 草稿归属校验；只提供显式 `ASSET_STORAGE_DIR` filesystem adapter，尚未部署或进入 `services.json`，生产对象存储仍未实现。设计见 [Asset](../docs/backend-asset.md)。
 
 ## 开发与检查
 
@@ -32,8 +32,10 @@ GitHub `CI` 自动启动一次性 PostgreSQL，并执行格式、Proto 生成一
 | --- | --- | --- |
 | `cmd/identity` | mTLS gRPC `:8443`；内部探针/指标 `:8081` | `IDENTITY_DATABASE_URL_FILE`、`IDENTITY_ENCRYPTION_KEYS_FILE`、`IDENTITY_SIGNING_KEYS_FILE`、`PUBLIC_ORIGIN`、`SERVICE_CERT_FILE`、`SERVICE_KEY_FILE`、`SERVICE_CA_FILE` |
 | `cmd/gateway` | HTTPS/HTTP `:8080`；内部探针/指标 `:8081` | `PUBLIC_ORIGIN`、`IDENTITY_TARGET`、三个 `SERVICE_*_FILE`；实验 HTTPS 再提供 `HTTP_TLS_CERT_FILE`、`HTTP_TLS_KEY_FILE` |
-| `cmd/content` | Content mTLS gRPC `:8443`；内部探针/指标 `:8081` | `CONTENT_DATABASE_URL_FILE`（运行账号）、`IDENTITY_TARGET`、三个 `SERVICE_*_FILE`；证书身份为 `content` |
+| `cmd/content` | Content mTLS gRPC `:8443`；内部探针/指标 `:8081` | `CONTENT_DATABASE_URL_FILE`（运行账号）、`IDENTITY_TARGET`、可选 `ASSET_TARGET`、三个 `SERVICE_*_FILE`；证书身份为 `content` |
 | `cmd/content migrate` | 独立 Content 迁移，不访问 Identity 表 | `CONTENT_DATABASE_URL_FILE`（schema owner） |
+| `cmd/asset` | Asset mTLS gRPC `:8443`；内部探针/指标 `:8081` | `ASSET_DATABASE_URL_FILE`（运行账号）、`IDENTITY_TARGET`、三个 `SERVICE_*_FILE`、本地测试用 `ASSET_STORAGE_DIR` |
+| `cmd/asset migrate` | 独立 Asset 迁移，不访问 Identity/Content 表 | `ASSET_DATABASE_URL_FILE`（schema owner） |
 | `cmd/identity migrate` | 单独执行有锁、带摘要检查的迁移 | 仅 `IDENTITY_DATABASE_URL_FILE`，使用 schema owner；运行服务不负责 DDL |
 | `cmd/identity-admin` | 角色/状态变更、身份版本递增和审计 | 运维专用数据库文件、`OPERATOR_IDENTITY`；见 lab 的 `account.py` |
 

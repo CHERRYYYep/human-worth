@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
@@ -20,6 +21,15 @@ type policy struct {
 }
 
 var policies = map[string]policy{
+	assetpb.AssetService_CreateUploadSession_FullMethodName: {Audience: "asset", Write: true},
+	assetpb.AssetService_UploadAsset_FullMethodName:         {Audience: "asset", Write: true},
+	assetpb.AssetService_CompleteUpload_FullMethodName:     {Audience: "asset", Write: true},
+	assetpb.AssetService_AbortUpload_FullMethodName:        {Audience: "asset", Write: true},
+	assetpb.AssetService_GetUploadSession_FullMethodName:   {Audience: "asset"},
+	assetpb.AssetService_GetAssetMetadata_FullMethodName:   {Audience: "asset"},
+	assetpb.AssetService_ListMyAssets_FullMethodName:       {Audience: "asset"},
+	assetpb.AssetService_CheckAssetOwnership_FullMethodName:{Audience: "asset"},
+	assetpb.AssetService_DownloadAsset_FullMethodName:      {Audience: "asset"},
 	contentpb.ContentService_CreateTaskDraft_FullMethodName:     {Audience: "content", Write: true},
 	contentpb.ContentService_GetMyTaskSubmission_FullMethodName: {Audience: "content"},
 	contentpb.ContentService_ListMySubmissions_FullMethodName:   {Audience: "content"},

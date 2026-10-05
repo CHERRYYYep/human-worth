@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
@@ -34,6 +35,7 @@ type Server struct {
 	pb.UnimplementedContentServiceServer
 	DB       *pgxpool.Pool
 	Identity identitypb.IdentityServiceClient
+	Asset    assetpb.AssetServiceClient
 }
 
 // Service identity and user identity are independent trust boundaries.
@@ -137,7 +139,7 @@ func validate(input *pb.TaskDraftInput) ([]byte, error) {
 				if a.AssetId == nil || a.GetAssetId() == "" || a.Url != nil {
 					return nil, invalid("invalid_artifact")
 				}
-				return nil, status.Error(codes.FailedPrecondition, "asset_service_not_ready")
+				continue
 			}
 			if a.Kind != "link" || a.Url == nil || a.AssetId != nil {
 				return nil, invalid("invalid_artifact")
@@ -170,6 +172,31 @@ func validate(input *pb.TaskDraftInput) ([]byte, error) {
 	return canonical, nil
 }
 
+func (s *Server) validateAssets(ctx context.Context, author string, input *pb.TaskDraftInput, assertion string) error {
+	ids := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, entry := range input.GetEntries() {
+		for _, artifact := range entry.GetArtifacts() {
+			if artifact.GetKind() == "file" && !seen[artifact.GetAssetId()] {
+				seen[artifact.GetAssetId()] = true
+				ids = append(ids, artifact.GetAssetId())
+			}
+		}
+	}
+	if len(ids) == 0 { return nil }
+	if s.Asset == nil || assertion == "" { return status.Error(codes.FailedPrecondition, "asset_service_not_ready") }
+	if len(ids) > 32 { return invalid("too_many_assets") }
+	response, err := s.Asset.CheckAssetOwnership(ctx, &assetpb.CheckAssetOwnershipRequest{ActorAssertion: assertion, AssetIds: ids})
+	if err != nil { return err }
+	if len(response.GetAssets()) != len(ids) { return status.Error(codes.FailedPrecondition, "asset_not_ready") }
+	for _, asset := range response.GetAssets() {
+		if asset.GetOwnerId() != author || asset.GetState() != assetpb.AssetState_ASSET_STATE_READY {
+			return status.Error(codes.FailedPrecondition, "asset_not_ready")
+		}
+	}
+	return nil
+}
+
 func (s *Server) CreateTaskDraft(ctx context.Context, r *pb.CreateTaskDraftRequest) (*pb.CreateTaskDraftResponse, error) {
 	author, err := s.actor(ctx, r.ActorAssertion, pb.ContentService_CreateTaskDraft_FullMethodName)
 	if err != nil {
@@ -180,6 +207,9 @@ func (s *Server) CreateTaskDraft(ctx context.Context, r *pb.CreateTaskDraftReque
 	}
 	data, err := validate(r.Content)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.validateAssets(ctx, author, r.Content, r.AssetActorAssertion); err != nil {
 		return nil, err
 	}
 	hash := sha256.Sum256(data)
@@ -420,6 +450,9 @@ func (s *Server) ReplaceTaskDraft(ctx context.Context, r *pb.ReplaceTaskDraftReq
 	}
 	data, err := validate(r.Content)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.validateAssets(ctx, author, r.Content, r.AssetActorAssertion); err != nil {
 		return nil, err
 	}
 	tx, err := s.DB.Begin(ctx)

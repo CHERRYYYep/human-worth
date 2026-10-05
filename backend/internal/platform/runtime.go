@@ -84,16 +84,38 @@ func (r *Runtime) Unary(ctx context.Context, request any, info *grpc.UnaryServer
 	default:
 		return nil, status.Error(codes.ResourceExhausted, "too_many_requests")
 	}
+	ctx, cancel := context.WithTimeout(ctx, methodTimeout(info.FullMethod))
+	defer cancel()
+	return next(ctx, request)
+}
+
+func methodTimeout(method string) time.Duration {
 	timeout := 2 * time.Second
-	switch info.FullMethod {
+	switch method {
 	case "/humanworth.content.v1.ContentService/ListMySubmissions":
 		timeout = 5 * time.Second
+	case "/humanworth.asset.v1.AssetService/UploadAsset", "/humanworth.asset.v1.AssetService/DownloadAsset":
+		timeout = 15 * time.Minute
+	case "/humanworth.asset.v1.AssetService/CompleteUpload":
+		timeout = 30 * time.Second
 	case "/humanworth.identity.v1.IdentityService/CompleteGoogleLogin":
 		timeout = 15 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	return timeout
+}
+
+type contextServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s contextServerStream) Context() context.Context { return s.ctx }
+
+// Stream applies the same method-specific deadline policy as Unary.
+func (r *Runtime) Stream(service any, stream grpc.ServerStream, info *grpc.StreamServerInfo, next grpc.StreamHandler) error {
+	ctx, cancel := context.WithTimeout(stream.Context(), methodTimeout(info.FullMethod))
 	defer cancel()
-	return next(ctx, request)
+	return next(service, contextServerStream{ServerStream: stream, ctx: ctx})
 }
 func (r *Runtime) Health(address string, ready func(context.Context) error) *http.Server {
 	mux := http.NewServeMux()

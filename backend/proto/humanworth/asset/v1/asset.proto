@@ -16,28 +16,23 @@ service AssetService {
   rpc GetAssetMetadata(GetAssetMetadataRequest) returns (GetAssetMetadataResponse);
   rpc ListMyAssets(ListMyAssetsRequest) returns (ListMyAssetsResponse);
   rpc CheckAssetOwnership(CheckAssetOwnershipRequest) returns (CheckAssetOwnershipResponse);
-  rpc DownloadAsset(DownloadAssetRequest) returns (stream DownloadAssetChunk);
+  rpc DownloadAsset(DownloadAssetRequest) returns (stream DownloadAssetResponse);
 }
 
 enum AssetState {
   ASSET_STATE_UNSPECIFIED = 0;
-  ASSET_STATE_UPLOADING = 1;
-  ASSET_STATE_UPLOADED = 2;
-  ASSET_STATE_AVAILABLE = 3;
-  ASSET_STATE_FAILED = 4;
-  ASSET_STATE_ABORTED = 5;
-  ASSET_STATE_EXPIRED = 6;
+  ASSET_STATE_STAGING = 1;
+  ASSET_STATE_READY = 2;
+  ASSET_STATE_FAILED = 3;
+  ASSET_STATE_DELETED = 4;
 }
 
 enum UploadSessionState {
   UPLOAD_SESSION_STATE_UNSPECIFIED = 0;
-  UPLOAD_SESSION_STATE_UPLOADING = 1;
-  UPLOAD_SESSION_STATE_UPLOADED = 2;
-  UPLOAD_SESSION_STATE_COMPLETING = 3;
-  UPLOAD_SESSION_STATE_COMPLETED = 4;
-  UPLOAD_SESSION_STATE_FAILED = 5;
-  UPLOAD_SESSION_STATE_ABORTED = 6;
-  UPLOAD_SESSION_STATE_EXPIRED = 7;
+  UPLOAD_SESSION_STATE_ACTIVE = 1;
+  UPLOAD_SESSION_STATE_COMPLETED = 2;
+  UPLOAD_SESSION_STATE_ABORTED = 3;
+  UPLOAD_SESSION_STATE_EXPIRED = 4;
 }
 
 message AssetMetadata {
@@ -74,6 +69,9 @@ message CreateUploadSessionResponse {
   UploadSession upload_session = 2;
 }
 
+// The first message must be UploadStart. It authenticates the stream and pins
+// the session/attempt. Subsequent chunks must be contiguous and no larger
+// than the server's chunk limit. EOF ends the request; completion is separate.
 message UploadAssetRequest {
   oneof message {
     UploadStart start = 1;
@@ -90,17 +88,19 @@ message UploadChunk {
   int64 offset = 1;
   bytes data = 2;
   string chunk_id = 3;
+  string sha256 = 4;
 }
 message UploadAssetResponse {
   string upload_session_id = 1;
   int64 received_bytes = 2;
   int64 next_offset = 3;
-  AssetState state = 4;
+  UploadSessionState state = 4;
 }
 
 message CompleteUploadRequest {
   string actor_assertion = 1;
   string upload_session_id = 2;
+  string asset_id = 3;
 }
 message CompleteUploadResponse { AssetMetadata asset = 1; }
 
@@ -141,10 +141,8 @@ message CheckAssetOwnershipResponse { repeated AssetMetadata assets = 1; }
 message DownloadAssetRequest {
   string actor_assertion = 1;
   string asset_id = 2;
-  // When present, Asset asks Content to verify the private draft reference.
-  optional string task_id = 3;
 }
-message DownloadAssetChunk {
+message DownloadAssetResponse {
   int64 offset = 1;
   bytes data = 2;
 }

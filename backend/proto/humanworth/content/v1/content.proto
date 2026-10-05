@@ -62,6 +62,8 @@ message CreateTaskDraftRequest {
   string actor_assertion = 1;
   string idempotency_key = 2;
   TaskDraftInput content = 3;
+  // Gateway obtains this assertion for the same web session and Asset method.
+  string asset_actor_assertion = 4;
 }
 message CreateTaskDraftResponse { TaskSubmission submission = 1; }
 message GetMyTaskSubmissionRequest {
@@ -87,5 +89,6 @@ message ReplaceTaskDraftRequest {
   string task_id = 2;
   int64 expected_revision = 3;
   TaskDraftInput content = 4;
+  string asset_actor_assertion = 5;
 }
 message ReplaceTaskDraftResponse { TaskSubmission submission = 1; }
