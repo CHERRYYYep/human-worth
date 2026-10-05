@@ -111,7 +111,7 @@ func (h *Handler) uploadAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := r.PathValue("uploadSessionId")
-	if err = stream.Send(&pb.UploadAssetRequest{Message: &pb.UploadAssetRequest_Start{Start: &pb.UploadStart{ActorAssertion: actor, UploadSessionId: sessionID, Offset: offset, UploadAttemptId: requestID(r)}}}); err != nil {
+	if err = stream.Send(&pb.UploadAssetRequest{ActorAssertion: actor, UploadSessionId: sessionID, Offset: offset, UploadAttemptId: requestID(r)}); err != nil {
 		assetError(w, err)
 		return
 	}
@@ -134,7 +134,7 @@ func (h *Handler) uploadAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(data) > 0 {
-		if err = stream.Send(&pb.UploadAssetRequest{Message: &pb.UploadAssetRequest_Chunk{Chunk: &pb.UploadChunk{Offset: offset, Data: data, Sha256: sha256Hex(data)}}}); err != nil {
+		if err = stream.Send(&pb.UploadAssetRequest{Offset: offset, Chunk: data, ChunkSha256: sha256Hex(data)}); err != nil {
 			assetError(w, err)
 			return
 		}

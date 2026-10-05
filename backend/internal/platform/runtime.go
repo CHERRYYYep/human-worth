@@ -98,7 +98,9 @@ func methodTimeout(method string) time.Duration {
 		timeout = 15 * time.Minute
 	case "/humanworth.asset.v1.AssetService/CompleteUpload":
 		timeout = 30 * time.Second
-	case "/humanworth.identity.v1.IdentityService/CompleteGoogleLogin":
+	case "/humanworth.identity.v1.IdentityService/CompleteGoogleLogin",
+		"/humanworth.challenge.v1.ChallengeService/StartRun",
+		"/humanworth.challenge.v1.ChallengeService/RestartRun":
 		timeout = 15 * time.Second
 	}
 	return timeout

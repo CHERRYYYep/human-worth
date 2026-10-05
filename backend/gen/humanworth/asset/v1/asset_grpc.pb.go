@@ -28,13 +28,17 @@ const (
 	AssetService_ListMyAssets_FullMethodName        = "/humanworth.asset.v1.AssetService/ListMyAssets"
 	AssetService_CheckAssetOwnership_FullMethodName = "/humanworth.asset.v1.AssetService/CheckAssetOwnership"
 	AssetService_DownloadAsset_FullMethodName       = "/humanworth.asset.v1.AssetService/DownloadAsset"
+	AssetService_GetAsset_FullMethodName            = "/humanworth.asset.v1.AssetService/GetAsset"
+	AssetService_ReadAsset_FullMethodName           = "/humanworth.asset.v1.AssetService/ReadAsset"
 )
 
 // AssetServiceClient is the client API for AssetService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Private user-owned files. Content owns task references and visibility.
+// AssetService serves both browser-owned uploads and trusted Challenge material.
+// The database owns state; callers are authorized by the gateway/user assertion
+// or by the mTLS service identity plus an explicit Access scope.
 type AssetServiceClient interface {
 	CreateUploadSession(ctx context.Context, in *CreateUploadSessionRequest, opts ...grpc.CallOption) (*CreateUploadSessionResponse, error)
 	UploadAsset(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse], error)
@@ -45,6 +49,10 @@ type AssetServiceClient interface {
 	ListMyAssets(ctx context.Context, in *ListMyAssetsRequest, opts ...grpc.CallOption) (*ListMyAssetsResponse, error)
 	CheckAssetOwnership(ctx context.Context, in *CheckAssetOwnershipRequest, opts ...grpc.CallOption) (*CheckAssetOwnershipResponse, error)
 	DownloadAsset(ctx context.Context, in *DownloadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAssetResponse], error)
+	// Challenge dependency methods. Access is checked against task/run/attempt
+	// scope and the caller's mTLS service identity.
+	GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error)
+	ReadAsset(ctx context.Context, in *ReadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadAssetResponse], error)
 }
 
 type assetServiceClient struct {
@@ -157,11 +165,42 @@ func (c *assetServiceClient) DownloadAsset(ctx context.Context, in *DownloadAsse
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AssetService_DownloadAssetClient = grpc.ServerStreamingClient[DownloadAssetResponse]
 
+func (c *assetServiceClient) GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAssetResponse)
+	err := c.cc.Invoke(ctx, AssetService_GetAsset_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) ReadAsset(ctx context.Context, in *ReadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadAssetResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[2], AssetService_ReadAsset_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReadAssetRequest, ReadAssetResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_ReadAssetClient = grpc.ServerStreamingClient[ReadAssetResponse]
+
 // AssetServiceServer is the server API for AssetService service.
 // All implementations must embed UnimplementedAssetServiceServer
 // for forward compatibility.
 //
-// Private user-owned files. Content owns task references and visibility.
+// AssetService serves both browser-owned uploads and trusted Challenge material.
+// The database owns state; callers are authorized by the gateway/user assertion
+// or by the mTLS service identity plus an explicit Access scope.
 type AssetServiceServer interface {
 	CreateUploadSession(context.Context, *CreateUploadSessionRequest) (*CreateUploadSessionResponse, error)
 	UploadAsset(grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]) error
@@ -172,6 +211,10 @@ type AssetServiceServer interface {
 	ListMyAssets(context.Context, *ListMyAssetsRequest) (*ListMyAssetsResponse, error)
 	CheckAssetOwnership(context.Context, *CheckAssetOwnershipRequest) (*CheckAssetOwnershipResponse, error)
 	DownloadAsset(*DownloadAssetRequest, grpc.ServerStreamingServer[DownloadAssetResponse]) error
+	// Challenge dependency methods. Access is checked against task/run/attempt
+	// scope and the caller's mTLS service identity.
+	GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error)
+	ReadAsset(*ReadAssetRequest, grpc.ServerStreamingServer[ReadAssetResponse]) error
 	mustEmbedUnimplementedAssetServiceServer()
 }
 
@@ -208,6 +251,12 @@ func (UnimplementedAssetServiceServer) CheckAssetOwnership(context.Context, *Che
 }
 func (UnimplementedAssetServiceServer) DownloadAsset(*DownloadAssetRequest, grpc.ServerStreamingServer[DownloadAssetResponse]) error {
 	return status.Error(codes.Unimplemented, "method DownloadAsset not implemented")
+}
+func (UnimplementedAssetServiceServer) GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAsset not implemented")
+}
+func (UnimplementedAssetServiceServer) ReadAsset(*ReadAssetRequest, grpc.ServerStreamingServer[ReadAssetResponse]) error {
+	return status.Error(codes.Unimplemented, "method ReadAsset not implemented")
 }
 func (UnimplementedAssetServiceServer) mustEmbedUnimplementedAssetServiceServer() {}
 func (UnimplementedAssetServiceServer) testEmbeddedByValue()                      {}
@@ -374,6 +423,35 @@ func _AssetService_DownloadAsset_Handler(srv interface{}, stream grpc.ServerStre
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AssetService_DownloadAssetServer = grpc.ServerStreamingServer[DownloadAssetResponse]
 
+func _AssetService_GetAsset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAssetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).GetAsset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_GetAsset_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).GetAsset(ctx, req.(*GetAssetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_ReadAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ReadAssetRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AssetServiceServer).ReadAsset(m, &grpc.GenericServerStream[ReadAssetRequest, ReadAssetResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_ReadAssetServer = grpc.ServerStreamingServer[ReadAssetResponse]
+
 // AssetService_ServiceDesc is the grpc.ServiceDesc for AssetService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -409,6 +487,10 @@ var AssetService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "CheckAssetOwnership",
 			Handler:    _AssetService_CheckAssetOwnership_Handler,
 		},
+		{
+			MethodName: "GetAsset",
+			Handler:    _AssetService_GetAsset_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -419,6 +501,11 @@ var AssetService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "DownloadAsset",
 			Handler:       _AssetService_DownloadAsset_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReadAsset",
+			Handler:       _AssetService_ReadAsset_Handler,
 			ServerStreams: true,
 		},
 	},

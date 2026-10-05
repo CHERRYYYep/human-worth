@@ -1,18 +1,26 @@
 openapi: 3.1.1
 info:
   title: Human Worth API
-  version: 0.6.0-draft
+  version: 0.7.0-draft
   summary: 人类价值平台的 HTTP 接口契约草案
   description: |
-    行为依据为 docs/prd.md 中的可信场景 S1～S6、2026-09-18 人类修订 H1～H3，以及 AGENTS.md 的发帖、评论、投票目标。
+    行为依据为 docs/prd.md 中的可信场景 S1～S6、人类修订 H1～H11，以及 AGENTS.md 的发帖、评论、投票目标。
     健康检查与 Identity 的登录、会话和 MCP 凭据管理已在 worth.oopsbox.cn 上线；真人 Google 登录已由用户确认，部署状态见 x-deployment-status。
-    Content 的本人草稿操作已在 worth.oopsbox.cn 上线；Asset 私有文件链路已在本分支实现，但尚未发布或部署。
-    本人投稿分页列表已本地实现，尚未发布；其余未实现的业务 operation 仍为 planned。implemented 不等于已部署，具体运行状态见 docs/deployment.md。
+
+    Content 的四个本人草稿操作已在 worth.oopsbox.cn 上线；当前分支同时实现了 Asset 私有文件链路，但尚未发布或部署。
+    本人投稿分页列表已发布；Asset 私有列表和上传接口仅本地实现；其余未实现的业务 operation 仍为 planned。implemented 不等于已部署，具体运行状态见 docs/deployment.md。
+    Challenge 管理接口已本地实现并通过有状态依赖 fake 联调，尚未发布。implemented 不代表真实依赖或执行沙箱已验收，具体状态见 docs/deployment.md。
+
     路径、字段、状态枚举、认证载体和分页等具体选择属于 Agent Self-Claimed，详见 docs/references.md。
 
     作品以审核结果决定展示，没有独立的公开/私有或公开授权开关；云端使用授权另行检查。
     投票一次给出该任务全部允许展示的过审作品，用户从中单选一件最认可的作品。
     管理概览与运行记录不展示剩余额度、已用额度或消耗数值；启动/重启的预算配置及后台执行限制继续保留。
+    挑战分为打包、执行、排序三个角色；管理员从任务描述中选附件、手写说明和作品要求作为初始包。
+    所有挑战统一追求成为最佳作品或对齐最佳效果，不按人类／agent 谁领先分流。
+    先只迭代排序角色 R，真人偏好拟合度超过阈值后固定 R，再只迭代打包角色 P 并运行执行角色 E。
+    R 提供评判依据，拟合度由可信评分器计算；P 不接收任何用户评论，只依据自身作品和合格 R 的反馈改进执行提示。初始包与 E 配置固定，P/E 不能读取其他作品。
+    打包和排序每个工作项只调用一次模型，返回结构化结果，不使用 ReAct；只有执行角色使用工作区和 harness，角色及用途的可见范围由内部权限保证。
     普通 GET 不改变投票资格，不返回或预取单题得票、得票占比；投票响应也不附带统计。
     只有显式 POST statistics-access 可以读取具体统计，且必须先持久化账号 × 任务的永久禁投记录。
     网站、MCP 和管理员查看单题具体统计均经过此入口；管理角色不能绕过资格变化。
@@ -66,7 +74,7 @@ tags:
   - {name: Board, description: 公开看板与热度排行}
   - {name: Discussion, description: 评论及举报}
   - {name: Administration, description: 管理员审核、下架与审计}
-  - {name: Challenges, description: 管理员云端挑战与公开进度}
+  - {name: Challenges, description: 管理员云端挑战}
 paths:
   /api/health:
     get:
@@ -489,7 +497,523 @@ paths:
         分页请求之间不保持数据库快照；编辑不改变 created_at，但翻页期间改变 category 会使草稿按新类别进入或离开后续结果。
       x-scenarios: [S2, S3]
       x-implementation-status: implemented
-      x-deployment-status: not_published
+      x-deployment-status: published
+      security: [{WebSession: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: kind
+          in: query
+          description: 首阶段唯一支持 task；缺省也表示 task。
+          schema: {type: string, enum: [task]}
+        - name: state
+          in: query
+          description: 首阶段唯一支持 draft；缺省也表示 draft。
+          schema: {type: string, enum: [draft]}
+        - name: category
+          in: query
+          description: 按任务草稿 category 精确筛选；显式空值非法，最长 12000 个 UTF-8 字节，不建立分类枚举或分类表。
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: 首阶段仅含本人完整任务草稿；nextCursor 为 null 时没有下一页
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SubmissionPage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/tasks/{taskId}:
+    parameters: [{$ref: '#/components/parameters/TaskId'}]
+    get:
+      tags: [Account]
+      operationId: getMyTaskSubmission
+      summary: 读取本人任务与初始作品的投稿内容
+      description: 首阶段仅存在作者私有 draft；MCP、其他账号（含管理员）均不能读取。
+      x-scenarios: [S2]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{WebSession: []}]
+      responses:
+        '200':
+          description: 仅任务投稿者可读；其他账号返回 404
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskSubmission'}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Submissions]
+      operationId: replaceTaskDraft
+      summary: 替换本人任务草稿
+      description: |
+        完整替换可编辑内容与初始作品列表，仍为 draft。首阶段只创建/编辑 draft，不实现审核或驳回重提。
+        expectedRevision 必须等于当前版本，每次成功加一，否则 409 revision_conflict；同一旧版本重复 PUT 也返回 409。
+        客户端遇到超时先 GET 核对当前版本与内容，不自动用新版本重放旧编辑。其他账号与不存在的任务均返回 404。
+        后续接入审核时允许 rejected 修订回 draft 并保留审核历史；pending_review、published、taken_down 不可编辑。
+        与创建共用文件拒绝、内容/作品数量上限，写入成功不公开、不送审。
+      x-scenarios: [S2]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TaskDraftUpdate'}
+      responses:
+        '200':
+          description: 保存后的草稿及新版本
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskSubmission'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/tasks/{taskId}/review-requests:
+    parameters: [{$ref: '#/components/parameters/TaskId'}]
+    post:
+      tags: [Submissions]
+      operationId: requestTaskReview
+      summary: 将本人任务及双方初始作品一起送审
+      description: |
+        服务端校验 expectedRevision、完整任务信息及至少一件 human 和一件 agent 作品；缺少任一方返回 422。
+        所有材料须可用且授权有效；校验失败时保留草稿，不部分送审。
+        同一版本重复请求找回原审核记录；通过后任务发布、初始作品获准展示，在同一事务生效。发布不启动云端 agent。
+      x-scenarios: [S2]
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RevisionInput'}
+      responses:
+        '200':
+          description: 送审结果或同一版本已有结果
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskSubmission'}
+        '422': {$ref: '#/components/responses/InvalidSubmission'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/entries/{entryId}:
+    parameters: [{$ref: '#/components/parameters/EntryId'}]
+    get:
+      tags: [Account]
+      operationId: getMyEntrySubmission
+      summary: 读取本人追加作品与审核结果
+      x-scenarios: [S3]
+      x-implementation-status: planned
+      security: [{WebSession: []}]
+      responses:
+        '200':
+          description: 本人作品投稿；其他账号返回 404
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EntrySubmission'}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      tags: [Submissions]
+      operationId: createAssetUploadSession
+      summary: 创建本人私有资产上传会话
+
+      tags: [Submissions]
+      operationId: getAssetUploadSession
+      summary: 查询本人上传进度
+      x-implementation-status: implemented-local
+      security: [{WebSession: []}]
+      parameters: [{$ref: '#/components/parameters/UploadSessionId'}]
+{$ref: '#/components/headers/NoStore'}
+            Content-Type:
+              schema: {type: string, const: 'application/json; charset=utf-8'}
+        '503':
+          description: Identity 入口未就绪；与 GET 状态相同，无响应体
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+
+  /api/auth/google:
+    get:
+      tags: [Authentication]
+      operationId: startGoogleLogin
+      summary: 发起 Google 登录
+      description: |
+        浏览器以顶层页面导航打开本接口，接收 302 后进入 Google；不要用 fetch 跟随跨站登录跳转。
+        服务端创建十分钟有效、绑定浏览器的一次性登录流程，保存随机 state、nonce 和 PKCE verifier，发送 S256 challenge。
+        仅请求 openid、email、profile，使用 response_type=code；不请求离线访问或其他 Google API 权限。
+        同一浏览器重新发起会使前一次未完成流程失效；既有网站会话暂不改变。
+        Google redirect_uri 来自服务端的环境配置并与注册值完全一致，不接受客户端提供 redirect_uri、returnTo、角色或账号 ID。
+        已有网站会话即使过期也可重新登录；携带 Authorization/Bearer 返回 400，MCP 不暴露此入口。
+        Client Secret 和 PKCE verifier 不进入浏览器、URL 或日志；具体回调配置未就绪时返回 503，不降级到公网 HTTP/IP 回调。
+      x-scenarios: [H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: []
+      responses:
+        '302':
+          description: 创建登录流程并跳转至 Google；尚未登录 Human Worth
+          headers:
+            Location:
+              description: 服务端构造的 Google 授权地址，含客户端 ID、固定回调、最小 scopes、state、nonce 和 S256 challenge
+              schema: {type: string, format: uri}
+            Set-Cookie:
+              description: 随机登录流程凭据；十分钟有效，HttpOnly、Secure、SameSite=Lax、Path=/，不设置 Domain
+              schema: {type: string}
+              example: '__Host-human-worth-oauth=opaque-login-handle; Max-Age=600; Path=/; Secure; HttpOnly; SameSite=Lax'
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Referrer-Policy: {$ref: '#/components/headers/NoReferrer'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/auth/google/callback:
+    get:
+      tags: [Authentication]
+      operationId: completeGoogleLogin
+      summary: 接收 Google 回调并建立网站会话
+      description: |
+        由 Google 导航回调，不是前端手工提交 Google ID token 的接口。无需已有网站会话，但必须携带发起登录时的流程 Cookie。
+        state 必填且只能出现一次；code 与 error 必须二选一且只出现一次，重复参数或缺失/冲突返回 400。
+        忽略 Google 附带的其他响应参数，不用其决定身份、角色或跳转地址。
+        Identity 先验证流程 Cookie、state 与有效期，再原子占用一次性流程；多副本并发回调只允许一份继续，重放返回 400。
+        服务端使用授权码、固定 redirect_uri、Client Secret 和原 PKCE verifier 换取 token；验证 ID token 签名、发行方、受众、有效期、nonce，以及适用的 azp。
+        只接受 Google 发行方的允许值，规范为 https://accounts.google.com 后按 (issuer, sub) 关联稳定账号；邮箱、显示名和回调参数不能替代 sub。
+        首次登录原子创建普通账号，重复登录复用账号；不按相同邮箱自动绑定其他账号，不重建投票资格，不自动授予管理员。
+        成功时使当前浏览器的旧网站会话失效并签发新会话，清除流程 Cookie，303 回到 /；前端随后调用 GET /api/me 取得账号和 CSRF token。
+        用户拒绝授权且流程验证通过时，清除流程 Cookie 并 303 回到 /?login=cancelled，保留原有网站会话。
+        验证失败不建立新会话：无效/过期/重放流程返回 400；授权码或 ID token 无效返回 401；账号禁用返回 403；供应方或存储暂不可用返回 503。
+        流程占用后失败或结果未知须重新发起登录，不盲目重放授权码。已成功提交但响应丢失的会话轮换仍以持久记录为准；错误不改变其他账号或既有投票记录。
+        所有回调响应（包括错误）均 no-store、no-referrer；访问日志须屏蔽回调 query、Cookie、授权码和 token。
+        Google access/ID/refresh token 不返回前端、不作为网站或 MCP 凭据，不写 localStorage；携带 Bearer 返回 400。
+      x-scenarios: [H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{GoogleLoginTransaction: []}]
+      parameters:
+        - name: state
+          in: query
+          required: true
+          description: 发起流程时服务端生成的随机值，必须与该浏览器的一次性流程匹配
+          schema: {type: string, minLength: 1, maxLength: 1024}
+        - name: code
+          in: query
+          description: Google 返回的一次性授权码；与 error 恰有一个，不接受前端自行提供账号资料
+          schema: {type: string, minLength: 1, maxLength: 4096}
+        - name: error
+          in: query
+          description: Google 返回的授权错误；access_denied 表示用户拒绝，其余错误按脱敏后的错误响应处理
+          schema: {type: string, minLength: 1, maxLength: 128}
+          example: access_denied
+      responses:
+        '303':
+          description: 登录成功返回 /；用户拒绝授权返回 /?login=cancelled。具体账号通过 GET /api/me 查询
+          headers:
+            Location:
+              schema: {type: string, enum: ['/', '/?login=cancelled']}
+            Set-Cookie:
+              description: |
+                成功时设置新网站会话，并以第二条独立 Set-Cookie 清除 __Host-human-worth-oauth（空值、Max-Age=0、Path=/、Secure、HttpOnly、SameSite=Lax）。
+                用户拒绝时只清除流程 Cookie。重复的 Set-Cookie 必须分别发送，不能用逗号合并；下例仅展示成功时的网站会话字段。
+              schema: {type: string}
+              example: '__Host-human-worth-session=opaque-session; Path=/; Secure; HttpOnly; SameSite=Lax'
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Referrer-Policy: {$ref: '#/components/headers/NoReferrer'}
+        '400': {$ref: '#/components/responses/GoogleLoginProblem'}
+        '401': {$ref: '#/components/responses/GoogleLoginProblem'}
+        '403': {$ref: '#/components/responses/GoogleLoginProblem'}
+        '503': {$ref: '#/components/responses/GoogleLoginProblem'}
+        default: {$ref: '#/components/responses/GoogleLoginProblem'}
+
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logoutCurrentSession
+      summary: 退出当前网站会话
+      description: |
+        验证当前会话、X-CSRF-Token 与来源后，服务端撤销该会话并清除浏览器会话 Cookie。
+        不退出其他设备、不撤销 MCP token、不退出 Google 账号、不删除平台账号或恢复任何任务的投票资格。
+        已失效会话返回 401；不以只清除 Cookie 代替服务端撤销，不能通过 GET 触发退出。
+      x-scenarios: [H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{WebSession: [], CsrfToken: []}]
+      responses:
+        '204':
+          description: 当前会话已在服务端撤销，无响应体
+          headers:
+            Set-Cookie:
+              schema: {type: string}
+              example: '__Host-human-worth-session=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax'
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me:
+    get:
+      tags: [Account]
+      operationId: getCurrentSession
+      summary: 获取当前网站账号与 CSRF token
+      x-scenarios: [S2, S3, S4, S5, H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{WebSession: []}]
+      responses:
+        '200':
+          description: Google 登录成功后查询本人身份；csrfToken 仅用于当前网站会话的写请求，不返回 Google token
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/mcp-tokens:
+    post:
+      tags: [Account]
+      operationId: createMcpToken
+      summary: 创建本人 MCP 读取凭据
+      description: |
+        仅当前网站会话可创建；校验 X-CSRF-Token 和精确 Origin，不接受 MCP token 代为签发。
+        token 为随机凭据，固定三十天有效，数据库只保存摘要；明文仅在本次 201 响应中返回一次。
+        createRequestId 在账号内唯一。相同 ID 再次请求返回 409，不重复创建，也不再次返回明文。
+        如果响应丢失，先通过列表中的 createRequestId 找到并撤销原凭据，再使用新 ID 创建。
+        新 token 仍属于原稳定账号，不改变任何任务的投票资格；MCP 业务工具本身由后续模块实现。
+      x-scenarios: [S3, S5, H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{WebSession: [], CsrfToken: []}]
+      parameters:
+        - {$ref: '#/components/parameters/WebOrigin'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, createRequestId]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 80, description: 便于本人识别的名称，不能仅为空白}
+                createRequestId: {type: string, minLength: 1, maxLength: 128, description: 客户端随机生成并在同一次创建的重试中保持不变}
+      responses:
+        '201':
+          description: 凭据已创建；离开本响应后无法找回明文
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [credential, token]
+                properties:
+                  credential: {$ref: '#/components/schemas/McpCredential'}
+                  token: {type: string, minLength: 1, description: 仅此次返回的明文；客户端自行妥善保存，不放入网站 localStorage}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+    get:
+      tags: [Account]
+      operationId: listMyMcpTokens
+      summary: 分页列出本人的 MCP 凭据
+      description: 返回名称、创建请求 ID、时间和有效/撤销/过期状态；不返回明文或凭据摘要，不列出网站会话。按不透明凭据 ID 排序，跨页时新创建的凭据可通过刷新首屏查看。
+      x-scenarios: [S3, S5, H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{WebSession: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: 仅本人凭据元数据；nextCursor 为 null 时没有下一页
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, nextCursor]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/McpCredential'}}
+                  nextCursor: {$ref: '#/components/schemas/NextCursor'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/mcp-tokens/{credentialId}:
+    delete:
+      tags: [Account]
+      operationId: revokeMcpToken
+      summary: 撤销本人的一个 MCP 凭据
+      description: |
+        仅网站会话可操作，并校验 CSRF 与 Origin；其他账号的凭据与不存在均返回 404。
+        重复撤销返回 204；提交后新的鉴权和身份断言校验拒绝旧 token，不依赖进程内缓存。
+        已完成鉴权的在途业务另受对应业务事务约束；撤销不删除稳定账号或恢复投票资格。
+      x-scenarios: [S3, S5, H3]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      security: [{WebSession: [], CsrfToken: []}]
+      parameters:
+        - name: credentialId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/Id'}
+        - {$ref: '#/components/parameters/WebOrigin'}
+      responses:
+        '204':
+          description: 已撤销，无响应体
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: 分页浏览公开任务
+      description: |
+        首页默认 recommended；看板排行榜使用 hot，按热度降序排列，同热度按任务 ID 升序。
+        游标绑定排序、筛选及列表快照，持续滚动不重复同一任务；快照内已下架内容即时过滤。
+        不返回具体得票或得票占比，不因读取改变资格。heat 是不可反推出具体票数的排序分值。
+        q 仅检索允许公开的任务文本，不检索私有投稿或统计。
+      x-scenarios: [S1, S5, S6]
+      x-implementation-status: planned
+      security: [{}, {WebSession: []}, {McpToken: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+        - name: order
+          in: query
+          schema: {type: string, enum: [recommended, hot], default: recommended}
+        - name: category
+          in: query
+          schema: {type: string, minLength: 1}
+        - name: q
+          in: query
+          schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: 已审核发布任务；nextCursor 为 null 时没有后续页
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskPage'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Submissions]
+      operationId: createTaskDraft
+      summary: 保存新任务草稿
+      description: |
+        可缺少一方或双方作品，不进入公开查询或审核，不启动云端挑战。作者仅由会话确定，不接受 authorId/state。
+        本阶段仅保存文本和 HTTP(S) 外链，不抓取或执行链接；file 材料返回 409 asset_service_not_ready。
+        必须携带 Idempotency-Key。同账号同键、相同规范化内容重试返回原任务的当前快照（201），不回滚后续编辑；同键不同内容返回 409。
+        不同账号键空间隔离。键随草稿持久保存，不因超时、进程重启或会话更新失效。
+        HTTP 请求体上限 16384 字节，规范化 content 上限 12000 字节；最多 32 件初始作品，每件最多 32 个交付物。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 客户端为一次创建生成并在重试时复用；不要使用每次变化的 request ID。
+          schema: {type: string, pattern: '^[A-Za-z0-9_-]{16,128}$', minLength: 16, maxLength: 128}
+      x-scenarios: [S2]
+      x-implementation-status: implemented
+      x-deployment-status: published
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TaskDraftInput'}
+      responses:
+        '201':
+          description: 本人草稿已保存
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskSubmission'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/tasks/{taskId}:
+    parameters: [{$ref: '#/components/parameters/TaskId'}]
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: 阅读公开任务详情
+      description: 只返回已发布任务；草稿、待审、驳回和下架内容返回 404。普通作品浏览可分页；投票通过 ballot 一次取得全部过审作品，不隐式读取统计。
+      x-scenarios: [S1, S3, S5, S6]
+      x-implementation-status: planned
+      security: [{}, {WebSession: []}, {McpToken: []}]
+      responses:
+        '200':
+          description: 公开任务正文，不含票数和得票占比
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicTask'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/tasks/{taskId}/entries:
+    parameters: [{$ref: '#/components/parameters/TaskId'}]
+    get:
+      tags: [Tasks]
+      operationId: listApprovedEntries
+      summary: 分页浏览该题通过审核的作品
+      description: |
+        任务须可见，作品须为 approved；没有作品公开/私有状态，也不检查单独的公开授权。
+        此分页接口用于普通浏览；投票页面必须使用 ballot 一次取得全部过审作品，不得仅以某一页作为候选集合。
+        不暴露其他人的草稿、待审作品、内部配置或单题统计。
+      x-scenarios: [S1, S3, S5, H1]
+      x-implementation-status: planned
+      security: [{}, {WebSession: []}, {McpToken: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: 审核通过、允许展示的作品
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EntryPage'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      tags: [Submissions]
+      operationId: submitAdditionalEntry
+      summary: 向任意公开任务追加一件作品并送审
+      description: |
+        任意网站用户可单方追加，不要求作者邀请或批准；即使已永久失去该题投票权也可投稿。
+        仅新作品进入 pending_review，原任务保持 published。作品署名不能决定投稿者账号。
+        校验资产归属、来源、授权及适用配置；不恢复投票资格，不启动云端挑战。
+      x-scenarios: [S3]
+      x-implementation-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EntryInput'}
+      responses:
+        '201':
+          description: 新作品与独立审核记录已建立
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EntrySubmission'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/submissions:
+    get:
+      tags: [Account]
+      operationId: listMySubmissions
+      summary: 找回本人的任务草稿、投稿与审核结果
+      description: |
+        首阶段只返回当前网站会话账号自己的完整 TaskSubmission 草稿；不查询 EntrySubmission、审核或公开内容。
+        kind 缺省等同 task，state 缺省等同 draft；明确传入其他值或空 kind/state 返回 400 unsupported_submission_filter，未知或重复参数返回 400 invalid_request。
+        category 按草稿写入值精确匹配，不 trim、不改变大小写、不做 Unicode 归一化；缺省不筛选，显式空值返回 400。为容纳合法 UTF-8 值的 URL 编码，该路由允许最多 40 KiB Request-URI；超过时返回 414 invalid_request。
+        固定按 created_at DESC、id DESC 排序并使用键集游标。省略 cursor 或 cursor= 都表示第一页；游标最长 2048 字符，绑定账号、有效筛选和排序，损坏、跨账号或换筛选复用返回 400 invalid_cursor。category 为空、含 NUL、不是有效 UTF-8 或超过 12000 个 UTF-8 字节返回 400 invalid_category；该字节上限覆盖所有满足草稿整体 12000 字节约束的既有分类。
+        单页最多 limit 条，以 limit+1 查询判断 nextCursor；响应还受 2 MiB 的实际 Protobuf 编码预算约束，因此合法完整对象较大时可少于 limit 条，并以最后一条实际返回记录生成 nextCursor。空结果为 items: []、nextCursor: null，不查询 totalCount。
+        分页请求之间不保持数据库快照；编辑不改变 created_at，但翻页期间改变 category 会使草稿按新类别进入或离开后续结果。
+      x-scenarios: [S2, S3]
+      x-implementation-status: implemented
+      x-deployment-status: published
       security: [{WebSession: []}]
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
@@ -1162,7 +1686,8 @@ paths:
       operationId: listChallengeRuns
       summary: 分页查看云端运行、异常及结果
       x-scenarios: [S4, H2]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: [admin]}]
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
@@ -1181,10 +1706,20 @@ paths:
       summary: 管理员为公开任务启动云端挑战
       description: |
         重新检查任务公开性、配置、材料授权与可用性、额度；预算和轮数须显式设置，不提供隐含开销默认值。
-        任务结论待定仅追加生成；agent 领先可提炼经验；人类领先先准备授权材料并验证投票者，再进入匿名对抗。
-        结论由系统计算，客户端不能指定或修改。普通用户、任务作者及 MCP token 均不能启动。
-      x-scenarios: [S4]
-      x-implementation-status: planned
+        所有任务统一追求成为最佳作品或对齐最佳效果，先单独迭代 R，真人偏好拟合度严格超过阈值后固定 R，再只迭代 P 并运行 E；不读取任务领先结论或据此分流。
+        管理员必须提交 initialTaskPackage：选定该任务描述的附件、手写执行说明和作品要求。校验任务版本、附件归属和授权，不允许使用其他作品附件；运行开始后固定不变。
+        三角色配置分别为 packer、executor、ranker：P 读取初始包、自身作品、报告、名次及合格 R 的自身作品评判依据和拟合度，任何用户评论均不可见；E 只读本次任务包并交作品与报告。P/E 不能读取其他作品；R 内部排序读取原任务、获准评论和全部作品，不读取任务包或执行报告。
+        面向 P 的评判依据由同一固定 R 在独立无历史调用中产生，仅输入原始任务要求、选定任务附件及自身作品，不携带评论、其他作品或全量排序理由；拟合度来自可信验证记录，不能由模型自报。
+        程序预先读齐并校验文字与文件，再一次性提供给 P/R；每个工作项只调用一次模型，只接受结构化结果，不提供工具或 ReAct。无法读取的作品明确报错，不用文件名或摘要冒充内容；不共享工作区或提供完整执行轨迹。
+        第一阶段每轮先由 LLM 读取完整授权内容生成判断标准，包括初始包、原任务、作品、评论、真人训练偏好与已有判断反馈，再独立调用 LLM 按标准判断；首轮也先生成标准。未达标不允许 P 调用或 E Job；达标后冻结 R，仅 P 改进执行提示，E 配置全程固定。打包与排序不使用工作区或 harness，具体验证方案见 docs/backend-challenge.md。
+        rankerFitThreshold、rankerMinComparablePairs、rankerRoundLimit 与 roundLimit 均须显式提交。仅有效拟合度严格超过阈值才放行，等于阈值仍不达标；两阶段共享预算和期限。
+        P/R 固定为每个工作项一次模型调用、零工具调用，纳入 R 输入策略；新标准落库后才获取独立验证样本，验证标签留在服务端评分器。
+        只保存当前提示，校验后按阶段覆盖，不保留历史优化版本或退化回滚。R 阶段超限、样本不足、材料／拟合记录失效时不推进 P/E；启动前能确认则拒绝，运行后发现则失败收尾。运行完成不代表作品已达到最佳效果。
+        排序返回内部完整顺序，不改变网站全部作品单选语义；真人训练标签不通过运行记录或普通内容响应返回。
+        普通用户、任务作者及 MCP token 均不能启动。
+      x-scenarios: [S4, H4, H5, H7, H8, H9, H10, H12]
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: [admin], CsrfToken: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
@@ -1216,7 +1751,8 @@ paths:
       summary: 查看一次运行的配置、阶段、异常和候选登记状态
       description: 不把生成完成、登记、审核发布或真人反馈混作获胜；不返回额度余额或消耗数值，具体真人统计仍走 statistics-access。
       x-scenarios: [S4, H2]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: [admin]}]
       responses:
         '200':
@@ -1234,11 +1770,14 @@ paths:
       operationId: cancelChallengeRun
       summary: 取消云端运行并拒绝后续结果推进
       description: |
-        先提交 cancelled 状态再停止外部调用；与阶段推进、候选登记串行化。
-        已取消的重复请求返回原记录；其他终态返回 409。取消或结束后的迟到结果不继续推进、不登记新作品。
+        先持久化 cancelling 意图并冻结推进、撤销执行权限，再请求停止执行环境和封闭 Content 的登记通道。
+        确认登记通道关闭后才提交 cancelled；关闭与首次登记在 Content 的本地事务中串行化。
+        重复取消返回原记录：cancelling 返回 202，cancelled 返回 200；finalizing 或其他终态返回 409。
+        收紧后迟到结果不继续推进；终态后不登记新作品。物理环境清理和外部在途请求对账可以继续。
         已登记作品保留原审核流程；取消不表示已发生的消耗退回。
       x-scenarios: [S4]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: [admin], CsrfToken: []}]
       requestBody:
         required: true
@@ -1247,7 +1786,12 @@ paths:
             schema: {$ref: '#/components/schemas/ReasonInput'}
       responses:
         '200':
-          description: 已持久化的取消结果
+          description: 已确认登记通道关闭的 cancelled 记录
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChallengeRun'}
+        '202':
+          description: 取消意图已持久化，处于 cancelling；按运行 ID 查询收尾进度
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ChallengeRun'}
@@ -1263,9 +1807,11 @@ paths:
       summary: 从已终止的运行创建关联的新运行
       description: |
         仅 completed、failed、cancelled 可重启；原记录不覆盖，新运行保留同一 taskId 并设置 parentRunId。
-        使用显式提供的配置，再次检查任务、授权、材料和额度；不能继承旧运行的通过结果来跳过检查。
-      x-scenarios: [S4]
-      x-implementation-status: planned
+        使用显式提供的配置，包括管理员初始包；可复制旧包后修改，但须再次检查任务版本、选定附件归属、授权、材料和额度，不能继承旧运行的通过结果来跳过检查。
+        新运行从 R 拟合阶段开始，按当前工具与输入策略重新验证阈值和样本条件，不继承旧达标记录；统一追求最佳或对齐最佳效果，不读取任务领先结论。
+      x-scenarios: [S4, H7, H9, H10, H11]
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: [admin], CsrfToken: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody:
@@ -1297,45 +1843,26 @@ paths:
       description: |
         仅操作该运行中已持久化的最终候选；不接受客户端上传新的云端结果。
         先按 runId × candidateId 找回已有作品及当前审核状态，不能重置已通过或被驳回作品的状态。
-        仅无登记且运行仍 active、材料仍有效时原子创建一件 pending_review 作品及审核记录；并发重试返回同一作品。
-        完成运行前应完成候选登记；终态下仅可找回已有登记，无登记返回 409，不补记迟到作品。
+        仅无登记且运行仍 active、材料仍有效时发起首次登记；Content 同事务核实登记通道并创建 pending_review 作品、登记回执和审核请求 outbox。
+        Moderation 异步幂等建立审核记录；尚未建立时 reviewId 为空，作品保持待审，不自动展示。并发重试返回同一作品。
+        完成运行前应处理完计划内候选；cancelling、finalizing 或终态下只查回已有登记，无登记返回 409，不补记迟到作品。
       x-scenarios: [S4]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: not_published
       security: [{WebSession: [admin], CsrfToken: []}]
       responses:
         '200':
           description: 已有作品及当前审核状态
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/EntrySubmission'}
+              schema: {$ref: '#/components/schemas/RegistrationReceipt'}
         '201':
           description: 首次登记的待审作品
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/EntrySubmission'}
+              schema: {$ref: '#/components/schemas/RegistrationReceipt'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
-        default: {$ref: '#/components/responses/Problem'}
-
-  /api/tasks/{taskId}/challenge-progress:
-    parameters: [{$ref: '#/components/parameters/TaskId'}]
-    get:
-      tags: [Challenges]
-      operationId: listPublicChallengeProgress
-      summary: 分页读取允许公开的云端进度
-      description: 仅公开任务及获准披露的运行阶段，不提供私有材料、提示词、预算、日志、未审核作品或具体真人统计。
-      x-scenarios: [S4]
-      x-implementation-status: planned
-      security: [{}, {WebSession: []}, {McpToken: []}]
-      parameters:
-        - {$ref: '#/components/parameters/Cursor'}
-        - {$ref: '#/components/parameters/Limit'}
-      responses:
-        '200':
-          description: 经过公开字段投影的进度
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/ProgressPage'}
         default: {$ref: '#/components/responses/Problem'}
 
   /api/admin/audit-events:
@@ -1648,7 +2175,7 @@ components:
       properties:
         cloudUse:
           type: boolean
-          description: 是否允许该作品用于云端挑战；必须显式选择，无默认授权，启动及重启仍检查有效性
+          description: 是否允许该作品或任务附件用于云端挑战；必须显式选择，无默认授权，启动及重启仍检查有效性
         statement: {type: string, description: 来源权利或云端使用授权的说明，不填写密钥或无关个人信息；不是作品展示开关}
       description: 仅记录用途授权；作品是否允许展示由审核结果决定，不接受 publish/public/private 字段。
     AgentConfiguration:
@@ -1691,6 +2218,14 @@ components:
           else:
             not:
               required: [agentConfiguration]
+    TaskAttachmentInput:
+      type: object
+      additionalProperties: false
+      required: [assetId, permissions]
+      properties:
+        assetId: {$ref: '#/components/schemas/Id'}
+        permissions: {$ref: '#/components/schemas/Permissions'}
+      description: 原始任务描述的附件，校验上传归属并随任务一起审核；与作品交付物分开，不能由打包角色追加作品库来扩大输入范围
     TaskDraftInput:
       type: object
       additionalProperties: false
@@ -1755,12 +2290,17 @@ components:
     PublicTask:
       type: object
       additionalProperties: false
-      required: [id, title, summary, description, category, author, heat, publishedAt]
+      required: [id, revision, title, summary, description, taskAttachments, category, author, heat, publishedAt]
       properties:
         id: {$ref: '#/components/schemas/Id'}
+        revision: {type: integer, minimum: 1, description: 当前任务描述及附件版本；管理员准备初始包时提交为 taskRevision，不是投票目录版本}
         title: {type: string}
         summary: {type: string}
         description: {type: string}
+        taskAttachments:
+          type: array
+          items: {$ref: '#/components/schemas/Asset'}
+          description: 随任务过审的描述附件，无附件时为空；下载仍检查当前可见性，云端使用权限不由此响应授予
         category: {type: [string, 'null']}
         author: {$ref: '#/components/schemas/Author'}
         heat: {type: number, description: 平台热度排序值；不包含可还原的票数或得票占比}
@@ -1780,6 +2320,12 @@ components:
           type: array
           minItems: 1
           items: {$ref: '#/components/schemas/Artifact'}
+          contains:
+            type: object
+            required: [kind]
+            properties:
+              kind: {enum: [text, file]}
+          minContains: 1
         author: {$ref: '#/components/schemas/Author'}
         approvedAt: {$ref: '#/components/schemas/Timestamp'}
       description: 任务可见且作品审核通过时的展示内容；没有公开/私有状态，不返回投稿审核材料、完整运行配置或未过审作品内容。
@@ -2004,35 +2550,114 @@ components:
         pendingTaskReviews: {type: integer, minimum: 0}
         pendingEntryReviews: {type: integer, minimum: 0}
         openReports: {type: integer, minimum: 0}
-        activeRuns: {type: integer, minimum: 0}
+        activeRuns: {type: integer, minimum: 0, description: queued、active、cancelling、finalizing 的运行数}
         failedRuns: {type: integer, minimum: 0}
+    ModelCallConfiguration:
+      type: object
+      additionalProperties: false
+      required: [model]
+      properties:
+        model: {type: string, minLength: 1, description: 服务端已配置的模型标识，不接受任意 API 地址}
+        prompt: {type: string, description: 初始打包指令或生成 R 判断标准的种子指令；不得包含密钥或隐藏验证标签}
+        parameters:
+          type: object
+          additionalProperties: true
+          description: 首版只接受 temperature（0～2）和 top_p（大于 0 且不大于 1）；拒绝客户端注入 tools、harness、skills、文件路径、会话历史及供应商端点等能力配置；材料由程序按角色与用途预先准备，P/R 无工具
+      description: 打包与排序每个工作项单次调用并返回结构化 JSON，不使用工具或 ReAct，不创建工作区或任务 Pod；prompt 为初始打包指令或生成判断标准的种子指令，R 首轮仍需由 LLM 生成标准；输入策略纳入拟合记录绑定
+    InitialTaskPackage:
+      type: object
+      additionalProperties: false
+      required: [taskRevision, taskAttachmentIds, description, workRequirements]
+      properties:
+        taskRevision: {type: integer, minimum: 1, description: 管理员选材依据的任务版本；不一致返回 409}
+        taskAttachmentIds:
+          type: array
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/Id'}
+          description: 从该版本任务描述附件中选定的 asset ID；可为空，不接受其他作品附件或任意上传文件
+        description: {type: string, minLength: 1, description: 管理员手写的执行任务说明，不转交用户评论、其他作品或投票结果}
+        workRequirements: {type: string, minLength: 1, description: 管理员手写的作品交付要求，包括文字或文件、文件格式及内容要求}
+      description: 管理员准备的初始包；启动后冻结，P 只增加执行提示，不能改动本对象；E 只接收本对象加执行提示；R 标准生成可读取本对象，正式判断不接收。修改需新运行；字段与来源校验不替代管理员核对说明是否忠实于原任务
     RunConfiguration:
       type: object
       additionalProperties: false
-      required: [generator, voter, roundLimit, budget]
+      required: [initialTaskPackage, packer, executor, ranker, rankerFitThreshold, rankerMinComparablePairs, rankerRoundLimit, roundLimit, budget]
       properties:
-        generator: {$ref: '#/components/schemas/AgentConfiguration'}
-        voter: {$ref: '#/components/schemas/AgentConfiguration'}
-        roundLimit: {type: integer, minimum: 1}
+        initialTaskPackage: {$ref: '#/components/schemas/InitialTaskPackage'}
+        packer: {$ref: '#/components/schemas/ModelCallConfiguration'}
+        executor: {$ref: '#/components/schemas/AgentConfiguration'}
+        ranker: {$ref: '#/components/schemas/ModelCallConfiguration'}
+        rankerFitThreshold:
+          type: number
+          exclusiveMinimum: 0
+          exclusiveMaximum: 1
+          description: R 真人偏好拟合阈值，无默认值；仅有效拟合度严格大于此值才能开始 P/E，比较使用未四舍五入的分数
+        rankerMinComparablePairs:
+          type: integer
+          minimum: 1
+          description: 独立验证样本中最少有效可比作品对数，无默认值；不足则分数为空，不放行 P/E
+        rankerRoundLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: 第一阶段 R 的标准生成与独立判断轮数上限，首轮也计数；用尽仍未达标则失败，不能跳过门槛
+        roundLimit: {type: integer, minimum: 1, maximum: 100, description: 第二阶段 P/E 作品轮次上限；第一阶段不运行 P/E}
         budget:
-          allOf:
-            - {$ref: '#/components/schemas/Quantity'}
-            - type: object
-              properties:
-                amount: {exclusiveMinimum: 0}
-      description: 配置是运行创建时快照；修改配置通过新运行完成，不原地改变已启动运行
+          type: object
+          additionalProperties: false
+          required: [amount, unit]
+          properties:
+            amount: {type: integer, minimum: 1, maximum: 100000}
+            unit: {type: string, const: model_calls}
+          description: 首版按模型调用次数预留；失败或结果未知不自动退回，不在运行响应中展示已用或余额
+      description: 管理员初始包、三角色配置、拟合门槛和轮数创建时冻结；先只改 R 提示，达标后固定 R 再只改 P 提示并运行 E；E 配置全程固定。当前提示按阶段覆盖，不保留历史版本或回滚；修改初始包、阈值、模型或工具配置须新运行并重新校准 R
     RunStatus:
       type: string
-      enum: [queued, active, completed, failed, cancelled]
-      description: completed、failed、cancelled 为终态，之后不接纳迟到结果或新登记
+      enum: [queued, active, cancelling, finalizing, completed, failed, cancelled]
+      description: cancelling 为取消收尾，finalizing 为完成或失败收尾，均已冻结推进；登记通道关闭后才进入 completed、failed、cancelled 终态，终态不接纳迟到结果或新登记
     RunStage:
       type: string
-      enum: [queued, preparing_materials, validating_voter, generating, learning, anonymous_battle, registering, finished]
-      description: 阶段枚举为提案，仍须遵守待定/agent 领先/人类领先的分流及材料校验顺序
+      enum: [queued, preparing_materials, optimizing_ranker, optimizing_packer, registering, finished]
+      description: 先 optimizing_ranker 单独迭代并验证 R，拟合度超过阈值后进入 optimizing_packer；后者固定 R，循环 P 改提示、E 生成与 R 评测。样本不足或无有效达标记录不能进入 P 阶段
+    RankerFit:
+      type: object
+      additionalProperties: false
+      required: [status, score, evaluatedAt]
+      properties:
+        status: {type: string, enum: [pending, insufficient_data, not_met, passed, invalidated]}
+        score: {type: [number, 'null'], minimum: 0, maximum: 1, description: 可信评分器对独立真人偏好样本计算的一致率；尚未评测或数据不足时为空，不是本轮作品得票率}
+        evaluatedAt: {$ref: '#/components/schemas/NullableTime'}
+      allOf:
+        - if:
+            properties:
+              status: {enum: [pending, insufficient_data]}
+          then:
+            properties:
+              score: {type: 'null'}
+        - if:
+            properties:
+              status: {enum: [not_met, passed]}
+          then:
+            properties:
+              score: {type: number}
+              evaluatedAt: {type: string, format: date-time}
+      description: 管理员运行响应的脱敏拟合摘要；不包含具体真人票数、标签或验证作品身份。passed 必须绑定当前 R 及有效验证记录且 score 严格大于配置阈值；失效记录不能推动 P/E
+    RegistrationReceipt:
+      type: object
+      additionalProperties: false
+      required: [runId, candidateId, entryId, reviewId, reviewState, created]
+      properties:
+        runId: {$ref: '#/components/schemas/Id'}
+        candidateId: {$ref: '#/components/schemas/Id'}
+        entryId: {$ref: '#/components/schemas/Id'}
+        reviewId: {$ref: '#/components/schemas/NullableId'}
+        reviewState: {type: string, enum: [pending_review, approved, rejected, approval_revoked]}
+        created: {type: boolean, description: 仅本次首次创建为 true；查回已有登记为 false}
+      description: Content 的登记回执，不包含作品正文；审核案件尚未建立时 reviewId 为空，登记不自动通过审核
     ChallengeRun:
       type: object
       additionalProperties: false
-      required: [id, taskId, parentRunId, administratorId, status, stage, round, taskConclusion, configuration, failureReason, candidates, createdAt, updatedAt, endedAt]
+      required: [id, taskId, parentRunId, administratorId, status, stage, rankerRound, round, rankerFit, configuration, failureReason, candidates, createdAt, updatedAt, endedAt]
       properties:
         id: {$ref: '#/components/schemas/Id'}
         taskId: {$ref: '#/components/schemas/Id'}
@@ -2040,8 +2665,9 @@ components:
         administratorId: {$ref: '#/components/schemas/Id'}
         status: {$ref: '#/components/schemas/RunStatus'}
         stage: {$ref: '#/components/schemas/RunStage'}
-        round: {type: integer, minimum: 0}
-        taskConclusion: {$ref: '#/components/schemas/Conclusion'}
+        rankerRound: {type: integer, minimum: 0, description: R 已完成的判断标准生成次数；尚未生成时为 0，首轮判断时为 1}
+        round: {type: integer, minimum: 0, description: P/E 作品轮次；R 达标前为 0}
+        rankerFit: {$ref: '#/components/schemas/RankerFit'}
         configuration: {$ref: '#/components/schemas/RunConfiguration'}
         failureReason: {type: [string, 'null'], description: 经脱敏的模型、运行限制或材料失效原因，不夹带额度余额、消耗数值或单题票数}
         candidates:
@@ -2058,16 +2684,6 @@ components:
         createdAt: {$ref: '#/components/schemas/Timestamp'}
         updatedAt: {$ref: '#/components/schemas/Timestamp'}
         endedAt: {$ref: '#/components/schemas/NullableTime'}
-    PublicProgress:
-      type: object
-      additionalProperties: false
-      required: [runId, status, stage, round, updatedAt]
-      properties:
-        runId: {$ref: '#/components/schemas/Id'}
-        status: {$ref: '#/components/schemas/RunStatus'}
-        stage: {$ref: '#/components/schemas/RunStage'}
-        round: {type: integer, minimum: 0}
-        updatedAt: {$ref: '#/components/schemas/Timestamp'}
     ReasonInput:
       type: object
       additionalProperties: false
@@ -2140,13 +2756,6 @@ components:
       required: [items, nextCursor]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/ChallengeRun'}}
-        nextCursor: {$ref: '#/components/schemas/NextCursor'}
-    ProgressPage:
-      type: object
-      additionalProperties: false
-      required: [items, nextCursor]
-      properties:
-        items: {type: array, items: {$ref: '#/components/schemas/PublicProgress'}}
         nextCursor: {$ref: '#/components/schemas/NextCursor'}
     AuditPage:
       type: object

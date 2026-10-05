@@ -1,6 +1,9 @@
 CREATE TABLE asset.assets (
     id text PRIMARY KEY,
     owner_id text NOT NULL,
+    run_id text NOT NULL DEFAULT '',
+    attempt_id text NOT NULL DEFAULT '',
+    upload_id text NOT NULL DEFAULT '',
     state text NOT NULL CHECK (state IN ('staging', 'ready', 'failed', 'deleted')),
     original_filename text NOT NULL,
     declared_media_type text NOT NULL,
@@ -32,3 +35,5 @@ CREATE TABLE asset.upload_sessions (
 CREATE UNIQUE INDEX upload_sessions_owner_key ON asset.upload_sessions(owner_id, idempotency_key);
 CREATE INDEX assets_owner_created_id ON asset.assets(owner_id, created_at DESC, id DESC);
 CREATE INDEX upload_sessions_expiry ON asset.upload_sessions(expires_at) WHERE state = 'active';
+
+CREATE UNIQUE INDEX assets_challenge_upload ON asset.assets(run_id, attempt_id, upload_id) WHERE upload_id <> '';
