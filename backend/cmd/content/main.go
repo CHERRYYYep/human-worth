@@ -109,6 +109,12 @@ func run() error {
 		if conn.GetState() != connectivity.Ready {
 			return errors.New("identity unavailable")
 		}
+		if assetConn != nil {
+			response, err := healthpb.NewHealthClient(assetConn).Check(ctx, &healthpb.HealthCheckRequest{})
+			if err != nil || response.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+				return errors.New("asset unavailable")
+			}
+		}
 		return nil
 	}
 	probe := runtime.Health(platform.Value("HEALTH_LISTEN", ":8081"), ready)

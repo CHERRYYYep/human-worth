@@ -11,12 +11,14 @@ import (
 	"time"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
+	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/asset"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -35,7 +37,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	db, err := platform.Database(ctx, dsn)
+	db, err := platform.Database(ctx, dsn, 40*time.Second)
 	if err != nil {
 		return err
 	}
@@ -61,13 +63,29 @@ func run() error {
 		return errors.New("identity client initialization failed")
 	}
 	defer identityConn.Close()
+	var contentClient contentpb.ContentServiceClient
+	// Optional to preserve private-only installations; public reads fail closed
+	// without this target. Do not require Content health in Asset's readiness:
+	// Content itself needs Asset for private writes (no readiness dependency cycle).
+	if target := os.Getenv("CONTENT_TARGET"); target != "" {
+		config, e := platform.TLS(os.Getenv("SERVICE_CERT_FILE"), os.Getenv("SERVICE_KEY_FILE"), os.Getenv("SERVICE_CA_FILE"), "content")
+		if e != nil {
+			return e
+		}
+		conn, e := grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(65536), grpc.MaxCallSendMsgSize(65536)))
+		if e != nil {
+			return errors.New("content client initialization failed")
+		}
+		defer conn.Close()
+		contentClient = contentpb.NewContentServiceClient(conn)
+	}
 	serverTLS, err := platform.TLS(os.Getenv("SERVICE_CERT_FILE"), os.Getenv("SERVICE_KEY_FILE"), os.Getenv("SERVICE_CA_FILE"), "")
 	if err != nil {
 		return err
 	}
-	var storage asset.Storage
-	if directory := os.Getenv("ASSET_STORAGE_DIR"); directory != "" {
-		storage = asset.FileStorage{Root: directory}
+	storage, storageErr := asset.StorageFromEnv()
+	if storageErr != nil {
+		slog.Error("object storage configuration unavailable; readiness disabled")
 	}
 	runtime := platform.NewRuntime("asset")
 	shutdown, err := platform.Trace(ctx, "asset")
@@ -81,15 +99,22 @@ func run() error {
 	}()
 	runtime.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "human_worth_database_connections", Help: "Open connections in this replica's pool"}, func() float64 { return float64(db.Stat().TotalConns()) }))
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, asset.Authorization), grpc.ChainStreamInterceptor(runtime.Stream, asset.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(512<<10), grpc.MaxSendMsgSize(512<<10), grpc.MaxConcurrentStreams(64))
-	pb.RegisterAssetServiceServer(server, &asset.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(identityConn), Storage: storage})
+	pb.RegisterAssetServiceServer(server, &asset.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(identityConn), Storage: storage, Content: contentClient})
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	ready := func(check context.Context) error {
 		if err := asset.Ready(check, db); err != nil {
 			return err
 		}
-		if storage == nil {
+		if storageErr != nil {
+			return errors.New("object storage configuration unavailable")
+		}
+		if err := asset.CheckStorage(check, storage); err != nil {
 			return errors.New("object storage unavailable")
+		}
+		response, err := healthpb.NewHealthClient(identityConn).Check(check, &healthpb.HealthCheckRequest{})
+		if err != nil || response.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+			return errors.New("identity unavailable")
 		}
 		return nil
 	}
@@ -114,11 +139,27 @@ func run() error {
 				state := healthpb.HealthCheckResponse_SERVING
 				if ready(check) != nil {
 					state = healthpb.HealthCheckResponse_NOT_SERVING
-				} else {
-					_ = asset.CleanupExpired(check, db, storage)
 				}
 				cancel()
 				healthServer.SetServingStatus("", state)
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				check, cancel := context.WithTimeout(ctx, 30*time.Second)
+				if storage != nil {
+					if e := asset.CleanupExpired(check, db, storage); e != nil {
+						runtime.Log.Warn("object cleanup incomplete")
+					}
+				}
+				cancel()
 			}
 		}
 	}()

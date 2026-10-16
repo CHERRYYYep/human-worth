@@ -39,11 +39,25 @@ type Server struct {
 }
 
 // Service identity and user identity are independent trust boundaries.
-func Authorization(ctx context.Context, request any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
-	if err := gatewayPeer(ctx); err != nil {
+func Authorization(ctx context.Context, request any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+	if err := contentPeer(ctx, info.FullMethod); err != nil {
 		return nil, err
 	}
 	return next(ctx, request)
+}
+func contentPeer(ctx context.Context, method string) error {
+	switch method {
+	case pb.ContentService_CheckAssetAccess_FullMethodName:
+		return requireContentCaller(ctx, "asset")
+	case pb.ContentService_ApplyAssetReview_FullMethodName:
+		return requireContentCaller(ctx, "moderation")
+	case "/grpc.health.v1.Health/Check":
+		name, err := platform.ServiceName(ctx)
+		if err == nil && name == "asset" {
+			return nil
+		}
+	}
+	return gatewayPeer(ctx)
 }
 func gatewayPeer(ctx context.Context) error {
 	name, err := platform.ServiceName(ctx)
@@ -134,7 +148,7 @@ func validate(input *pb.TaskDraftInput) ([]byte, error) {
 			if a == nil {
 				return nil, invalid("invalid_artifact")
 			}
-			// Asset authorization does not exist yet; never store an unverified asset reference.
+			// File references are verified against Asset before persistence.
 			if a.Kind == "file" {
 				if a.AssetId == nil || a.GetAssetId() == "" || a.Url != nil {
 					return nil, invalid("invalid_artifact")
@@ -183,12 +197,22 @@ func (s *Server) validateAssets(ctx context.Context, author string, input *pb.Ta
 			}
 		}
 	}
-	if len(ids) == 0 { return nil }
-	if s.Asset == nil || assertion == "" { return status.Error(codes.FailedPrecondition, "asset_service_not_ready") }
-	if len(ids) > 32 { return invalid("too_many_assets") }
+	if len(ids) == 0 {
+		return nil
+	}
+	if s.Asset == nil || assertion == "" {
+		return status.Error(codes.FailedPrecondition, "asset_service_not_ready")
+	}
+	if len(ids) > 32 {
+		return invalid("too_many_assets")
+	}
 	response, err := s.Asset.CheckAssetOwnership(ctx, &assetpb.CheckAssetOwnershipRequest{ActorAssertion: assertion, AssetIds: ids})
-	if err != nil { return err }
-	if len(response.GetAssets()) != len(ids) { return status.Error(codes.FailedPrecondition, "asset_not_ready") }
+	if err != nil {
+		return err
+	}
+	if len(response.GetAssets()) != len(ids) {
+		return status.Error(codes.FailedPrecondition, "asset_not_ready")
+	}
 	for _, asset := range response.GetAssets() {
 		if asset.GetOwnerId() != author || asset.GetState() != assetpb.AssetState_ASSET_STATE_READY {
 			return status.Error(codes.FailedPrecondition, "asset_not_ready")

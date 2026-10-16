@@ -1,6 +1,39 @@
 # Go 后端
 
-当前已发布 `gateway`、`IdentityService`、`ContentService` 四个本人草稿接口；Asset 的私有上传服务已在本分支实现但尚未发布。`ChallengeService`、challenge-worker 与 P/R/E Completion 适配器已本地实现，真实 PostgreSQL 与依赖 fake 联调已有记录，真实 E 沙箱及完整依赖闭环仍待验收，未发布。Asset 当前仅提供本地 `ASSET_STORAGE_DIR` filesystem adapter，生产对象存储和部署仍待完成。见 [Identity](../docs/backend-identity.md)、[Content](../docs/backend-content.md)、[Asset](../docs/backend-asset.md)、[Challenge](../docs/backend-challenge.md#implementation)和[部署文档](../docs/deployment.md#identity-lab)。
+当前已发布 `gateway`、`IdentityService`、`ContentService` 四个本人草稿接口；Asset 的私有上传服务已在本分支实现并已接入本分支 kind lab，2026-10-16 本地隔离模块 rollout、重复部署及 Asset 跨 Pod 文件业务验收通过，但尚未合入或公网发布。Asset 使用 S3-compatible 共享存储，`FileStorage` 仅限显式单进程测试；本地 SeaweedFS 和 kind 验收不等于生产 HA 或公网验收。`ChallengeService`、challenge-worker 与 P/R/E Completion 适配器已本地实现，真实 PostgreSQL 与依赖 fake 联调已有记录，真实 E 沙箱及完整依赖闭环仍待验收，未发布。见 [Identity](../docs/backend-identity.md)、[Content](../docs/backend-content.md)、[Asset](../docs/backend-asset.md)、[Challenge](../docs/backend-challenge.md#implementation)和[部署文档](../docs/deployment.md#identity-lab)。
+
+## Asset 3C：过审作品文件读取（本地分支，未发布）
+
+2026-10-16 已完成真实 PostgreSQL/HTTP 集成及隔离 kind 双 Asset Pod 验收，最终模块部署检查退出 0；完整审核产品与公网发布仍未完成。
+
+`GET /api/tasks/{taskId}/entries/{entryId}/assets/{assetId}/content` 对匿名提供经本次 Content 审核状态检查的文件流。Asset `CONTENT_TARGET` 指向 Content，校验 mTLS 身份，关闭重试；未配置时公开请求 503，不影响本人私有上传/管理。Content 的 `CheckAssetAccess` 仅接受 asset 服务；`ApplyAssetReview` 仅接受 moderation 服务并以 decision ID、确切来源版本和 expected revision 幂等应用决定，没有 HTTP 直批入口。
+
+先执行 Content owner 的新迁移 `003_reviewed_assets.sql` 和 `ops/content/grants.sql` 再滚动应用；runtime 不能改审核快照、作者或回执。首次批准需已保存的完整人类+agent 草稿包，返回冻结快照的稳定 entry ID。公开读取不接受 query 或 owner 身份绕过，撤销/下架后新请求 404，Content/存储故障不使用缓存授权；私有工作副本编辑不会自动改变审核快照。实际产品 Moderation 工作流和公开任务/作品详情仍未实现。
+
+验证：
+
+```sh
+# backend；独立 PostgreSQL，fixture 自动创建随机数据库/受限角色
+IDENTITY_TEST_DATABASE_URL_FILE=/path/to/private/test-dsn \
+  go test -race -tags=integration ./internal/identity -run '^TestReviewedAssetHTTPAccess$' -count=1 -timeout=120s
+# 根目录；真实进程/共享 S3/临时 namespace，包含 3A/3B 相邻回归
+DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py
+```
+
+PostgreSQL/FileStorage 测试不是共享存储验收；kind 另运行 `TestKindPublicAssetDeployment`，覆盖两个真实 Asset Pod 的公开文件、撤销/下架/旧决定重放和 Content 停机/恢复。其 Moderation 证书只是测试调用方，非已部署服务。完整契约、边界和实际结果见 [Asset 3C](../docs/backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。没有公网发布或生产 HA 声明。
+
+## Asset 审查修复（2026-10-16，本地未部署）
+
+Challenge 同一 run/attempt/upload 的整条流现在由 PostgreSQL session advisory lock 跨实例互斥；并发重试返回 `Aborted upload_in_progress`，原流结束后可重试找回同一 ready Asset。新上传及 final-before-commit 恢复均从对象存储实际读取并验证大小、SHA-256 与媒体类型，不信任声明值。进行中的 Challenge 流占用一个池连接，取消/异常时释放锁或丢弃连接，不保持长事务。这些属于 Agent Self-Claimed 实现选择，不改变公开权限或 Proto。
+
+`gateway.TestOpenAPIContract` 严格解析源 OpenAPI（包含重复键、本地引用和关键路由检查），随普通 Go 测试执行。新增真实 PostgreSQL/mTLS/共享 S3 回归可用上述私有测试配置运行：
+
+```sh
+go test -race -tags=integration ./internal/asset \
+  -run '^TestChallenge(UploadPostgresRegression|ConcurrentS3Retry)$' -count=5 -timeout=120s
+```
+
+本轮针对性 60 个测试/子测试和最终全量集成 231 个测试/子测试均 PASS、无跳过；不是 kind 重部署或公网验收，完整证据见 [Asset 审查修复](../docs/backend-asset.md#14-2026-10-16-审查缺陷修复agent-self-claimed)。
 
 ## Identity 内部分层
 
@@ -34,10 +67,31 @@ node --check internal/gateway/web/account.js
 ```sh
 IDENTITY_TEST_DATABASE_URL_FILE=/path/to/private/test-database-url \
 CHALLENGE_TEST_DATABASE_URL_FILE=/path/to/private/test-database-url \
+ASSET_TEST_DATABASE_URL_FILE=/path/to/private/test-database-url \
   go test -race -tags=integration ./... -count=1 -timeout=120s
 ```
 
 GitHub `CI` 自动启动一次性 PostgreSQL，并执行格式、Proto 生成一致性、vet、上述并发集成测试和所有入口构建。根目录 `npm run ci` 仍负责文档、Node 基座及现有部署控制器；完整本地验收需要两组检查。
+
+Asset 3A 的 `internal/asset/integration_test.go` 使用真实 PostgreSQL migration、随机 owner/runtime 角色、临时 FileStorage 和正式 mTLS gRPC client/server；它会重建 Server 并从同一数据库和目录读取完成资产。3B 的 `internal/asset/s3_integration_test.go` 以隔离 SeaweedFS 4.13/random bucket 验证两个 S3 adapter/Asset Server 实例共享读写、恢复与清理；`internal/identity/asset_s3_integration_test.go` 进一步验证进程内真实 HTTP → Identity → mTLS Asset/Content → PostgreSQL → S3。`internal/identity/asset_integration_test.go` 另用真实 Identity/PostgreSQL 验证 Asset audience、full method、MCP 与撤销。Challenge 边界测试验证完成/取消 Attempt 不能继续上传。上述 Go 集成测试在测试进程内运行。另于 2026-10-16 实跑扩展后的 `ops/lab/validate_modules.py`，最终退出 0：四模块真实 kind rollout、Asset 跨 Pod 文件上传/下载和 Content 绑定、重启/存储故障恢复、网络允许/拒绝及重复部署通过，临时 namespace 已清理；生产 HA S3 和公网部署仍未验收。命令与证据边界见 [Asset 验证状态](../docs/backend-asset.md#10-3b-存储与-kind-lab-状态)。
+
+### Asset 的本地 kind 业务验收
+
+已有 `kind-lab` 基础设施、Docker 权限及所需工具时，从仓库根目录运行：
+
+```sh
+DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" \
+  python3 -u ops/lab/validate_modules.py
+echo "validation-exit=$?"
+```
+
+`DOCKER_CONFIG` 指向不依赖失效 Desktop credential helper 的私有本地配置目录；不覆盖原 Docker 配置，不在此目录或日志中提交凭据。该脚本创建随机 `human-worth-verify-*` namespace，复制代码快照，再以正式服务镜像、证书、受限数据库角色、NetworkPolicy 和真实 SeaweedFS/PVC 部署；不切换公网入口、不修改默认业务 namespace，结束时清理临时资源。
+
+新增 `internal/identity/asset_lab_test.go` 与既有 Content lab 测试复用 `kind_lab_test.go` 的合成账号、会话、CA 和 HTTP 夹具。脚本对快照执行 `go test -race -tags=lab ./internal/identity -run '^TestKind(Content|Asset|PublicAsset)Deployment$' -count=1 -timeout=480s -v`；不带有效临时 namespace 的直接执行会 `SKIP/INCONCLUSIVE`，不算通过。
+
+Agent Self-Claimed 验证方案：从正式 Gateway 模板创建临时 probe Pod，仅将其 `ASSET_TARGET` 固定到两个不同 worker 上的 Asset Pod IP；保留 mTLS/安全配置，并以未满足的 readiness gate 排除出普通 Gateway Service。由此定向验证 HTTP 上传/续传/完成/下载确实跨 Pod，而非依靠随机均衡碰运气。测试还检查 A/B 隔离、幂等、Content 绑定及 revision、实际 S3 对象与数据库摘要、过期/取消清理、Asset Pod 重建、copy+delete 后数据库未提交的故障恢复，以及暂停/恢复 S3 后 `/readyz` 和写入/下载 fail-closed。
+
+探针和对象存储观察仅在测试 namespace 内工作；其额外 Gateway Pod、loopback port-forward 和测试凭据随测试清理。单实例 SeaweedFS/PVC 故障恢复不是生产 HA 演练；FileStorage 仍仅供显式单进程测试。
 
 ## 程序入口与配置
 
@@ -47,7 +101,7 @@ GitHub `CI` 自动启动一次性 PostgreSQL，并执行格式、Proto 生成一
 | `cmd/gateway` | HTTPS/HTTP `:8080`；内部探针/指标 `:8081` | `PUBLIC_ORIGIN`、`IDENTITY_TARGET`、三个 `SERVICE_*_FILE`；实验 HTTPS 再提供 `HTTP_TLS_CERT_FILE`、`HTTP_TLS_KEY_FILE` |
 | `cmd/content` | Content mTLS gRPC `:8443`；内部探针/指标 `:8081` | `CONTENT_DATABASE_URL_FILE`（运行账号）、`IDENTITY_TARGET`、可选 `ASSET_TARGET`、三个 `SERVICE_*_FILE`；证书身份为 `content` |
 | `cmd/content migrate` | 独立 Content 迁移，不访问 Identity 表 | `CONTENT_DATABASE_URL_FILE`（schema owner） |
-| `cmd/asset` | Asset mTLS gRPC `:8443`；内部探针/指标 `:8081` | `ASSET_DATABASE_URL_FILE`（运行账号）、`IDENTITY_TARGET`、三个 `SERVICE_*_FILE`、本地测试用 `ASSET_STORAGE_DIR` |
+| `cmd/asset` | Asset mTLS gRPC `:8443`；内部探针/指标 `:8081` | `ASSET_DATABASE_URL_FILE`（运行账号）、`IDENTITY_TARGET`、公开文件读取再配 `CONTENT_TARGET`、三个 `SERVICE_*_FILE`、`ASSET_STORAGE_BACKEND=s3`、`ASSET_S3_ENDPOINT`、`ASSET_S3_BUCKET`、`ASSET_S3_REGION`、`ASSET_S3_ACCESS_KEY_FILE`、`ASSET_S3_SECRET_KEY_FILE`、`ASSET_S3_FORCE_PATH_STYLE`；filesystem 仅显式测试开关 |
 | `cmd/asset migrate` | 独立 Asset 迁移，不访问 Identity/Content 表 | `ASSET_DATABASE_URL_FILE`（schema owner） |
 | `cmd/identity migrate` | 单独执行有锁、带摘要检查的迁移 | 仅 `IDENTITY_DATABASE_URL_FILE`，使用 schema owner；运行服务不负责 DDL |
 | `cmd/identity-admin` | 角色/状态变更、身份版本递增和审计 | 运维专用数据库文件、`OPERATOR_IDENTITY`；见 lab 的 `account.py` |
@@ -70,7 +124,7 @@ docker build --provenance=false --sbom=false -f backend/Dockerfile \
   -t human-worth/identity:development .
 ```
 
-`SERVICE` 可取 `identity`、`gateway`、`content`、`identity-admin`、`challenge`、`challenge-worker`。此镜像内的 worker 支持 P/R；启用 E 的可信 worker 还需要固定版本的 `kubectl`。运行镜像为非 root、只读文件系统友好的静态 Go 程序，没有 shell 和编译工具；现有自动部署清单只启用 Identity、Content 和 gateway；Challenge 待真实依赖与执行隔离验收后纳入。
+`SERVICE` 可取 `identity`、`gateway`、`content`、`asset`、`identity-admin`、`challenge`、`challenge-worker`。此镜像内的 worker 支持 P/R；启用 E 的可信 worker 还需要固定版本的 `kubectl`。运行镜像为非 root、只读文件系统友好的静态 Go 程序，没有 shell 和编译工具；当前工作分支的 lab catalog 启用 Identity、Asset、Content 和 gateway，已发布环境仍只有 Identity、Content 和 gateway；Challenge 待真实依赖与执行隔离验收后纳入。
 
 ## Challenge 启动与验证
 

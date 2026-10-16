@@ -1,0 +1,69 @@
+# Agent Self-Claimed: private shared S3 lab infrastructure, NOT production HA.
+# One SeaweedFS server with a PVC, shared by both Asset replicas. Never exposed
+# through NodePort/Ingress. Provision explicitly with object_store.py first.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: asset-store, namespace: human-worth}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata: {name: asset-store, namespace: human-worth}
+spec:
+  selector: {app: asset-store}
+  ports: [{name: s3, port: 8333, targetPort: s3}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: asset-store, namespace: human-worth}
+spec:
+  serviceName: asset-store
+  replicas: 1
+  selector: {matchLabels: {app: asset-store}}
+  template:
+    metadata: {labels: {app: asset-store}}
+    spec:
+      serviceAccountName: asset-store
+      automountServiceAccountToken: false
+      nodeSelector: {human-worth.io/worker: "true"}
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: s3
+          image: chrislusf/seaweedfs:4.13@sha256:803e0f9f4a190319e39c2b226e15e75bf0ff78d00fe3e2806c38850ca81eb8a7
+          command: [weed]
+          args: [server, "-dir=/data", "-ip=127.0.0.1", "-ip.bind=0.0.0.0", "-master.volumeSizeLimitMB=128", "-volume.max=8", "-filer", "-s3", "-s3.port=8333", "-s3.config=/config/s3.json"]
+          workingDir: /data
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 600m, memory: 384Mi}
+          env: [{name: HOME, value: /tmp}]
+          ports: [{name: s3, containerPort: 8333}]
+          startupProbe: {tcpSocket: {port: s3}, periodSeconds: 2, failureThreshold: 60}
+          livenessProbe: {tcpSocket: {port: s3}, periodSeconds: 10}
+          readinessProbe: {tcpSocket: {port: s3}, periodSeconds: 3}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, secret: {secretName: asset-store, defaultMode: 0440}}
+        - {name: tmp, emptyDir: {sizeLimit: 32Mi}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: standard
+        resources: {requests: {storage: 2Gi}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: asset-store, namespace: human-worth}
+spec:
+  podSelector: {matchLabels: {app: asset-store}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: asset}}}]
+      ports: [{protocol: TCP, port: 8333}]
+  egress: []

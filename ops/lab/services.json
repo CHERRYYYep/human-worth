@@ -3,20 +3,60 @@
     "dependencies": [],
     "database": true,
     "grants": "ops/lab/identity-grants.sql",
-    "checks": [{"path": "/api/me", "status": 401, "code": "unauthenticated"}]
+    "checks": [
+      {
+        "path": "/api/me",
+        "status": 401,
+        "code": "unauthenticated"
+      }
+    ]
   },
   "content": {
-    "dependencies": ["identity"],
+    "dependencies": [
+      "identity",
+      "asset"
+    ],
     "database": true,
     "grants": "ops/content/grants.sql",
     "checks": [
-      {"path": "/api/me/tasks/tsk_00000000000000000000000000000000", "status": 401, "code": "unauthenticated"},
-      {"path": "/api/me/submissions", "status": 401, "code": "unauthenticated"}
+      {
+        "path": "/api/me/tasks/tsk_00000000000000000000000000000000",
+        "status": 401,
+        "code": "unauthenticated"
+      },
+      {
+        "path": "/api/me/submissions",
+        "status": 401,
+        "code": "unauthenticated"
+      }
     ]
   },
   "gateway": {
-    "dependencies": ["identity", "content"],
+    "dependencies": [
+      "identity",
+      "content",
+      "asset"
+    ],
     "database": false,
     "checks": []
+  },
+  "asset": {
+    "dependencies": [
+      "identity"
+    ],
+    "database": true,
+    "grants": "ops/asset-grants.sql",
+    "checks": [
+      {
+        "path": "/api/me/assets",
+        "status": 401,
+        "code": "unauthenticated"
+      },
+      {
+        "path": "/api/tasks/tsk_00000000000000000000000000000000/entries/ent_00000000000000000000000000000000/assets/ast_00000000000000000000000000000000/content",
+        "status": 404,
+        "code": "asset_not_found"
+      }
+    ]
   }
 }

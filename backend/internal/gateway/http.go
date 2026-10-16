@@ -128,6 +128,7 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 		{"GET", "/api/me/assets", "listMyAssets", h.listMyAssets},
 		{"GET", "/api/me/assets/{assetId}", "getAssetMetadata", h.getAssetMetadata},
 		{"GET", "/api/me/assets/{assetId}/content", "downloadAsset", h.downloadAsset},
+		{"GET", "/api/tasks/{taskId}/entries/{entryId}/assets/{assetId}/content", "downloadPublicAsset", h.downloadPublicAsset},
 		{"GET", "/api/me/tasks/{taskId}", "getMyTaskSubmission", h.getDraft},
 		{"PUT", "/api/me/tasks/{taskId}", "replaceTaskDraft", h.replaceDraft},
 		{"GET", "/api/auth/google", "startGoogleLogin", h.start}, {"GET", "/api/auth/google/callback", "completeGoogleLogin", h.callback},
@@ -232,7 +233,7 @@ func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc
 		if name == "uploadAsset" {
 			timeout = 15 * time.Minute
 		}
-		if name == "downloadAsset" {
+		if name == "downloadAsset" || name == "downloadPublicAsset" {
 			timeout = 15 * time.Minute
 		}
 		if name == "completeAsset" {

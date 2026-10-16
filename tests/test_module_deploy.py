@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -11,7 +12,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT/'ops'), str(ROOT/'ops/lab')]
 import app
+import check_network
 import deployment_health
+import object_store
 import services
 import verify_deployment
 
@@ -126,6 +129,8 @@ class ModuleDeployTest(unittest.TestCase):
         def response(path, options=()):
             if path == '/api/health':
                 return ready
+            if path.startswith('/api/tasks/'):
+                return 404, {'code':'asset_not_found'}
             return 401, {'code':'unauthenticated'}
 
         for failure in [(503,{'code':'content_unavailable'}), (404,{'code':'not_found'}), (401,{'code':'wrong_error'})]:
@@ -133,6 +138,132 @@ class ModuleDeployTest(unittest.TestCase):
                 self.assertFalse(deployment_health.healthy(sha, checks))
         with patch.object(deployment_health,'response',side_effect=response):
             self.assertTrue(deployment_health.healthy(sha, checks))
+
+    def test_public_file_probe_rejects_outage_and_wrong_denial(self):
+        checks = services.load_services(ROOT)['asset']['checks']
+        public = next(c for c in checks if c['path'].startswith('/api/tasks/'))
+        self.assertEqual((public['status'], public['code']), (404, 'asset_not_found'))
+        sha = 'a'*40
+        def response(path, options=()):
+            if path == '/api/health': return 200, {'status':'ok','service':'human-worth','revision':sha}
+            return 401, {'code':'unauthenticated'}
+        for reply, expected in [((404, {'code':'asset_not_found'}), True),
+                                ((503, {'code':'asset_unavailable'}), False),
+                                ((200, {}), False), ((404, {'code':'not_found'}), False)]:
+            with patch.object(deployment_health, 'response', side_effect=lambda path, options=(): reply if path == public['path'] else response(path, options)):
+                self.assertEqual(deployment_health.healthy(sha, checks), expected)
+
+    def test_asset_catalog_and_private_s3_wiring(self):
+        actual=services.load_services(ROOT)
+        self.assertEqual(actual['asset']['dependencies'], ['identity'])
+        self.assertIn('asset',actual['content']['dependencies'])
+        self.assertIn('asset',actual['gateway']['dependencies'])
+        self.assertNotIn('challenge',actual)
+        self.assertIn({'path':'/api/me/assets','status':401,'code':'unauthenticated'},actual['asset']['checks'])
+        manifest=(ROOT/'ops/lab/asset.yaml').read_text()
+        for value in ['replicas: 2', 'ASSET_STORAGE_BACKEND, value: s3', 'secretName: asset-runtime',
+                      'secretName: asset-tls', 'secretName: database-ca', 'readOnlyRootFilesystem: true',
+                      'runAsNonRoot: true', 'automountServiceAccountToken: false', 'port: 8333']:
+            self.assertIn(value,manifest)
+        self.assertNotIn('ASSET_STORAGE_DIR',manifest)
+        for name in ['gateway','content']:
+            self.assertIn('ASSET_TARGET, value: "dns:///asset.human-worth.svc.cluster.local:8443"',(ROOT/('ops/lab/'+name+'.yaml')).read_text())
+        self.assertIn('app: asset',(ROOT/'ops/lab/identity.yaml').read_text())
+        self.assertIn('CONTENT_TARGET, value: "dns:///content.human-worth.svc.cluster.local:8443"',manifest)
+        # Public authorization is a per-request dependency, not startup readiness:
+        # asset -> content -> asset would otherwise deadlock deployment.
+        self.assertIn('app: content',manifest)
+        self.assertIn('app: asset',(ROOT/'ops/lab/content.yaml').read_text())
+        grants=(ROOT/'ops/asset-grants.sql').read_text()
+        self.assertIn('storage_cleaned_at',grants)
+        for value in ['GRANT DELETE','GRANT CREATE','GRANT ALL','identity.','content.','UPDATE(owner_id']:
+            self.assertNotIn(value,grants)
+
+    def test_validator_requires_asset_and_content_business_tests_on_snapshot(self):
+        script = (ROOT/'ops/lab/validate_modules.py').read_text()
+        selection = re.search(r"'-run','([^']+)'", script)
+        self.assertIsNotNone(selection)
+        for name in ['TestKindAssetDeployment', 'TestKindContentDeployment', 'TestKindPublicAssetDeployment']:
+            self.assertRegex(name, selection.group(1))
+        self.assertNotRegex('TestUnrelated', selection.group(1))
+        self.assertIn("cwd=source/'backend'", script)
+        self.assertNotIn("cwd=app.REPO/'backend'", script)
+
+    def test_network_probe_permissions_are_independent_of_private_host_umask(self):
+        callers = []
+
+        def run(*args):
+            if args[:3] == ('env', 'CGO_ENABLED=0', 'go'):
+                binary = Path(args[args.index('-o')+1])
+                binary.write_bytes(b'test-only executable placeholder')
+                binary.chmod(0o700)
+            if args[:2] == ('docker', 'build'):
+                directory = Path(args[-1])
+                self.assertEqual((directory/'probe').stat().st_mode & 0o777, 0o755)
+                self.assertEqual((directory/'ca-certificates.crt').stat().st_mode & 0o777, 0o644)
+
+        def apply(raw):
+            pod = json.loads(raw)
+            callers.append(pod['metadata']['labels']['app'])
+            self.assertTrue(pod['spec']['securityContext']['runAsNonRoot'])
+            self.assertFalse(pod['spec']['automountServiceAccountToken'])
+
+        with patch.object(check_network, 'run', side_effect=run), patch.object(check_network, 'apply', side_effect=apply), patch.object(check_network, 'kube', return_value=subprocess.CompletedProcess([], 0, stdout='Succeeded')):
+            check_network.main()
+        self.assertEqual(callers, ['identity', 'content', 'asset', 'gateway', 'untrusted'])
+
+    def test_asset_store_bucket_owner_is_confirmed(self):
+        config={'endpoint':'http://asset-store.human-worth.svc.cluster.local:8333',
+                'bucket':'test-assets','region':'us-east-1','access_key':'test-access',
+                'secret_key':'test-secret','force_path_style':True}
+        calls=[]
+        # SeaweedFS 4.13 prints prompts even for non-TTY, piped input. This
+        # transcript reproduces the real kind Pod's bucket list output.
+        transcript=('master: localhost:9333 filer: 127.0.0.1:8888\n'
+                    '> create bucket under /buckets\ncreated bucket test-assets\n'
+                    'bucket owner: asset-runtime\n'
+                    '>   test-assets\tsize:0\tchunk:0\towner:"asset-runtime"\n> ')
+        for output in [transcript, '  test-assets\tsize:0\tchunk:0\towner:"asset-runtime"\n']:
+            def kube(*args, **kwargs):
+                calls.append((args, kwargs))
+                return subprocess.CompletedProcess(args, 0, stdout=output if 'exec' in args else '')
+            with self.subTest(output=output), patch.object(object_store.app,'secret'), patch.object(object_store,'apply'), patch.object(object_store,'kube',side_effect=kube):
+                object_store.install(config)
+        command=next(kwargs['input'] for args, kwargs in calls if 'exec' in args)
+        self.assertIn('s3.bucket.create -name test-assets -owner asset-runtime',command)
+        self.assertIn('s3.bucket.list',command)
+        for output in ['bucket command failed\n', 'created bucket test-assets\n',
+                       transcript.replace('test-assets\t','other-assets\t'),
+                       transcript.replace('owner:"asset-runtime"','owner:"other-owner"'),
+                       transcript.replace('\towner:"asset-runtime"','')]:
+            with self.subTest(output=output), patch.object(object_store.app,'secret'), patch.object(object_store,'apply'), patch.object(object_store,'kube',return_value=subprocess.CompletedProcess([],0,stdout=output)):
+                with self.assertRaisesRegex(RuntimeError,'did not confirm'):
+                    object_store.install(config)
+
+    def test_asset_secrets_fail_closed_and_never_cross_modules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state=Path(directory)
+            with patch.dict(app.os.environ,{'ASSET_S3_CONFIG_FILE':''}):
+                # An explicit empty override is also invalid; no generated fallback.
+                with self.assertRaises(RuntimeError):app.object_storage_config(state)
+            config={'endpoint':'http://asset-store.human-worth.svc.cluster.local:8333',
+                    'bucket':'test-assets','region':'us-east-1','access_key':'test-access',
+                    'secret_key':'test-secret','force_path_style':True}
+            path=state/'asset-s3.json';path.write_text(json.dumps(config));path.chmod(0o600)
+            with patch.dict(app.os.environ,{'ASSET_S3_CONFIG_FILE':str(path)}):
+                self.assertEqual(app.object_storage_config(state),config)
+                path.chmod(0o644)
+                with self.assertRaises(RuntimeError):app.object_storage_config(state)
+                path.chmod(0o600)
+                changed={**config,'endpoint':'https://public.example'};path.write_text(json.dumps(changed))
+                with self.assertRaises(RuntimeError):app.object_storage_config(state)
+            captured={}
+            with patch.object(app,'STATE',state),patch.object(app,'secret',side_effect=lambda name,values,*args:captured.update({name:values})):
+                app.database_secrets({'asset':{'database':True},'content':{'database':True}},config)
+            self.assertEqual(captured['asset-runtime']['s3-access-key'],'test-access')
+            self.assertEqual(captured['asset-runtime']['s3-force-path-style'],'true')
+            self.assertEqual(captured['content-runtime'].keys(),{'database-url'})
+            self.assertEqual(captured['asset-owner'].keys(),{'database-url'})
 
     def test_superseded_or_failed_ci_never_reports_deployment_success(self):
         sha='a'*40

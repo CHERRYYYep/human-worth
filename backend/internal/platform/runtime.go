@@ -94,7 +94,8 @@ func methodTimeout(method string) time.Duration {
 	switch method {
 	case "/humanworth.content.v1.ContentService/ListMySubmissions":
 		timeout = 5 * time.Second
-	case "/humanworth.asset.v1.AssetService/UploadAsset", "/humanworth.asset.v1.AssetService/DownloadAsset":
+	case "/humanworth.asset.v1.AssetService/UploadAsset", "/humanworth.asset.v1.AssetService/DownloadAsset",
+		"/humanworth.asset.v1.AssetService/DownloadPublicAsset":
 		timeout = 15 * time.Minute
 	case "/humanworth.asset.v1.AssetService/CompleteUpload":
 		timeout = 30 * time.Second

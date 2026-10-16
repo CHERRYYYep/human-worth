@@ -86,6 +86,21 @@ def validate_manifest(objects, name, image):
             if 'configMap' in volume and (name != 'gateway' or volume['configMap'].get('name') != 'release-status'):
                 raise ValueError('Unapproved module ConfigMap')
         container = containers[0]
+        if name == 'asset':
+            env = {item['name']:item for item in container.get('env', [])}
+            if env.get('ASSET_STORAGE_BACKEND', {}).get('value') != 's3' or any(key in env for key in ['ASSET_STORAGE_DIR', 'ASSET_ALLOW_LOCAL_STORAGE']):
+                raise ValueError('Two Asset replicas require shared S3, never FileStorage')
+            for key in ['endpoint','bucket','region','force-path-style']:
+                expected = {'name':'asset-runtime','key':'s3-'+key}
+                variable = 'ASSET_S3_'+key.replace('-','_').upper()
+                if env.get(variable,{}).get('valueFrom',{}).get('secretKeyRef') != expected:
+                    raise ValueError('Asset S3 configuration must use its runtime Secret')
+            for key in ['access-key','secret-key']:
+                variable = 'ASSET_S3_'+key.replace('-','_').upper()+'_FILE'
+                if env.get(variable,{}).get('value') != '/asset-secrets/s3-'+key:
+                    raise ValueError('Asset S3 credentials must use Secret files')
+            if pod.get('securityContext',{}).get('runAsNonRoot') is not True or not container.get('securityContext',{}).get('readOnlyRootFilesystem'):
+                raise ValueError('Asset must be non-root with a read-only root filesystem')
         if spec.get('replicas') != 2 or not all(container.get(probe) for probe in ['startupProbe', 'livenessProbe', 'readinessProbe']):
             raise ValueError('Module requires two replicas and health probes')
         if container.get('envFrom'):

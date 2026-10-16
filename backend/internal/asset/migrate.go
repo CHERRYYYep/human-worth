@@ -23,8 +23,14 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7185429003)`); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS asset`); err != nil {
+	var schemaExists bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='asset')`).Scan(&schemaExists); err != nil {
 		return err
+	}
+	if !schemaExists {
+		if _, err = tx.Exec(ctx, `CREATE SCHEMA asset`); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS asset.schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT clock_timestamp())`); err != nil {
 		return err
@@ -63,7 +69,7 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 
 func Ready(ctx context.Context, db *pgxpool.Pool) error {
 	var exists bool
-	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset.schema_migrations WHERE version='001_asset.sql')`).Scan(&exists); err != nil {
+	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset.schema_migrations WHERE version='002_storage_cleanup.sql')`).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -72,8 +78,9 @@ func Ready(ctx context.Context, db *pgxpool.Pool) error {
 	return nil
 }
 
-// CleanupExpired is safe to repeat. Database state changes first; object
-// deletion is idempotent and a later pass retries leftovers after restart.
+// CleanupExpired locks the same rows as upload/completion. Deletes are
+// idempotent; a failed deletion or commit leaves a durable retry candidate.
+// Never deletes a ready asset or uses a bucket-wide lifecycle rule for final.
 func CleanupExpired(ctx context.Context, db *pgxpool.Pool, storage Storage) error {
 	if storage == nil {
 		return errors.New("storage unavailable")
@@ -81,30 +88,50 @@ func CleanupExpired(ctx context.Context, db *pgxpool.Pool, storage Storage) erro
 	if _, err := db.Exec(ctx, `UPDATE asset.upload_sessions SET state='expired',updated_at=clock_timestamp() WHERE state='active' AND expires_at<=clock_timestamp()`); err != nil {
 		return err
 	}
-	rows, err := db.Query(ctx, `SELECT a.id,a.staging_key FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id WHERE s.state='expired' AND a.state IN ('staging','failed')`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	type expired struct{ id, key string }
-	var items []expired
-	for rows.Next() {
-		var item expired
-		if err = rows.Scan(&item.id, &item.key); err != nil {
+	for i := 0; i < 100; i++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		done, err := cleanupOne(ctx, db, storage)
+		if err != nil {
 			return err
 		}
-		items = append(items, item)
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for _, item := range items {
-		if _, err = db.Exec(ctx, `UPDATE asset.assets SET state='failed',updated_at=clock_timestamp() WHERE id=$1 AND state='staging'`, item.id); err != nil {
-			return err
-		}
-		if err = storage.Delete(ctx, item.key); err != nil {
-			return err
+		if !done {
+			return nil
 		}
 	}
 	return nil
+}
+func cleanupOne(ctx context.Context, db *pgxpool.Pool, storage Storage) (bool, error) {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	var session, assetID, staging, final string
+	err = tx.QueryRow(ctx, `SELECT s.id,a.id,a.staging_key,a.final_key
+        FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id
+        WHERE s.state IN ('expired','aborted') AND s.storage_cleaned_at IS NULL
+          AND a.state IN ('staging','failed')
+        ORDER BY s.expires_at,s.id LIMIT 1 FOR UPDATE OF s,a SKIP LOCKED`).Scan(&session, &assetID, &staging, &final)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// A non-ready final can exist after copy succeeded but the DB commit failed.
+	if err = storage.Delete(ctx, staging); err != nil {
+		return false, err
+	}
+	if err = storage.Delete(ctx, final); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',updated_at=clock_timestamp() WHERE id=$1`, assetID); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE asset.upload_sessions SET storage_cleaned_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, session); err != nil {
+		return false, err
+	}
+	return true, tx.Commit(ctx)
 }

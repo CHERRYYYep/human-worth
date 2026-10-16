@@ -17,6 +17,10 @@ func Authorization(ctx context.Context, req any, info *grpc.UnaryServerInfo, nex
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "service_identity_required")
 	}
+	// Asset readiness checks only service health, never raw user credentials.
+	if info.FullMethod == "/grpc.health.v1.Health/Check" && caller == "asset" {
+		return next(ctx, req)
+	}
 	if info.FullMethod == pb.IdentityService_VerifyActor_FullMethodName {
 		switch caller {
 		case "content", "asset", "voting", "moderation", "challenge", "discovery":

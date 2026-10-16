@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create/reconcile only the isolated kind-lab infrastructure; no public cutover."""
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -54,7 +55,16 @@ def host_proxy(nodes):
     if parsed.hostname not in ['localhost','127.0.0.1','::1']: return None
     if parsed.username or parsed.password: raise RuntimeError('Authenticated loopback proxy needs a private node configuration')
     network = json.loads(run('docker','network','inspect','kind',capture=True).stdout)[0]
-    gateway = next(v['Gateway'] for v in network['IPAM']['Config'] if ':' not in v['Gateway'])
+    # Dual-stack Docker networks may omit Gateway on an IPv6 IPAM entry.
+    gateway = None
+    for entry in network['IPAM']['Config']:
+        try:
+            gateway = str(ipaddress.IPv4Address(entry.get('Gateway')))
+            break
+        except ipaddress.AddressValueError:
+            continue
+    if gateway is None:
+        raise RuntimeError('kind network has no usable IPv4 gateway for the host proxy')
     translated = urlunsplit((parsed.scheme,gateway+(':'+str(parsed.port) if parsed.port else ''),'','',''))
     dropin = '[Service]\n'+''.join('Environment="'+key+'='+translated+'"\n' for key in ['HTTP_PROXY','HTTPS_PROXY','http_proxy','https_proxy'])
     for name in nodes:

@@ -182,6 +182,37 @@ func TestChallengeMaterialAndUploadBoundaries(t *testing.T) {
 	q.ResultDigest = protobuf.ResultDigest(q)
 	_, err = l.workers[0].CompleteWork(t.Context(), q)
 	code(t, err, codes.PermissionDenied)
+
+	valid := proto.Clone(stored.Asset).(*asset.Asset)
+	q = &pb.CompleteWorkRequest{Attempt: e.Attempt, Result: &pb.CompleteWorkRequest_Generated{Generated: &pb.GeneratedWork{Work: &content.Work{Id: "work_" + e.Attempt.AttemptId, Artifacts: []*content.Artifact{{Value: &content.Artifact_File{File: valid}}}}, Report: "执行完成"}}}
+	q.ResultDigest = protobuf.ResultDigest(q)
+	_, err = l.workers[0].CompleteWork(t.Context(), q)
+	must(t, err)
+	_, err = upload(e, "work.txt", digest([]byte("作品")))
+	code(t, err, codes.FailedPrecondition)
+}
+
+func TestChallengeCancelledAttemptCannotUpload(t *testing.T) {
+	l := newLab(t)
+	run := l.start(config())
+	must(t, l.services[0].Reconcile(t.Context()))
+	a := l.claim(0)
+	l.activate(a)
+	a = l.submitCriteria(a)
+	l.activate(a)
+	l.complete(a, &pb.CompleteWorkRequest{Result: &pb.CompleteWorkRequest_Rankings{Rankings: rankings(a.GetRank(), false)}})
+	p := l.claim(0)
+	l.activate(p)
+	l.complete(p, &pb.CompleteWorkRequest{Result: &pb.CompleteWorkRequest_Prompt{Prompt: &pb.PromptResult{Prompt: "按照任务执行"}}})
+	e := l.claim(0)
+	l.activate(e)
+	_, err := l.admins[0].CancelRun(t.Context(), &pb.CancelRunRequest{ActorAssertion: "admin", RunId: run.Id, Reason: "验证取消后上传被拒绝"})
+	must(t, err)
+	stream, err := l.workers[0].UploadArtifact(t.Context())
+	must(t, err)
+	must(t, stream.Send(&pb.UploadArtifactRequest{Attempt: e.Attempt, UploadId: "upload_after_cancel", Filename: "work.txt", MediaType: "text/plain", Bytes: 6, Sha256: digest([]byte("作品")), Chunk: []byte("作品")}))
+	_, err = stream.CloseAndRecv()
+	code(t, err, codes.FailedPrecondition)
 }
 
 func TestChallengeHTTPAuthorization(t *testing.T) {

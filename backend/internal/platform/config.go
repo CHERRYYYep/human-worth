@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
@@ -41,7 +42,7 @@ func Secret(name string) (string, error) {
 	}
 	return value, nil
 }
-func Database(ctx context.Context, url string) (*pgxpool.Pool, error) {
+func Database(ctx context.Context, url string, idleTransactionTimeout ...time.Duration) (*pgxpool.Pool, error) {
 	config, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, errors.New("invalid database configuration")
@@ -53,7 +54,12 @@ func Database(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	config.ConnConfig.ConnectTimeout = 5 * time.Second
 	config.ConnConfig.RuntimeParams["statement_timeout"] = "5000"
 	config.ConnConfig.RuntimeParams["lock_timeout"] = "2000"
-	config.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "10000"
+	idle := 10 * time.Second
+	// Only callers doing bounded object I/O inside a row lock opt in.
+	if len(idleTransactionTimeout) == 1 {
+		idle = idleTransactionTimeout[0]
+	}
+	config.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprint(idle.Milliseconds())
 	db, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, errors.New("database initialization failed")

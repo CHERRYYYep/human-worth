@@ -13,12 +13,14 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
+	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
@@ -51,6 +53,7 @@ type Server struct {
 	DB       *pgxpool.Pool
 	Identity identitypb.IdentityServiceClient
 	Storage  Storage
+	Content  contentpb.ContentServiceClient
 }
 
 func invalid(reason string) error { return status.Error(codes.InvalidArgument, reason) }
@@ -74,9 +77,23 @@ func assetPeer(ctx context.Context, method string) error {
 	if err != nil {
 		return status.Error(codes.Unauthenticated, "service_identity_required")
 	}
+	if method == "/grpc.health.v1.Health/Check" && (name == "gateway" || name == "content" || name == "challenge") {
+		return nil
+	}
 	switch name {
 	case "gateway":
-		return nil
+		switch method {
+		case pb.AssetService_CreateUploadSession_FullMethodName,
+			pb.AssetService_UploadAsset_FullMethodName,
+			pb.AssetService_CompleteUpload_FullMethodName,
+			pb.AssetService_AbortUpload_FullMethodName,
+			pb.AssetService_GetUploadSession_FullMethodName,
+			pb.AssetService_GetAssetMetadata_FullMethodName,
+			pb.AssetService_ListMyAssets_FullMethodName,
+			pb.AssetService_DownloadAsset_FullMethodName,
+			pb.AssetService_DownloadPublicAsset_FullMethodName:
+			return nil
+		}
 	case "content":
 		if method == pb.AssetService_CheckAssetOwnership_FullMethodName {
 			return nil
@@ -87,6 +104,17 @@ func assetPeer(ctx context.Context, method string) error {
 		}
 	}
 	return status.Error(codes.PermissionDenied, "service_forbidden")
+}
+
+func requireAssetCaller(ctx context.Context, expected string) error {
+	name, err := platform.ServiceName(ctx)
+	if err != nil {
+		return status.Error(codes.Unauthenticated, "service_identity_required")
+	}
+	if name != expected {
+		return status.Error(codes.PermissionDenied, "service_forbidden")
+	}
+	return nil
 }
 func (s *Server) actor(ctx context.Context, assertion, method string) (string, error) {
 	if err := assetPeer(ctx, method); err != nil {
@@ -181,15 +209,30 @@ type assetRow struct {
 
 func scanAsset(row assetScan) (assetRow, error) {
 	var result assetRow
-	err := row.Scan(&result.ID, &result.Owner, &result.RunID, &result.AttemptID, &result.UploadID, &result.State, &result.Filename, &result.Declared, &result.Detected, &result.Expected, &result.Received, &result.ExpectedHash, &result.ActualHash, &result.StagingKey, &result.FinalKey, &result.Created, &result.Completed)
+	var detected *string
+	err := row.Scan(&result.ID, &result.Owner, &result.RunID, &result.AttemptID, &result.UploadID, &result.State, &result.Filename, &result.Declared, &detected, &result.Expected, &result.Received, &result.ExpectedHash, &result.ActualHash, &result.StagingKey, &result.FinalKey, &result.Created, &result.Completed)
+	if detected != nil {
+		result.Detected = *detected
+	}
 	return result, err
 }
 func assetContract(row assetRow) *pb.Asset {
 	return &pb.Asset{Id: row.ID, Filename: row.Filename, MediaType: row.Detected, Bytes: row.Expected, Sha256: hex.EncodeToString(row.ActualHash), RunId: row.RunID, AttemptId: row.AttemptID}
 }
 
+var challengePurposes = map[string]bool{
+	"WORK_KIND_VALIDATE_RANKER":  true,
+	"WORK_KIND_TRAIN_RANKER":     true,
+	"WORK_KIND_REFINE_RANKER":    true,
+	"WORK_KIND_PACK_TASK":        true,
+	"WORK_KIND_EXECUTE_PACKAGE":  true,
+	"WORK_KIND_RANK_WORKS":       true,
+	"WORK_KIND_EXPLAIN_OWN_WORK": true,
+	"output":                     true,
+}
+
 func validateAccess(access *pb.Access) error {
-	if access == nil || access.GetTaskId() == "" || access.GetRunId() == "" || access.GetAttemptId() == "" || access.GetPurpose() == "" {
+	if access == nil || access.GetTaskId() == "" || access.GetRunId() == "" || access.GetAttemptId() == "" || access.GetPurpose() == "" || !challengePurposes[access.GetPurpose()] {
 		return invalid("invalid_access")
 	}
 	return nil
@@ -274,7 +317,7 @@ func (s *Server) CreateUploadSession(ctx context.Context, r *pb.CreateUploadSess
 		if !bytesEqual(existingHash, requestHash) {
 			return nil, status.Error(codes.AlreadyExists, "idempotency_key_conflict")
 		}
-		row, scanErr := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE id=$1`, assetID))
+		row, scanErr := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
 		if scanErr != nil {
 			return nil, unavailable(scanErr)
 		}
@@ -328,6 +371,9 @@ func (s *Server) UploadAsset(stream pb.AssetService_UploadAssetServer) error {
 }
 
 func (s *Server) uploadBrowser(stream pb.AssetService_UploadAssetServer, first *pb.UploadAssetRequest) error {
+	if err := requireAssetCaller(stream.Context(), "gateway"); err != nil {
+		return err
+	}
 	if !uploadPattern.MatchString(first.GetUploadSessionId()) || !attemptPattern.MatchString(first.GetUploadAttemptId()) || first.GetOffset() < 0 || first.GetActorAssertion() == "" {
 		return invalid("invalid_upload_start")
 	}
@@ -410,14 +456,87 @@ func (s *Server) uploadBrowser(stream pb.AssetService_UploadAssetServer, first *
 
 var serviceUploadPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
+func challengeUploadMatches(row assetRow, first *pb.UploadAssetRequest, filename, declared string, expectedHash []byte) bool {
+	return row.Expected == first.GetBytes() && bytesEqual(row.ExpectedHash, expectedHash) && row.Filename == filename && row.Declared == declared
+}
+
+func (s *Server) objectDigest(ctx context.Context, key string) ([]byte, int64, string, error) {
+	reader, err := s.Storage.Open(ctx, key)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	hash := sha256.New()
+	var sniff [512]byte
+	n, err := io.ReadFull(reader, sniff[:])
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		reader.Close()
+		return nil, 0, "", err
+	}
+	_, _ = hash.Write(sniff[:n])
+	rest, err := io.Copy(hash, io.LimitReader(reader, maxAssetBytes+1-int64(n)))
+	closeErr := reader.Close()
+	if err != nil || closeErr != nil {
+		return nil, 0, "", firstErr(err, closeErr)
+	}
+	detected, _, _ := mimeParse(http.DetectContentType(sniff[:n]))
+	return hash.Sum(nil), int64(n) + rest, detected, nil
+}
+
+func validateDetectedMediaType(declared, detected string) error {
+	if !allowedTypes[detected] {
+		return invalid("unsupported_media_type")
+	}
+	if detected != declared {
+		return status.Error(codes.FailedPrecondition, "media_type_mismatch")
+	}
+	return nil
+}
+
+func (s *Server) recoverChallengeFinal(ctx context.Context, db *pgxpool.Conn, row assetRow, declared string) (assetRow, bool, error) {
+	actual, size, detected, err := s.objectDigest(ctx, row.FinalKey)
+	if errors.Is(err, os.ErrNotExist) {
+		return row, false, nil
+	}
+	if err != nil {
+		return row, false, err
+	}
+	if size != row.Expected || !bytesEqual(actual, row.ExpectedHash) {
+		if err = s.Storage.Delete(ctx, row.FinalKey); err != nil {
+			return row, false, err
+		}
+		return row, false, nil
+	}
+	if mediaErr := validateDetectedMediaType(declared, detected); mediaErr != nil {
+		s.failChallengeUpload(ctx, db, row.ID, row.StagingKey)
+		if err = s.Storage.Delete(ctx, row.FinalKey); err != nil {
+			return row, false, err
+		}
+		return row, false, mediaErr
+	}
+	if err = s.Storage.Delete(ctx, row.StagingKey); err != nil {
+		return row, false, err
+	}
+	_, err = db.Exec(ctx, `UPDATE asset.assets SET state='ready',detected_media_type=$2,received_bytes=$3,actual_sha256=$4,completed_at=COALESCE(completed_at,clock_timestamp()),updated_at=clock_timestamp() WHERE id=$1`, row.ID, detected, size, actual)
+	if err != nil {
+		return row, false, err
+	}
+	row, err = scanAsset(db.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, row.ID))
+	return row, err == nil, err
+}
+
+func (s *Server) failChallengeUpload(ctx context.Context, db *pgxpool.Conn, assetID, key string) {
+	_, _ = db.Exec(ctx, `UPDATE asset.assets SET state='failed',updated_at=clock_timestamp() WHERE id=$1 AND state='staging'`, assetID)
+	_ = s.Storage.Delete(ctx, key)
+}
+
 func (s *Server) uploadChallenge(stream pb.AssetService_UploadAssetServer, first *pb.UploadAssetRequest) error {
-	if err := assetPeer(stream.Context(), pb.AssetService_UploadAsset_FullMethodName); err != nil {
+	if err := requireAssetCaller(stream.Context(), "challenge"); err != nil {
 		return err
 	}
 	if err := storageReady(s); err != nil {
 		return err
 	}
-	if err := validateAccess(first.GetAccess()); err != nil || !serviceUploadPattern.MatchString(first.GetUploadId()) {
+	if err := validateAccess(first.GetAccess()); err != nil || first.GetAccess().GetPurpose() != "WORK_KIND_EXECUTE_PACKAGE" || !serviceUploadPattern.MatchString(first.GetUploadId()) {
 		return invalid("invalid_upload")
 	}
 	filename, err := cleanFilename(first.GetFilename())
@@ -437,50 +556,100 @@ func (s *Server) uploadChallenge(stream pb.AssetService_UploadAssetServer, first
 	}
 	access := first.GetAccess()
 	ctx := stream.Context()
-	tx, err := s.DB.Begin(ctx)
+	db, err := s.DB.Acquire(ctx)
+	if err != nil {
+		return unavailable(err)
+	}
+	defer db.Release()
+	// Keep one session lock across row creation, streaming, recovery and ready.
+	// Row locks released before receiving the stream cannot protect shared S3.
+	lockKey, _ := json.Marshal([]string{access.GetRunId(), access.GetAttemptId(), first.GetUploadId()})
+	var locked bool
+	if err = db.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,7185429004))`, string(lockKey)).Scan(&locked); err != nil {
+		// Acquisition may have succeeded before cancellation hid the result.
+		db.Conn().Close(ctx)
+		return unavailable(err)
+	}
+	if !locked {
+		return status.Error(codes.Aborted, "upload_in_progress")
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		var unlocked bool
+		if err := db.QueryRow(cleanup, `SELECT pg_advisory_unlock(hashtextextended($1,7185429004))`, string(lockKey)).Scan(&unlocked); err != nil || !unlocked {
+			// Never return a connection still holding a session lock to the pool.
+			db.Conn().Close(cleanup)
+		}
+	}()
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return unavailable(err)
 	}
 	defer tx.Rollback(ctx)
-	var existing assetRow
-	existing, err = scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE run_id=$1 AND attempt_id=$2 AND upload_id=$3`, access.GetRunId(), access.GetAttemptId(), first.GetUploadId()))
+	var row assetRow
+	row, err = scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE run_id=$1 AND attempt_id=$2 AND upload_id=$3 FOR UPDATE`, access.GetRunId(), access.GetAttemptId(), first.GetUploadId()))
 	if err == nil {
-		if existing.State != "ready" || existing.Expected != first.GetBytes() || !bytesEqual(existing.ExpectedHash, expectedHash) {
+		if !challengeUploadMatches(row, first, filename, declared, expectedHash) {
+			return status.Error(codes.Aborted, "upload_conflict")
+		}
+		if row.State == "ready" {
+			if err = tx.Commit(ctx); err != nil {
+				return unavailable(err)
+			}
+			return stream.SendAndClose(&pb.UploadAssetResponse{Asset: assetContract(row)})
+		}
+		if row.State != "staging" && row.State != "failed" {
 			return status.Error(codes.Aborted, "upload_conflict")
 		}
 		if err = tx.Commit(ctx); err != nil {
 			return unavailable(err)
 		}
-		return stream.SendAndClose(&pb.UploadAssetResponse{Asset: assetContract(existing)})
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return unavailable(err)
-	}
-	assetID, err := newID("ast_")
-	if err != nil {
-		return status.Error(codes.Internal, "internal_error")
-	}
-	staging := "assets/" + assetID + "/challenge/" + first.GetUploadId()
-	final := "assets/" + assetID + "/content"
-	_, err = tx.Exec(ctx, `INSERT INTO asset.assets(id,owner_id,run_id,attempt_id,upload_id,state,original_filename,declared_media_type,expected_bytes,expected_sha256,staging_key,final_key) VALUES($1,'challenge',$2,$3,$4,'staging',$5,$6,$7,$8,$9,$10)`, assetID, access.GetRunId(), access.GetAttemptId(), first.GetUploadId(), filename, declared, first.GetBytes(), expectedHash, staging, final)
-	if err != nil {
-		return unavailable(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return unavailable(err)
+		if row, recovered, recoverErr := s.recoverChallengeFinal(ctx, db, row, declared); recoverErr != nil {
+			if status.Code(recoverErr) == codes.InvalidArgument || status.Code(recoverErr) == codes.FailedPrecondition {
+				return recoverErr
+			}
+			return unavailable(recoverErr)
+		} else if recovered {
+			return stream.SendAndClose(&pb.UploadAssetResponse{Asset: assetContract(row)})
+		}
+		if row.State == "failed" {
+			if _, err = db.Exec(ctx, `UPDATE asset.assets SET state='staging',received_bytes=0,actual_sha256=NULL,completed_at=NULL,updated_at=clock_timestamp() WHERE id=$1 AND state='failed'`, row.ID); err != nil {
+				return unavailable(err)
+			}
+		}
+	} else {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return unavailable(err)
+		}
+		row.ID, err = newID("ast_")
+		if err != nil {
+			return status.Error(codes.Internal, "internal_error")
+		}
+		row.StagingKey = "assets/" + row.ID + "/challenge/" + first.GetUploadId()
+		row.FinalKey = "assets/" + row.ID + "/content"
+		_, err = tx.Exec(ctx, `INSERT INTO asset.assets(id,owner_id,run_id,attempt_id,upload_id,state,original_filename,declared_media_type,expected_bytes,expected_sha256,staging_key,final_key) VALUES($1,'challenge',$2,$3,$4,'staging',$5,$6,$7,$8,$9,$10)`, row.ID, access.GetRunId(), access.GetAttemptId(), first.GetUploadId(), filename, declared, first.GetBytes(), expectedHash, row.StagingKey, row.FinalKey)
+		if err != nil {
+			return unavailable(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return unavailable(err)
+		}
 	}
 	digest := sha256.New()
 	var received int64
 	current := first
 	for {
 		if len(current.GetChunk()) > maxChunkBytes || received+int64(len(current.GetChunk())) > first.GetBytes() {
+			s.failChallengeUpload(ctx, db, row.ID, row.StagingKey)
 			return invalid("invalid_upload_size")
 		}
 		if current != first && (current.GetAccess() != nil || current.GetUploadId() != "" || current.GetFilename() != "" || current.GetMediaType() != "" || current.GetBytes() != 0 || current.GetSha256() != "") {
+			s.failChallengeUpload(ctx, db, row.ID, row.StagingKey)
 			return invalid("duplicate_upload_metadata")
 		}
 		if len(current.GetChunk()) > 0 {
-			if err = s.Storage.WriteAt(ctx, staging, received, current.GetChunk()); err != nil {
+			if err = s.Storage.WriteAt(ctx, row.StagingKey, received, current.GetChunk()); err != nil {
 				return unavailable(err)
 			}
 			_, _ = digest.Write(current.GetChunk())
@@ -495,17 +664,32 @@ func (s *Server) uploadChallenge(stream pb.AssetService_UploadAssetServer, first
 		}
 		current = next
 	}
-	if received != first.GetBytes() || !strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), first.GetSha256()) {
+	actual := digest.Sum(nil)
+	if received != first.GetBytes() || !bytesEqual(actual, expectedHash) {
+		s.failChallengeUpload(ctx, db, row.ID, row.StagingKey)
 		return status.Error(codes.FailedPrecondition, "upload_digest_mismatch")
 	}
-	if err = s.Storage.Move(ctx, staging, final); err != nil {
-		return unavailable(err)
-	}
-	_, err = s.DB.Exec(ctx, `UPDATE asset.assets SET state='ready',detected_media_type=$2,received_bytes=$3,actual_sha256=$4,completed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, assetID, declared, received, digest.Sum(nil))
+	// Inspect the stored bytes, not just the stream's digest or declared type.
+	actual, size, detected, err := s.objectDigest(ctx, row.StagingKey)
 	if err != nil {
 		return unavailable(err)
 	}
-	row, err := scanAsset(s.DB.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE id=$1`, assetID))
+	if size != received || !bytesEqual(actual, expectedHash) {
+		s.failChallengeUpload(ctx, db, row.ID, row.StagingKey)
+		return status.Error(codes.FailedPrecondition, "upload_digest_mismatch")
+	}
+	if err = validateDetectedMediaType(declared, detected); err != nil {
+		s.failChallengeUpload(ctx, db, row.ID, row.StagingKey)
+		return err
+	}
+	if err = s.Storage.Move(ctx, row.StagingKey, row.FinalKey); err != nil {
+		return unavailable(err)
+	}
+	_, err = db.Exec(ctx, `UPDATE asset.assets SET state='ready',detected_media_type=$2,received_bytes=$3,actual_sha256=$4,completed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, row.ID, detected, received, actual)
+	if err != nil {
+		return unavailable(err)
+	}
+	row, err = scanAsset(db.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, row.ID))
 	if err != nil {
 		return unavailable(err)
 	}
@@ -547,7 +731,7 @@ func (s *Server) CompleteUpload(ctx context.Context, r *pb.CompleteUploadRequest
 		return nil, status.Error(codes.NotFound, "asset_not_found")
 	}
 	if state == "completed" && assetState == "ready" {
-		row, scanErr := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE id=$1`, assetID))
+		row, scanErr := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
 		if scanErr != nil {
 			return nil, unavailable(scanErr)
 		}
@@ -572,52 +756,25 @@ func (s *Server) CompleteUpload(ctx context.Context, r *pb.CompleteUploadRequest
 			return nil, status.Error(codes.FailedPrecondition, "upload_incomplete")
 		}
 	}
-	reader, err := s.Storage.Open(ctx, key)
+	actual, size, detected, err := s.objectDigest(ctx, key)
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	hash := sha256.New()
-	var sniff [512]byte
-	n, readErr := io.ReadFull(reader, sniff[:])
-	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) && !errors.Is(readErr, io.EOF) {
-		reader.Close()
-		return nil, unavailable(readErr)
-	}
-	if n == 0 {
-		reader.Close()
-		return nil, status.Error(codes.FailedPrecondition, "upload_incomplete")
-	}
-	if _, err = hash.Write(sniff[:n]); err == nil {
-		_, err = io.Copy(hash, reader)
-	}
-	closeErr := reader.Close()
-	if err != nil || closeErr != nil {
-		return nil, unavailable(firstErr(err, closeErr))
-	}
-	actual := hash.Sum(nil)
-	if !bytesEqual(actual, expectedHash) {
+	if size != expected || !bytesEqual(actual, expectedHash) {
 		_, _ = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',updated_at=clock_timestamp() WHERE id=$1`, assetID)
 		_, _ = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='aborted',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
 		_ = tx.Commit(ctx)
 		_ = s.Storage.Delete(ctx, staging)
 		return nil, status.Error(codes.FailedPrecondition, "sha256_mismatch")
 	}
-	detected, _, _ := mimeParse(http.DetectContentType(sniff[:n]))
-	if !allowedTypes[detected] {
+	if err = validateDetectedMediaType(declared, detected); err != nil {
 		_, _ = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',detected_media_type=$2,updated_at=clock_timestamp() WHERE id=$1`, assetID, detected)
 		_, _ = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='aborted',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
 		_ = tx.Commit(ctx)
 		_ = s.Storage.Delete(ctx, staging)
-		return nil, invalid("unsupported_media_type")
+		return nil, err
 	}
-	if detected != declared {
-		_, _ = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',detected_media_type=$2,updated_at=clock_timestamp() WHERE id=$1`, assetID, detected)
-		_, _ = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='aborted',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
-		_ = tx.Commit(ctx)
-		_ = s.Storage.Delete(ctx, staging)
-		return nil, status.Error(codes.FailedPrecondition, "media_type_mismatch")
-	}
-	if err = s.Storage.Move(ctx, staging, final); err != nil && key == staging {
+	if err = s.Storage.Move(ctx, staging, final); err != nil {
 		return nil, unavailable(err)
 	}
 	_, err = tx.Exec(ctx, `UPDATE asset.assets SET state='ready',detected_media_type=$2,actual_sha256=$3,completed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, assetID, detected, actual)
@@ -627,7 +784,7 @@ func (s *Server) CompleteUpload(ctx context.Context, r *pb.CompleteUploadRequest
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	row, err := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE id=$1`, assetID))
+	row, err := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -716,7 +873,7 @@ func (s *Server) GetAssetMetadata(ctx context.Context, r *pb.GetAssetMetadataReq
 	if !assetPattern.MatchString(r.GetAssetId()) {
 		return nil, status.Error(codes.NotFound, "asset_not_found")
 	}
-	row, err := scanAsset(s.DB.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE id=$1 AND owner_id=$2`, r.AssetId, owner))
+	row, err := scanAsset(s.DB.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1 AND owner_id=$2`, r.AssetId, owner))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.NotFound, "asset_not_found")
 	}
@@ -776,7 +933,7 @@ func (s *Server) ListMyAssets(ctx context.Context, r *pb.ListMyAssetsRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	query := assetSelect + ` FROM asset.assets WHERE owner_id=$1 AND state='ready'`
+	query := assetSelect + ` FROM asset.assets a WHERE owner_id=$1 AND state='ready'`
 	args := []any{owner}
 	if r.Cursor != "" {
 		args = append(args, created, cursorID)
@@ -830,7 +987,7 @@ func (s *Server) CheckAssetOwnership(ctx context.Context, r *pb.CheckAssetOwners
 		}
 		seen[id] = true
 	}
-	rows, err := s.DB.Query(ctx, assetSelect+` FROM asset.assets WHERE owner_id=$1 AND state='ready' AND id=ANY($2)`, owner, r.AssetIds)
+	rows, err := s.DB.Query(ctx, assetSelect+` FROM asset.assets a WHERE owner_id=$1 AND state='ready' AND id=ANY($2)`, owner, r.AssetIds)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -864,7 +1021,7 @@ func (s *Server) GetAsset(ctx context.Context, r *pb.GetAssetRequest) (*pb.GetAs
 	if err := validateAccess(r.GetAccess()); err != nil || !assetPattern.MatchString(r.GetAssetId()) {
 		return nil, status.Error(codes.NotFound, "asset_not_found")
 	}
-	row, err := scanAsset(s.DB.QueryRow(ctx, assetSelect+` FROM asset.assets WHERE id=$1 AND state='ready'`, r.GetAssetId()))
+	row, err := scanAsset(s.DB.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1 AND state='ready'`, r.GetAssetId()))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.RunID != "" && (row.RunID != r.GetAccess().GetRunId() || row.AttemptID != r.GetAccess().GetAttemptId())) {
 		return nil, status.Error(codes.NotFound, "asset_not_found")
 	}
@@ -881,7 +1038,7 @@ func (s *Server) ReadAsset(r *pb.ReadAssetRequest, stream pb.AssetService_ReadAs
 	if err := validateAccess(r.GetAccess()); err != nil || !assetPattern.MatchString(r.GetAssetId()) || r.GetOffset() < 0 {
 		return status.Error(codes.NotFound, "asset_not_found")
 	}
-	row, err := scanAsset(s.DB.QueryRow(stream.Context(), assetSelect+` FROM asset.assets WHERE id=$1 AND state='ready'`, r.GetAssetId()))
+	row, err := scanAsset(s.DB.QueryRow(stream.Context(), assetSelect+` FROM asset.assets a WHERE id=$1 AND state='ready'`, r.GetAssetId()))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.RunID != "" && (row.RunID != r.GetAccess().GetRunId() || row.AttemptID != r.GetAccess().GetAttemptId())) {
 		return status.Error(codes.NotFound, "asset_not_found")
 	}
@@ -931,7 +1088,7 @@ func (s *Server) DownloadAsset(r *pb.DownloadAssetRequest, stream pb.AssetServic
 	if !assetPattern.MatchString(r.GetAssetId()) {
 		return status.Error(codes.NotFound, "asset_not_found")
 	}
-	row, err := scanAsset(s.DB.QueryRow(stream.Context(), assetSelect+` FROM asset.assets WHERE id=$1 AND owner_id=$2 AND state='ready'`, r.AssetId, owner))
+	row, err := scanAsset(s.DB.QueryRow(stream.Context(), assetSelect+` FROM asset.assets a WHERE id=$1 AND owner_id=$2 AND state='ready'`, r.AssetId, owner))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return status.Error(codes.NotFound, "asset_not_found")
 	}
