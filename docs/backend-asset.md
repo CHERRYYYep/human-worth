@@ -1,6 +1,6 @@
 # Asset 后端：私有上传与过审作品文件读取
 
-日期：2026-09-28，按 2026-10-16 Asset 3C 工作分支实现更新。本文同时记录 Asset 第二阶段的实现方案和当前本地实现状态：已实现登录用户的私有上传、完成校验、元数据、私有下载和 Content 草稿绑定；已实现 S3-compatible adapter，并把 Asset 登记到本分支的 `services.json` 和 kind lab 声明。本地隔离 kind 模块部署及 Asset 跨 Pod 上传/下载、Content 私有绑定业务验收已通过；尚未合入/发布、更未公网部署。3C 增加过审作品文件的公开读取和 Content 权限检查，仍未实现 Moderation 审核工作流、公开任务详情、投票、推荐或云端挑战。
+日期：2026-09-28，按 2026-10-16 Asset 阶段 3 收尾验收更新。本文同时记录 Asset 第二阶段的实现方案和当前本地实现状态：已实现登录用户的私有上传、完成校验、元数据、私有下载和 Content 草稿绑定；已实现 S3-compatible adapter，并把 Asset 登记到本分支的 `services.json` 和 kind lab 声明。3A/3B/3C 已完成本地实现与验收，审查修复后的已提交代码已重新通过完整隔离 kind 验证（见第 15 节）；尚未合入 dev、更未公网部署。3C 增加过审作品文件的公开读取和 Content 权限检查，仍未实现 Moderation 审核工作流、公开任务详情、投票、推荐或云端挑战。
 
 ## 1. 依据与归属
 
@@ -470,7 +470,7 @@ kind 最终代码快照中的三个真实业务测试已通过：`TestKindAssetD
 
 最终 kind 临时 namespace `human-worth-verify-ba786c84` 已清理；本轮单独创建的 PostgreSQL/S3 测试容器及临时凭据已删除，不动用户已有 lab 集群或公网 namespace。源码、Proto、生成代码和测试进入最终部署快照；此后仅追加验收文档，并重新执行根目录检查。
 
-**阶段 3 结论**：3A 权限/持久化、3B 共享存储/双副本、3C Content 权威授权/过审文件/撤销拒绝已达到本地可提交审查的切片验收标准。尚未完成真正 Moderation 工作流、其 Pod 网络投递验收、新版草稿重新送审、公开任务/作品详情、生产 S3 HA/备份/加密容量验收、远端 GitHub CI 或公网发布。受信测试证书不是审核产品授权入口；本轮没有 commit、push、PR、合并或公网部署。
+**阶段 3 初次验收结论**：3A 权限/持久化、3B 共享存储/双副本、3C Content 权威授权/过审文件/撤销拒绝已达到本地可提交审查的切片验收标准。尚未完成真正 Moderation 工作流、其 Pod 网络投递验收、新版草稿重新送审、公开任务/作品详情、生产 S3 HA/备份/加密容量验收、远端 GitHub CI 或公网发布。受信测试证书不是审核产品授权入口；当轮尚未 commit、push、PR、合并或公网部署。后续审查修复与已提交代码的收尾验收见第 14、15 节。
 
 
 ## 14. 2026-10-16 审查缺陷修复（Agent Self-Claimed）
@@ -483,7 +483,43 @@ kind 最终代码快照中的三个真实业务测试已通过：`TestKindAssetD
 
 新增 `internal/asset/challenge_upload_integration_test.go` 覆盖真实受限 PostgreSQL、正式 mTLS gRPC、两实例/S3 adapter 并发上传、取消释放锁、完成重试及 split-chunk 媒体检测；拒绝路径核对数据库 failed、对象删除和读取拒绝。另保留 FileStorage 正常/恢复双路径的 PNG、文本、HTML 与声明不符样例，不把它标为共享存储验收。
 
-实际验证：针对性 `go test -race -json -tags=integration ./internal/asset -run '^TestChallenge(UploadPostgresRegression|ConcurrentS3Retry)$' -count=5 -timeout=120s` 退出 0，60 个测试/子测试 PASS、0 FAIL、0 SKIP。随后以私有临时 DSN/S3 配置执行 `go test -race -json -tags=integration -p=1 ./... -count=1 -timeout=120s` 退出 0，最终重跑 231 个测试/子测试 PASS、0 FAIL、0 SKIP；使用一次性 PostgreSQL 18 和 SeaweedFS 4.13，不连接产品库。测试容器、临时凭据已清理。原审查复现失败保留在 `/tmp/hw-asset-review-20261016/regression.log`；本轮原始日志位于 `/tmp/hw-asset-review-fix-PVbKlsYm/`。本轮没有重新部署 kind，也没有公网发布；历史 kind 通过不能代表本轮代码已部署。
+实际验证：针对性 `go test -race -json -tags=integration ./internal/asset -run '^TestChallenge(UploadPostgresRegression|ConcurrentS3Retry)$' -count=5 -timeout=120s` 退出 0，60 个测试/子测试 PASS、0 FAIL、0 SKIP。随后以私有临时 DSN/S3 配置执行 `go test -race -json -tags=integration -p=1 ./... -count=1 -timeout=120s` 退出 0，最终重跑 231 个测试/子测试 PASS、0 FAIL、0 SKIP；使用一次性 PostgreSQL 18 和 SeaweedFS 4.13，不连接产品库。测试容器、临时凭据已清理。原审查复现失败保留在 `/tmp/hw-asset-review-20261016/regression.log`；本轮原始日志位于 `/tmp/hw-asset-review-fix-PVbKlsYm/`。本次修复验证时尚未重新部署 kind；后续已补齐第 15 节的完整实跑，不能用历史 kind 结果替代该记录。
 
 
-本轮最终附加检查：`buf lint`、官方 `buf generate`、`gofmt -l cmd internal`（无输出）、`go vet ./...`、`go test -json ./... -count=1`、`go test -race -json ./... -count=1`、`go build ./cmd/...`、`npm run ci`、`git diff --check` 均退出 0；普通/race 各 131 个测试/子测试 PASS，根 CI 为 5 个 Node + 27 个 Python PASS。`git diff --exit-code -- gen` 退出 **1**，原因是本分支前轮 Proto/生成代码尚未提交；本轮未改 Proto，生成前后所有生成文件 SHA-256 完全一致，不将其误报为退出 0。未使用临时 GOCACHE、临时生成配置或手改 pb.go；使用官方固定本地生成插件。最初缺少专用环境的快速编译检查跳过 Asset integration，不能计作真实验收；后续两轮完整独立环境集成无跳过（先 230，补入对象检测单元测试后 231）。尚未运行远端 CI、未重跑 kind、未进行公网验证，未 commit/push/PR。
+本轮最终附加检查：`buf lint`、官方 `buf generate`、`gofmt -l cmd internal`（无输出）、`go vet ./...`、`go test -json ./... -count=1`、`go test -race -json ./... -count=1`、`go build ./cmd/...`、`npm run ci`、`git diff --check` 均退出 0；普通/race 各 131 个测试/子测试 PASS，根 CI 为 5 个 Node + 27 个 Python PASS。`git diff --exit-code -- gen` 退出 **1**，原因是本分支前轮 Proto/生成代码尚未提交；本轮未改 Proto，生成前后所有生成文件 SHA-256 完全一致，不将其误报为退出 0。未使用临时 GOCACHE、临时生成配置或手改 pb.go；使用官方固定本地生成插件。最初缺少专用环境的快速编译检查跳过 Asset integration，不能计作真实验收；后续两轮完整独立环境集成无跳过（先 230，补入对象检测单元测试后 231）。以上保留修复时的验证状态；之后代码已提交并推送，最新 kind 与剩余边界见下节，不将本地检查描述为远端 CI 或公网验证。
+
+## 15. 2026-10-16 阶段 3 收尾：审查修复后完整 kind 重跑（Agent Self-Claimed）
+
+### 验证对象与执行方式
+
+- 代码提交：`bedffc35fdd475812356dcb12b6bafefbad0f7b0`（`feat(asset): complete shared storage and reviewed downloads`），已推送到 `origin/backend/feat-asset-service`。
+- 本次在工作区干净时启动验证；脚本复制不可变源码快照，构建标识为 `1ca86745f42cf2b7fa63c1c50a62d1c1dd14da9d`。该标识不是 Git SHA，也不是远端发布版本。
+- 使用既有 `kind-lab` 集群，全部测试资源位于一次性 namespace `human-worth-verify-c521387b`；HTTPS 通过 loopback port-forward，不切换公网入口。
+- 2026-10-16 19:35（Asia/Shanghai）完成结果与清理核对。以下是最新实跑，不以第 13 节较早的 kind 快照代替。
+
+根目录执行命令（本机用户通过 `sg docker` 取得 Docker 组访问；私有 Docker 配置目录按本机设置替换）：
+
+```sh
+sg docker -c 'umask 022; DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py'
+```
+
+| 检查 | 结果 | 本次证据 |
+| --- | --- | --- |
+| 完整 `validate_modules.py` | PASS，退出 0 | Identity、Asset、Content、Gateway 四模块迁移/rollout、HTTPS 与完成标记检查通过 |
+| `TestKindAssetDeployment` | PASS，155.82 秒 | 不同 worker 的两个真实 Asset Pod 上传/续传/完成/下载、摘要与状态、A/B 隔离、Content 私有绑定与并发 revision、清理、Pod 重建、对象提升后 DB 未提交恢复、S3 停机拒绝与同 PVC 恢复、会话撤销 |
+| `TestKindPublicAssetDeployment` | PASS，37.92 秒 | 真实 HTTPS/mTLS/PostgreSQL/S3；双 Asset Pod 的过审文件读取、撤销/下架拒绝、旧决定重放拒绝、Content 停机拒绝与恢复 |
+| `TestKindContentDeployment` | PASS，4.13 秒 | 既有本人草稿及分页链路回归 |
+| NetworkPolicy | PASS | identity/content/asset/gateway/untrusted 五类调用方的预期允许与拒绝，包含 Asset → Content；不表示每个目标均可连通 |
+| 失败与恢复 | PASS | 故意坏镜像后恢复所有模块模板/策略；故意错误迁移凭据失败后，恢复凭据并以同一镜像版本重试成功 |
+| 重复完整部署 | PASS | 依赖、迁移、服务重复协调后保持健康 |
+| 清理与影响范围 | PASS | 临时 namespace、源码/凭据目录及 port-forward 已删除；默认 `human-worth` namespace 的 Deployment/StatefulSet/Service UID、generation、spec 快照前后一致；验证后代码 SHA 未变且工作区干净 |
+
+三个业务测试由脚本执行 `go test -race -tags=lab ./internal/identity -run '^TestKind(Content|Asset|PublicAsset)Deployment$' -count=1 -timeout=480s -v`，包执行退出 0。其中 Challenge 上传并发锁与媒体类型缺陷的专项验收仍以第 14 节真实 PostgreSQL/S3/mTLS 集成测试为依据；本次没有部署 Challenge，也没有用 kind 结果冒充其专项覆盖。
+
+本机原始日志：`/tmp/hw-asset-kind-final-20261016/kind.log`；结果与清理核对：同目录 `result.json`、`shared-before.json`、`shared-after.json`。日志 SHA-256 为 `d230cacda33f68ce37083fb4076aed0bed3fa537fc6c7400dc2a78b4108583ce`。这些是机器本地临时证据，不随 Git 分发，可能被系统清理；上表在仓库中保留验收摘要与代码/构建标识，不提交凭据或大体积日志。
+
+### 收尾结论与下一阶段边界
+
+阶段 3（3A/3B/3C）可按**本地实现与验收完成**收尾。第 14 节“修复后未重跑 kind”的缺口已补齐；本次之后仅更新验收文档，不修改业务代码、Proto、生成代码或部署配置。
+
+后续仍需通过 PR/远端 CI 进入 dev，发布与公网验收另行执行，本地验证不替代这些门槛。下一阶段优先推进真正的 Moderation 最小闭环：送审、管理员审核、决定的可靠投递与 Content 幂等应用；这是后续建议，不是本阶段已实现能力。新版草稿重新送审、公开任务/作品详情、Moderation Pod 网络投递，以及生产对象存储 HA/备份/加密/容量均不在本次完成声明内。已开始下载的字节仍无法追回，撤销拒绝针对提交后的新授权检查。本次未创建 PR、合并 dev 或部署公网。
