@@ -3,26 +3,35 @@ package domain
 type Operation string
 
 const (
-	CreateDraft        Operation = "create_draft"
-	ReadOwnSubmission  Operation = "read_own_submission"
-	ListOwnSubmissions Operation = "list_own_submissions"
-	ReplaceDraft       Operation = "replace_draft"
-	CurrentSession     Operation = "current_session"
-	Logout             Operation = "logout"
-	CreateMCPToken     Operation = "create_mcp_token"
-	ListMCPTokens      Operation = "list_mcp_tokens"
-	RevokeMCPToken     Operation = "revoke_mcp_token"
-	ReadTask           Operation = "read_task"
-	ListTasks          Operation = "list_tasks"
-	ViewStatistics     Operation = "view_statistics"
-	CastVote           Operation = "cast_vote"
-	StartRun           Operation = "start_run"
-	GetRun             Operation = "get_run"
-	ListRuns           Operation = "list_runs"
-	GetRunSummary      Operation = "get_run_summary"
-	CancelRun          Operation = "cancel_run"
-	RestartRun         Operation = "restart_run"
-	RegisterCandidate  Operation = "register_candidate"
+	CreateDraft              Operation = "create_draft"
+	ReadOwnSubmission        Operation = "read_own_submission"
+	ListOwnSubmissions       Operation = "list_own_submissions"
+	ReplaceDraft             Operation = "replace_draft"
+	CurrentSession           Operation = "current_session"
+	Logout                   Operation = "logout"
+	CreateMCPToken           Operation = "create_mcp_token"
+	ListMCPTokens            Operation = "list_mcp_tokens"
+	RevokeMCPToken           Operation = "revoke_mcp_token"
+	ReadTask                 Operation = "read_task"
+	ListTasks                Operation = "list_tasks"
+	ViewStatistics           Operation = "view_statistics"
+	CastVote                 Operation = "cast_vote"
+	StartRun                 Operation = "start_run"
+	GetRun                   Operation = "get_run"
+	ListRuns                 Operation = "list_runs"
+	GetRunSummary            Operation = "get_run_summary"
+	CancelRun                Operation = "cancel_run"
+	RestartRun               Operation = "restart_run"
+	RegisterCandidate        Operation = "register_candidate"
+	CreateAssetUploadSession Operation = "create_asset_upload_session"
+	UploadAsset              Operation = "upload_asset"
+	CompleteAssetUpload      Operation = "complete_asset_upload"
+	AbortAssetUpload         Operation = "abort_asset_upload"
+	GetAssetUploadSession    Operation = "get_asset_upload_session"
+	GetAssetMetadata         Operation = "get_asset_metadata"
+	ListMyAssets             Operation = "list_my_assets"
+	CheckAssetOwnership      Operation = "check_asset_ownership"
+	DownloadAsset            Operation = "download_asset"
 )
 
 // 【阅读 1】Policy 约束一个业务操作的受众与凭据用途；Write 表示存在副作用，web 调用需要 CSRF。
@@ -57,6 +66,12 @@ func PolicyFor(op Operation) (Policy, bool) {
 		return Policy{Audience: "challenge", Write: true, Admin: true}, true
 	case GetRun, ListRuns, GetRunSummary:
 		return Policy{Audience: "challenge", Admin: true}, true
+	case CreateAssetUploadSession, UploadAsset, CompleteAssetUpload, AbortAssetUpload:
+		return Policy{Audience: "asset", Write: true}, true
+	case GetAssetUploadSession, GetAssetMetadata, ListMyAssets, DownloadAsset:
+		return Policy{Audience: "asset"}, true
+	case CheckAssetOwnership:
+		return Policy{Audience: "asset"}, true
 	default:
 		return Policy{}, false
 	}

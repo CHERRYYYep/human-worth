@@ -6,9 +6,11 @@ info:
   description: |
     行为依据为 docs/prd.md 中的可信场景 S1～S6、人类修订 H1～H11，以及 AGENTS.md 的发帖、评论、投票目标。
     健康检查与 Identity 的登录、会话和 MCP 凭据管理已在 worth.oopsbox.cn 上线；真人 Google 登录已由用户确认，部署状态见 x-deployment-status。
-    Content 的四个本人草稿操作已在 worth.oopsbox.cn 上线；仅支持文本与外链作品草稿，文件材料仍待 Asset 接入。
-    本人投稿分页列表已发布；其余未实现的业务 operation 仍为 planned。implemented 不等于已部署，具体运行状态见 docs/deployment.md。
+
+    Content 的四个本人草稿操作已在 worth.oopsbox.cn 上线；当前分支同时实现了 Asset 私有文件链路，但尚未发布或部署。
+    本人投稿分页列表已发布；Asset 私有列表和上传接口仅本地实现；其余未实现的业务 operation 仍为 planned。implemented 不等于已部署，具体运行状态见 docs/deployment.md。
     Challenge 管理接口已本地实现并通过有状态依赖 fake 联调，尚未发布。implemented 不代表真实依赖或执行沙箱已验收，具体状态见 docs/deployment.md。
+
     路径、字段、状态枚举、认证载体和分页等具体选择属于 Agent Self-Claimed，详见 docs/references.md。
 
     作品以审核结果决定展示，没有独立的公开/私有或公开授权开关；云端使用授权另行检查。
@@ -633,67 +635,208 @@ paths:
               schema: {$ref: '#/components/schemas/EntrySubmission'}
         default: {$ref: '#/components/responses/Problem'}
 
-  /api/assets:
+  /api/me/assets/upload-sessions:
     post:
       tags: [Submissions]
-      operationId: uploadAsset
-      summary: 上传任务附件、作品文件或压缩包
+      operationId: createAssetUploadSession
+      summary: 创建本人私有资产上传会话
       description: |
-        返回的资产初始仅上传者可读；引用资产须校验归属，不因上传自动公开。
-        服务端检查实际类型、大小和恶意内容；压缩包按文件保存，不自动解压执行。
-        文件白名单、大小上限及保留期在实现前确定；超限 413、不支持类型 415、内容不合法 422。
+        资产初始只属于当前网站会话；服务端不会接受 ownerId、角色或对象键。
+        当前实现限制 32 MiB、PNG/JPEG/WebP/PDF/plain text，并要求客户端提供 SHA-256 期望值。
+        这组限额是 Agent Self-Claimed 实现选择，不是已确认的产品参数。
       x-scenarios: [S2, S3]
-      x-implementation-status: planned
+      x-implementation-status: implemented-local
+      security: [{WebSession: [], CsrfToken: []}]
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
               additionalProperties: false
-              required: [file]
+              required: [filename, mediaType, expectedBytes, sha256]
               properties:
-                file: {type: string, format: binary}
+                filename: {type: string}
+                mediaType: {type: string}
+                expectedBytes: {type: integer, minimum: 1, maximum: 33554432}
+                sha256: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
       responses:
         '201':
-          description: 已验证且可用于投稿的资产；被过审作品引用前仅供本人投稿管理与管理员审核
+          description: 已创建上传会话；文件尚未可引用
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asset, uploadSession]
+                properties:
+                  asset: {$ref: '#/components/schemas/Asset'}
+                  uploadSession: {$ref: '#/components/schemas/UploadSession'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/assets/upload-sessions/{uploadSessionId}/content:
+    put:
+      tags: [Submissions]
+      operationId: uploadAssetChunk
+      summary: 上传本人资产的一段字节
+      x-implementation-status: implemented-local
+      security: [{WebSession: [], CsrfToken: []}]
+      parameters:
+        - {$ref: '#/components/parameters/UploadSessionId'}
+        - name: Content-Range
+          in: header
+          required: true
+          schema: {type: string, pattern: '^bytes [0-9]+-[0-9]+/[0-9]+$'}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200':
+          description: 已接受连续字节，仍须调用完成接口
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadProgress'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/assets/{assetId}/complete:
+    post:
+      tags: [Submissions]
+      operationId: completeAssetUpload
+      summary: 完成本人资产校验
+      x-implementation-status: implemented-local
+      security: [{WebSession: [], CsrfToken: []}]
+      parameters: [{$ref: '#/components/parameters/AssetId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [uploadSessionId]
+              properties:
+                uploadSessionId: {$ref: '#/components/schemas/Id'}
+      responses:
+        '200':
+          description: SHA-256、大小和服务端媒体类型检查通过的本人私有资产
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Asset'}
         default: {$ref: '#/components/responses/Problem'}
 
-  /api/assets/{assetId}:
-    parameters:
-      - name: assetId
-        in: path
-        required: true
-        schema: {$ref: '#/components/schemas/Id'}
+  /api/me/assets/upload-sessions/{uploadSessionId}:
+    delete:
+      tags: [Submissions]
+      operationId: abortAssetUpload
+      summary: 取消本人上传会话
+      x-implementation-status: implemented-local
+      security: [{WebSession: [], CsrfToken: []}]
+      parameters: [{$ref: '#/components/parameters/UploadSessionId'}]
+      responses:
+        '204': {description: 上传会话已取消}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/upload-sessions/{uploadSessionId}:
     get:
-      tags: [Tasks]
-      operationId: downloadAsset
-      summary: 下载审核允许展示或本人有权管理的任务附件与作品文件
-      description: |
-        任务可见且作品审核通过（approved），其关联文件即可供匿名、网站和 MCP 读取，不另设公开/私有或公开授权开关。
-        任务描述附件随任务一同审核，仅任务可见时可供上述主体读取；不属于任何作品的 artifacts，不因作品登记被隐式加入任务附件。
-        没有符合上述展示条件的引用时，仅上传者本人或平台管理员可通过网站会话在投稿管理/审核中读取；MCP token 不获得这项管理权限。
-        撤销作品审核通过或任务下架后立即重新检查展示条件；资产自身被封禁时停止下载，不保留可绕过检查的长期下载 URL。
-        无权访问与不存在均返回 404；cloudUse 只限制云端挑战用途，不影响任务附件或过审作品的展示和普通下载。
-        使用附件下载与 nosniff，不在站点源内执行用户上传的 HTML 或脚本。
-      x-scenarios: [S2, S3, S4, S5, H1, H5]
-      x-implementation-status: planned
-      security: [{}, {WebSession: []}, {McpToken: []}]
+      tags: [Submissions]
+      operationId: getAssetUploadSession
+      summary: 查询本人上传进度
+      x-implementation-status: implemented-local
+      security: [{WebSession: []}]
+      parameters: [{$ref: '#/components/parameters/UploadSessionId'}]
       responses:
         '200':
-          description: 通过当前访问校验的原始文件字节
-          headers:
-            Content-Disposition:
-              description: 附件文件名须经过转义
-              schema: {type: string}
-            X-Content-Type-Options:
-              schema: {type: string, const: nosniff}
+          description: 当前上传进度
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UploadSession'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/assets:
+    get:
+      tags: [Submissions]
+      operationId: listMyAssets
+      summary: 分页读取本人资产元数据
+      x-implementation-status: implemented-local
+      security: [{WebSession: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: 本人资产元数据，不含二进制或对象 URL
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AssetPage'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/assets/{assetId}:
+    get:
+      tags: [Submissions]
+      operationId: getMyAssetMetadata
+      summary: 读取本人资产元数据
+      x-implementation-status: implemented-local
+      security: [{WebSession: []}]
+      parameters: [{$ref: '#/components/parameters/AssetId'}]
+      responses:
+        '200':
+          description: 本人资产元数据
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Asset'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/me/assets/{assetId}/content:
+    get:
+      tags: [Submissions]
+      operationId: downloadMyAsset
+      summary: 下载本人已完成的私有资产
+      description: 首阶段只允许资产所有者下载，不提供公开 URL，不接受 MCP token。
+      x-implementation-status: implemented-local
+      security: [{WebSession: []}]
+      parameters: [{$ref: '#/components/parameters/AssetId'}]
+      responses:
+        '200':
+          description: 附件字节流
           content:
             application/octet-stream:
               schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/tasks/{taskId}/entries/{entryId}/assets/{assetId}/content:
+    get:
+      tags: [Tasks]
+      operationId: downloadReviewedEntryAsset
+      summary: 读取已过审作品实际引用的文件
+      x-implementation-status: implemented-local
+      description: |
+        3C 本地实现，未发布。匿名读取；Cookie、MCP token、作者或管理员身份不提供绕过权限。
+        每次新下载由 Asset 经 mTLS 调用 Content.CheckAssetAccess，必须同时满足任务已发布、
+        作品审核通过、准确 taskId/entryId/assetId 的 file 引用及资产 ready。
+        未审核、下架、撤销审核、错误上下文和不存在统一 404 asset_not_found；
+        Content、数据库或对象存储不可用为 503，不返回旧授权或存储 URL。
+        不接受 query（包括 ownerId/public/token）、不返回 304 或重定向；响应 no-store、attachment、nosniff。
+        审核收紧提交后发起的新请求立即拒绝；已发送字节不能撤回，进行中的流不承诺瞬时中止。
+        仅实现审核决定的内部应用和文件读取，不表示 Moderation 工作流或公开任务/作品详情已经实现。
+      security: []
+      parameters:
+        - {$ref: '#/components/parameters/TaskId'}
+        - {$ref: '#/components/parameters/EntryId'}
+        - {$ref: '#/components/parameters/AssetId'}
+      responses:
+        '200':
+          description: 经过本次权限检查的完整附件字节流；传输失败会断流而非混入 Problem JSON
+          headers:
+            Cache-Control: {schema: {type: string, const: no-store}}
+            Content-Disposition: {schema: {type: string}}
+            X-Content-Type-Options: {schema: {type: string, const: nosniff}}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '503': {$ref: '#/components/responses/Problem'}
         default: {$ref: '#/components/responses/Problem'}
 
   /api/tasks/{taskId}/voting-eligibility:
@@ -1323,6 +1466,16 @@ components:
       in: query
       description: 每页上限为 agent 提案；实际返回数量可更少，以 nextCursor 判断后续页。
       schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    AssetId:
+      name: assetId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
+    UploadSessionId:
+      name: uploadSessionId
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Id'}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1480,12 +1633,45 @@ components:
     Asset:
       type: object
       additionalProperties: false
-      required: [id, filename, mediaType, bytes]
+      required: [id, filename, mediaType, bytes, sha256, state, createdAt, completedAt]
       properties:
         id: {$ref: '#/components/schemas/Id'}
         filename: {type: string}
         mediaType: {type: string}
         bytes: {type: integer, minimum: 0}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        state: {type: string, enum: [staging, ready, failed, deleted]}
+        createdAt: {$ref: '#/components/schemas/Timestamp'}
+        completedAt: {$ref: '#/components/schemas/NullableTime'}
+    UploadSession:
+      type: object
+      additionalProperties: false
+      required: [id, assetId, receivedBytes, expectedBytes, state, expiresAt]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        assetId: {$ref: '#/components/schemas/Id'}
+        receivedBytes: {type: integer, minimum: 0}
+        expectedBytes: {type: integer, minimum: 1}
+        state: {type: string, enum: [active, completed, aborted, expired]}
+        expiresAt: {$ref: '#/components/schemas/Timestamp'}
+    UploadProgress:
+      type: object
+      additionalProperties: false
+      required: [uploadSessionId, receivedBytes, nextOffset, state]
+      properties:
+        uploadSessionId: {$ref: '#/components/schemas/Id'}
+        receivedBytes: {type: integer, minimum: 0}
+        nextOffset: {type: integer, minimum: 0}
+        state: {type: string, enum: [active, completed, aborted, expired]}
+    AssetPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/Asset'}
+        nextCursor: {$ref: '#/components/schemas/NextCursor'}
     Artifact:
       description: 作品交付物；assetId 必须有权使用，外链仅允许 HTTP(S)，不在读取任务时自动抓取或执行。
       oneOf:

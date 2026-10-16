@@ -146,3 +146,8 @@ Challenge 的两个副本均可参与调度，通过数据库工作项领取和�
 当前已完成 Identity 的设计、9 个 RPC、核心实现、公共基座、lab 与公网发布；用户已确认真人 Google 登录成功。Content 的创建、详情、列表和整体替换四个本人草稿操作也已发布。Challenge 的最小依赖 Proto、核心服务、P/R worker 与 E 适配代码已本地落地，真实 PostgreSQL＋有状态依赖 fake 联调通过；真实 E 沙箱与全部依赖闭环仍待验收。不等待 Content、Asset、Voting、Moderation 全部实现。表中 D/E 表示联调完成条件，模块开发可以交错推进；最终发布仍需真实依赖闭环验收。
 
 worth.oopsbox.cn 经私有 TLS 隧道连接集群，应用只部署通过 dev push CI 的提交；创建 PR 仍必须收到覆盖相应改动的人类命令。
+
+
+### Asset 3C 本地增量（2026-10-16，Agent Self-Claimed）
+
+Content 新增受信 `ApplyAssetReview` 审核决定应用端及 `CheckAssetAccess`；不是 Moderation 服务或完整审核产品流程。每次匿名作品文件下载为 Gateway → Asset → Content 权威快照检查，Content 此方法不回调 Asset。私有草稿绑定仍走另一条 Content → Asset 链路，不形成单次请求循环。审核状态与稳定作品引用只存在 Content schema，不在 Asset 复制授权缓存。具体阶段边界及真实验证见 [Asset 3C](backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。

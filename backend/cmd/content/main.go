@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/content"
@@ -64,6 +65,20 @@ func run() error {
 		return errors.New("identity client initialization failed")
 	}
 	defer conn.Close()
+	var assetClient assetpb.AssetServiceClient
+	var assetConn *grpc.ClientConn
+	if target := os.Getenv("ASSET_TARGET"); target != "" {
+		config, e := platform.TLS(os.Getenv("SERVICE_CERT_FILE"), os.Getenv("SERVICE_KEY_FILE"), os.Getenv("SERVICE_CA_FILE"), "asset")
+		if e != nil {
+			return e
+		}
+		assetConn, e = grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
+		if e != nil {
+			return errors.New("asset client initialization failed")
+		}
+		defer assetConn.Close()
+		assetClient = assetpb.NewAssetServiceClient(assetConn)
+	}
 	serverTLS, err := platform.TLS(os.Getenv("SERVICE_CERT_FILE"), os.Getenv("SERVICE_KEY_FILE"), os.Getenv("SERVICE_CA_FILE"), "")
 	if err != nil {
 		return err
@@ -80,7 +95,7 @@ func run() error {
 	}()
 	runtime.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "human_worth_database_connections", Help: "Open connections in this replica's pool"}, func() float64 { return float64(db.Stat().TotalConns()) }))
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, content.Authorization), grpc.StreamInterceptor(content.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(65536), grpc.MaxSendMsgSize(4<<20), grpc.MaxConcurrentStreams(64))
-	pb.RegisterContentServiceServer(server, &content.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn)})
+	pb.RegisterContentServiceServer(server, &content.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn), Asset: assetClient})
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
@@ -93,6 +108,12 @@ func run() error {
 		conn.Connect()
 		if conn.GetState() != connectivity.Ready {
 			return errors.New("identity unavailable")
+		}
+		if assetConn != nil {
+			response, err := healthpb.NewHealthClient(assetConn).Check(ctx, &healthpb.HealthCheckRequest{})
+			if err != nil || response.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+				return errors.New("asset unavailable")
+			}
 		}
 		return nil
 	}

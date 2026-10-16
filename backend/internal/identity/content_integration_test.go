@@ -123,7 +123,7 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	var migrationCount, indexCount int
 	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM content.schema_migrations`).Scan(&migrationCount))
 	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='content' AND indexname='task_drafts_author_created_id'`).Scan(&indexCount))
-	if migrationCount != 2 || indexCount != 1 {
+	if migrationCount != 3 || indexCount != 1 {
 		t.Fatalf("Content list migration missing: migrations=%d indexes=%d", migrationCount, indexCount)
 	}
 	for _, row := range legacyRows {
@@ -705,10 +705,10 @@ DROP FUNCTION IF EXISTS content.test_delay_task_drafts();`
 	if unchanged != 1 {
 		t.Fatal("timed out lock waiter wrote a revision")
 	}
-	// Missing Identity is not the only dependency failure: do not fake-success
-	// file inputs before Asset can validate ownership.
+	// The Content-only lab intentionally has no ASSET_TARGET. Gateway must fail
+	// closed before issuing an unverified file-reference write.
 	fileBody := `{"title":"file","summary":"","description":"","entries":[{"side":"human","title":"h","source":"s","artifacts":[{"kind":"file","assetId":"unverified"}],"permissions":{"cloudUse":false}}]}`
-	check(request(0, "POST", "/api/tasks", fileBody, alice, aliceSession.CsrfToken, "content-file-rejected-01"), 409)
+	check(request(0, "POST", "/api/tasks", fileBody, alice, aliceSession.CsrfToken, "content-file-rejected-01"), 503)
 	// Store both kinds of initial draft with explicit cloud authorization choices.
 	const entries = `{"title":"with entries","summary":"","description":"","category":null,"entries":[{"side":"human","title":"human work","source":"my work","artifacts":[{"kind":"link","url":"https://example.com/human"}],"permissions":{"cloudUse":false}},{"side":"agent","title":"agent work","source":"model output","artifacts":[{"kind":"link","url":"https://example.com/agent"}],"permissions":{"cloudUse":true},"agentConfiguration":{"model":"draft-model","parameters":{"temperature":0.5}}}]}`
 	response = request(0, "PUT", path, `{"expectedRevision":1,"content":`+entries+`}`, alice, aliceSession.CsrfToken, "")

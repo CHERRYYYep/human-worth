@@ -2,16 +2,50 @@ syntax = "proto3";
 
 package humanworth.asset.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1;assetv1";
 
-// AssetService 先定义挑战需要的文件接口；每次访问由服务身份、用途和归属共同授权。
+// AssetService serves both browser-owned uploads and trusted Challenge material.
+// The database owns state; callers are authorized by the gateway/user assertion
+// or by the mTLS service identity plus an explicit Access scope.
 service AssetService {
+  rpc CreateUploadSession(CreateUploadSessionRequest) returns (CreateUploadSessionResponse);
+  rpc UploadAsset(stream UploadAssetRequest) returns (UploadAssetResponse);
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+  rpc AbortUpload(AbortUploadRequest) returns (AbortUploadResponse);
+  rpc GetUploadSession(GetUploadSessionRequest) returns (GetUploadSessionResponse);
+  rpc GetAssetMetadata(GetAssetMetadataRequest) returns (GetAssetMetadataResponse);
+  rpc ListMyAssets(ListMyAssetsRequest) returns (ListMyAssetsResponse);
+  rpc CheckAssetOwnership(CheckAssetOwnershipRequest) returns (CheckAssetOwnershipResponse);
+  rpc DownloadAsset(DownloadAssetRequest) returns (stream DownloadAssetResponse);
+  // Gateway only. Anonymous public read, not an ownership bypass. Asset checks
+  // Content on every new stream. No URL/grant; 15 minute transport budget.
+  rpc DownloadPublicAsset(DownloadPublicAssetRequest) returns (stream DownloadPublicAssetResponse);
+
+  // Challenge dependency methods. Access is checked against task/run/attempt
+  // scope and the caller's mTLS service identity.
   rpc GetAsset(GetAssetRequest) returns (GetAssetResponse);
   rpc ReadAsset(ReadAssetRequest) returns (stream ReadAssetResponse);
-  rpc UploadAsset(stream UploadAssetRequest) returns (UploadAssetResponse);
 }
 
-// Asset 描述已完成校验的不可变文件，正文经有界流传输。
+enum AssetState {
+  ASSET_STATE_UNSPECIFIED = 0;
+  ASSET_STATE_STAGING = 1;
+  ASSET_STATE_READY = 2;
+  ASSET_STATE_FAILED = 3;
+  ASSET_STATE_DELETED = 4;
+}
+
+enum UploadSessionState {
+  UPLOAD_SESSION_STATE_UNSPECIFIED = 0;
+  UPLOAD_SESSION_STATE_ACTIVE = 1;
+  UPLOAD_SESSION_STATE_COMPLETED = 2;
+  UPLOAD_SESSION_STATE_ABORTED = 3;
+  UPLOAD_SESSION_STATE_EXPIRED = 4;
+}
+
+// Asset is the stable, immutable file contract used by Challenge.
 message Asset {
   string id = 1;
   string filename = 2;
@@ -21,12 +55,14 @@ message Asset {
   string run_id = 6;
   string attempt_id = 7;
 }
+
 message Access {
   string task_id = 1;
   string run_id = 2;
   string attempt_id = 3;
   string purpose = 4;
 }
+
 message GetAssetRequest {
   string asset_id = 1;
   Access access = 2;
@@ -44,7 +80,45 @@ message ReadAssetResponse {
   int64 offset = 2;
   string sha256 = 3;
 }
-// 首帧带元数据，后续帧仅带数据；同 upload_id 必须找回同一结果，不能重复建文件。
+
+message AssetMetadata {
+  string id = 1;
+  string owner_id = 2;
+  string original_filename = 3;
+  string media_type = 4;
+  int64 bytes = 5;
+  string sha256 = 6;
+  AssetState state = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp completed_at = 9;
+}
+
+message UploadSession {
+  string id = 1;
+  string asset_id = 2;
+  int64 received_bytes = 3;
+  int64 expected_bytes = 4;
+  UploadSessionState state = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+message CreateUploadSessionRequest {
+  string actor_assertion = 1;
+  string idempotency_key = 2;
+  string original_filename = 3;
+  string declared_media_type = 4;
+  int64 expected_bytes = 5;
+  string expected_sha256 = 6;
+}
+message CreateUploadSessionResponse {
+  AssetMetadata asset = 1;
+  UploadSession upload_session = 2;
+}
+
+// Browser upload frames use actor_assertion/upload_session_id/offset. Challenge
+// upload frames use access/upload_id/filename/media_type/bytes/sha256. Keeping
+// both forms in one stream preserves one AssetService while separating auth
+// and ownership rules in the server implementation.
 message UploadAssetRequest {
   Access access = 1;
   string upload_id = 2;
@@ -53,7 +127,86 @@ message UploadAssetRequest {
   int64 bytes = 5;
   string sha256 = 6;
   bytes chunk = 7;
+
+  string actor_assertion = 8;
+  string upload_session_id = 9;
+  int64 offset = 10;
+  string upload_attempt_id = 11;
+  string chunk_id = 12;
+  string chunk_sha256 = 13;
 }
 message UploadAssetResponse {
   Asset asset = 1;
+  string upload_session_id = 2;
+  int64 received_bytes = 3;
+  int64 next_offset = 4;
+  UploadSessionState state = 5;
+}
+
+message CompleteUploadRequest {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+  string asset_id = 3;
+}
+message CompleteUploadResponse { AssetMetadata asset = 1; }
+
+message AbortUploadRequest {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+}
+message AbortUploadResponse { UploadSession upload_session = 1; }
+
+message GetUploadSessionRequest {
+  string actor_assertion = 1;
+  string upload_session_id = 2;
+}
+message GetUploadSessionResponse { UploadSession upload_session = 1; }
+
+message GetAssetMetadataRequest {
+  string actor_assertion = 1;
+  string asset_id = 2;
+}
+message GetAssetMetadataResponse { AssetMetadata asset = 1; }
+
+message ListMyAssetsRequest {
+  string actor_assertion = 1;
+  int32 limit = 2;
+  string cursor = 3;
+}
+message ListMyAssetsResponse {
+  repeated AssetMetadata items = 1;
+  string next_cursor = 2;
+}
+
+message CheckAssetOwnershipRequest {
+  string actor_assertion = 1;
+  repeated string asset_ids = 2;
+}
+message CheckAssetOwnershipResponse { repeated AssetMetadata assets = 1; }
+
+message DownloadAssetRequest {
+  string actor_assertion = 1;
+  string asset_id = 2;
+}
+message DownloadAssetResponse {
+  int64 offset = 1;
+  bytes data = 2;
+}
+
+message PublicAssetReference {
+  string task_id = 1;
+  string entry_id = 2;
+  string asset_id = 3;
+}
+message DownloadPublicAssetRequest {
+  PublicAssetReference reference = 1;
+}
+// Metadata is emitted exactly once, after authorization and opening the object;
+// subsequent frames contain data only. Offsets start at zero and are contiguous.
+message DownloadPublicAssetResponse {
+  oneof value {
+    Asset metadata = 1;
+    bytes data = 2;
+  }
+  int64 offset = 3;
 }

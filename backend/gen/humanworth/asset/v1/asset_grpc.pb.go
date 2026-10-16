@@ -19,20 +19,44 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AssetService_GetAsset_FullMethodName    = "/humanworth.asset.v1.AssetService/GetAsset"
-	AssetService_ReadAsset_FullMethodName   = "/humanworth.asset.v1.AssetService/ReadAsset"
-	AssetService_UploadAsset_FullMethodName = "/humanworth.asset.v1.AssetService/UploadAsset"
+	AssetService_CreateUploadSession_FullMethodName = "/humanworth.asset.v1.AssetService/CreateUploadSession"
+	AssetService_UploadAsset_FullMethodName         = "/humanworth.asset.v1.AssetService/UploadAsset"
+	AssetService_CompleteUpload_FullMethodName      = "/humanworth.asset.v1.AssetService/CompleteUpload"
+	AssetService_AbortUpload_FullMethodName         = "/humanworth.asset.v1.AssetService/AbortUpload"
+	AssetService_GetUploadSession_FullMethodName    = "/humanworth.asset.v1.AssetService/GetUploadSession"
+	AssetService_GetAssetMetadata_FullMethodName    = "/humanworth.asset.v1.AssetService/GetAssetMetadata"
+	AssetService_ListMyAssets_FullMethodName        = "/humanworth.asset.v1.AssetService/ListMyAssets"
+	AssetService_CheckAssetOwnership_FullMethodName = "/humanworth.asset.v1.AssetService/CheckAssetOwnership"
+	AssetService_DownloadAsset_FullMethodName       = "/humanworth.asset.v1.AssetService/DownloadAsset"
+	AssetService_DownloadPublicAsset_FullMethodName = "/humanworth.asset.v1.AssetService/DownloadPublicAsset"
+	AssetService_GetAsset_FullMethodName            = "/humanworth.asset.v1.AssetService/GetAsset"
+	AssetService_ReadAsset_FullMethodName           = "/humanworth.asset.v1.AssetService/ReadAsset"
 )
 
 // AssetServiceClient is the client API for AssetService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AssetService 先定义挑战需要的文件接口；每次访问由服务身份、用途和归属共同授权。
+// AssetService serves both browser-owned uploads and trusted Challenge material.
+// The database owns state; callers are authorized by the gateway/user assertion
+// or by the mTLS service identity plus an explicit Access scope.
 type AssetServiceClient interface {
+	CreateUploadSession(ctx context.Context, in *CreateUploadSessionRequest, opts ...grpc.CallOption) (*CreateUploadSessionResponse, error)
+	UploadAsset(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse], error)
+	CompleteUpload(ctx context.Context, in *CompleteUploadRequest, opts ...grpc.CallOption) (*CompleteUploadResponse, error)
+	AbortUpload(ctx context.Context, in *AbortUploadRequest, opts ...grpc.CallOption) (*AbortUploadResponse, error)
+	GetUploadSession(ctx context.Context, in *GetUploadSessionRequest, opts ...grpc.CallOption) (*GetUploadSessionResponse, error)
+	GetAssetMetadata(ctx context.Context, in *GetAssetMetadataRequest, opts ...grpc.CallOption) (*GetAssetMetadataResponse, error)
+	ListMyAssets(ctx context.Context, in *ListMyAssetsRequest, opts ...grpc.CallOption) (*ListMyAssetsResponse, error)
+	CheckAssetOwnership(ctx context.Context, in *CheckAssetOwnershipRequest, opts ...grpc.CallOption) (*CheckAssetOwnershipResponse, error)
+	DownloadAsset(ctx context.Context, in *DownloadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAssetResponse], error)
+	// Gateway only. Anonymous public read, not an ownership bypass. Asset checks
+	// Content on every new stream. No URL/grant; 15 minute transport budget.
+	DownloadPublicAsset(ctx context.Context, in *DownloadPublicAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPublicAssetResponse], error)
+	// Challenge dependency methods. Access is checked against task/run/attempt
+	// scope and the caller's mTLS service identity.
 	GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error)
 	ReadAsset(ctx context.Context, in *ReadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadAssetResponse], error)
-	UploadAsset(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse], error)
 }
 
 type assetServiceClient struct {
@@ -42,6 +66,127 @@ type assetServiceClient struct {
 func NewAssetServiceClient(cc grpc.ClientConnInterface) AssetServiceClient {
 	return &assetServiceClient{cc}
 }
+
+func (c *assetServiceClient) CreateUploadSession(ctx context.Context, in *CreateUploadSessionRequest, opts ...grpc.CallOption) (*CreateUploadSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateUploadSessionResponse)
+	err := c.cc.Invoke(ctx, AssetService_CreateUploadSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) UploadAsset(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[0], AssetService_UploadAsset_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[UploadAssetRequest, UploadAssetResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_UploadAssetClient = grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse]
+
+func (c *assetServiceClient) CompleteUpload(ctx context.Context, in *CompleteUploadRequest, opts ...grpc.CallOption) (*CompleteUploadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompleteUploadResponse)
+	err := c.cc.Invoke(ctx, AssetService_CompleteUpload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) AbortUpload(ctx context.Context, in *AbortUploadRequest, opts ...grpc.CallOption) (*AbortUploadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AbortUploadResponse)
+	err := c.cc.Invoke(ctx, AssetService_AbortUpload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) GetUploadSession(ctx context.Context, in *GetUploadSessionRequest, opts ...grpc.CallOption) (*GetUploadSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUploadSessionResponse)
+	err := c.cc.Invoke(ctx, AssetService_GetUploadSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) GetAssetMetadata(ctx context.Context, in *GetAssetMetadataRequest, opts ...grpc.CallOption) (*GetAssetMetadataResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAssetMetadataResponse)
+	err := c.cc.Invoke(ctx, AssetService_GetAssetMetadata_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) ListMyAssets(ctx context.Context, in *ListMyAssetsRequest, opts ...grpc.CallOption) (*ListMyAssetsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMyAssetsResponse)
+	err := c.cc.Invoke(ctx, AssetService_ListMyAssets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) CheckAssetOwnership(ctx context.Context, in *CheckAssetOwnershipRequest, opts ...grpc.CallOption) (*CheckAssetOwnershipResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckAssetOwnershipResponse)
+	err := c.cc.Invoke(ctx, AssetService_CheckAssetOwnership_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *assetServiceClient) DownloadAsset(ctx context.Context, in *DownloadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAssetResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[1], AssetService_DownloadAsset_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadAssetRequest, DownloadAssetResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_DownloadAssetClient = grpc.ServerStreamingClient[DownloadAssetResponse]
+
+func (c *assetServiceClient) DownloadPublicAsset(ctx context.Context, in *DownloadPublicAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPublicAssetResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[2], AssetService_DownloadPublicAsset_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadPublicAssetRequest, DownloadPublicAssetResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_DownloadPublicAssetClient = grpc.ServerStreamingClient[DownloadPublicAssetResponse]
 
 func (c *assetServiceClient) GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -55,7 +200,7 @@ func (c *assetServiceClient) GetAsset(ctx context.Context, in *GetAssetRequest, 
 
 func (c *assetServiceClient) ReadAsset(ctx context.Context, in *ReadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadAssetResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[0], AssetService_ReadAsset_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[3], AssetService_ReadAsset_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -72,28 +217,30 @@ func (c *assetServiceClient) ReadAsset(ctx context.Context, in *ReadAssetRequest
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AssetService_ReadAssetClient = grpc.ServerStreamingClient[ReadAssetResponse]
 
-func (c *assetServiceClient) UploadAsset(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[1], AssetService_UploadAsset_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[UploadAssetRequest, UploadAssetResponse]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AssetService_UploadAssetClient = grpc.ClientStreamingClient[UploadAssetRequest, UploadAssetResponse]
-
 // AssetServiceServer is the server API for AssetService service.
 // All implementations must embed UnimplementedAssetServiceServer
 // for forward compatibility.
 //
-// AssetService 先定义挑战需要的文件接口；每次访问由服务身份、用途和归属共同授权。
+// AssetService serves both browser-owned uploads and trusted Challenge material.
+// The database owns state; callers are authorized by the gateway/user assertion
+// or by the mTLS service identity plus an explicit Access scope.
 type AssetServiceServer interface {
+	CreateUploadSession(context.Context, *CreateUploadSessionRequest) (*CreateUploadSessionResponse, error)
+	UploadAsset(grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]) error
+	CompleteUpload(context.Context, *CompleteUploadRequest) (*CompleteUploadResponse, error)
+	AbortUpload(context.Context, *AbortUploadRequest) (*AbortUploadResponse, error)
+	GetUploadSession(context.Context, *GetUploadSessionRequest) (*GetUploadSessionResponse, error)
+	GetAssetMetadata(context.Context, *GetAssetMetadataRequest) (*GetAssetMetadataResponse, error)
+	ListMyAssets(context.Context, *ListMyAssetsRequest) (*ListMyAssetsResponse, error)
+	CheckAssetOwnership(context.Context, *CheckAssetOwnershipRequest) (*CheckAssetOwnershipResponse, error)
+	DownloadAsset(*DownloadAssetRequest, grpc.ServerStreamingServer[DownloadAssetResponse]) error
+	// Gateway only. Anonymous public read, not an ownership bypass. Asset checks
+	// Content on every new stream. No URL/grant; 15 minute transport budget.
+	DownloadPublicAsset(*DownloadPublicAssetRequest, grpc.ServerStreamingServer[DownloadPublicAssetResponse]) error
+	// Challenge dependency methods. Access is checked against task/run/attempt
+	// scope and the caller's mTLS service identity.
 	GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error)
 	ReadAsset(*ReadAssetRequest, grpc.ServerStreamingServer[ReadAssetResponse]) error
-	UploadAsset(grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]) error
 	mustEmbedUnimplementedAssetServiceServer()
 }
 
@@ -104,14 +251,41 @@ type AssetServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAssetServiceServer struct{}
 
+func (UnimplementedAssetServiceServer) CreateUploadSession(context.Context, *CreateUploadSessionRequest) (*CreateUploadSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateUploadSession not implemented")
+}
+func (UnimplementedAssetServiceServer) UploadAsset(grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]) error {
+	return status.Error(codes.Unimplemented, "method UploadAsset not implemented")
+}
+func (UnimplementedAssetServiceServer) CompleteUpload(context.Context, *CompleteUploadRequest) (*CompleteUploadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteUpload not implemented")
+}
+func (UnimplementedAssetServiceServer) AbortUpload(context.Context, *AbortUploadRequest) (*AbortUploadResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AbortUpload not implemented")
+}
+func (UnimplementedAssetServiceServer) GetUploadSession(context.Context, *GetUploadSessionRequest) (*GetUploadSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUploadSession not implemented")
+}
+func (UnimplementedAssetServiceServer) GetAssetMetadata(context.Context, *GetAssetMetadataRequest) (*GetAssetMetadataResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAssetMetadata not implemented")
+}
+func (UnimplementedAssetServiceServer) ListMyAssets(context.Context, *ListMyAssetsRequest) (*ListMyAssetsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMyAssets not implemented")
+}
+func (UnimplementedAssetServiceServer) CheckAssetOwnership(context.Context, *CheckAssetOwnershipRequest) (*CheckAssetOwnershipResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckAssetOwnership not implemented")
+}
+func (UnimplementedAssetServiceServer) DownloadAsset(*DownloadAssetRequest, grpc.ServerStreamingServer[DownloadAssetResponse]) error {
+	return status.Error(codes.Unimplemented, "method DownloadAsset not implemented")
+}
+func (UnimplementedAssetServiceServer) DownloadPublicAsset(*DownloadPublicAssetRequest, grpc.ServerStreamingServer[DownloadPublicAssetResponse]) error {
+	return status.Error(codes.Unimplemented, "method DownloadPublicAsset not implemented")
+}
 func (UnimplementedAssetServiceServer) GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAsset not implemented")
 }
 func (UnimplementedAssetServiceServer) ReadAsset(*ReadAssetRequest, grpc.ServerStreamingServer[ReadAssetResponse]) error {
 	return status.Error(codes.Unimplemented, "method ReadAsset not implemented")
-}
-func (UnimplementedAssetServiceServer) UploadAsset(grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]) error {
-	return status.Error(codes.Unimplemented, "method UploadAsset not implemented")
 }
 func (UnimplementedAssetServiceServer) mustEmbedUnimplementedAssetServiceServer() {}
 func (UnimplementedAssetServiceServer) testEmbeddedByValue()                      {}
@@ -133,6 +307,161 @@ func RegisterAssetServiceServer(s grpc.ServiceRegistrar, srv AssetServiceServer)
 	}
 	s.RegisterService(&AssetService_ServiceDesc, srv)
 }
+
+func _AssetService_CreateUploadSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateUploadSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).CreateUploadSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_CreateUploadSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).CreateUploadSession(ctx, req.(*CreateUploadSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_UploadAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AssetServiceServer).UploadAsset(&grpc.GenericServerStream[UploadAssetRequest, UploadAssetResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_UploadAssetServer = grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]
+
+func _AssetService_CompleteUpload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteUploadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).CompleteUpload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_CompleteUpload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).CompleteUpload(ctx, req.(*CompleteUploadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_AbortUpload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AbortUploadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).AbortUpload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_AbortUpload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).AbortUpload(ctx, req.(*AbortUploadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_GetUploadSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUploadSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).GetUploadSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_GetUploadSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).GetUploadSession(ctx, req.(*GetUploadSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_GetAssetMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAssetMetadataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).GetAssetMetadata(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_GetAssetMetadata_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).GetAssetMetadata(ctx, req.(*GetAssetMetadataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_ListMyAssets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMyAssetsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).ListMyAssets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_ListMyAssets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).ListMyAssets(ctx, req.(*ListMyAssetsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_CheckAssetOwnership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckAssetOwnershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AssetServiceServer).CheckAssetOwnership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AssetService_CheckAssetOwnership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AssetServiceServer).CheckAssetOwnership(ctx, req.(*CheckAssetOwnershipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AssetService_DownloadAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadAssetRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AssetServiceServer).DownloadAsset(m, &grpc.GenericServerStream[DownloadAssetRequest, DownloadAssetResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_DownloadAssetServer = grpc.ServerStreamingServer[DownloadAssetResponse]
+
+func _AssetService_DownloadPublicAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadPublicAssetRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AssetServiceServer).DownloadPublicAsset(m, &grpc.GenericServerStream[DownloadPublicAssetRequest, DownloadPublicAssetResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_DownloadPublicAssetServer = grpc.ServerStreamingServer[DownloadPublicAssetResponse]
 
 func _AssetService_GetAsset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetAssetRequest)
@@ -163,13 +492,6 @@ func _AssetService_ReadAsset_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AssetService_ReadAssetServer = grpc.ServerStreamingServer[ReadAssetResponse]
 
-func _AssetService_UploadAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(AssetServiceServer).UploadAsset(&grpc.GenericServerStream[UploadAssetRequest, UploadAssetResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AssetService_UploadAssetServer = grpc.ClientStreamingServer[UploadAssetRequest, UploadAssetResponse]
-
 // AssetService_ServiceDesc is the grpc.ServiceDesc for AssetService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -178,20 +500,58 @@ var AssetService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*AssetServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "CreateUploadSession",
+			Handler:    _AssetService_CreateUploadSession_Handler,
+		},
+		{
+			MethodName: "CompleteUpload",
+			Handler:    _AssetService_CompleteUpload_Handler,
+		},
+		{
+			MethodName: "AbortUpload",
+			Handler:    _AssetService_AbortUpload_Handler,
+		},
+		{
+			MethodName: "GetUploadSession",
+			Handler:    _AssetService_GetUploadSession_Handler,
+		},
+		{
+			MethodName: "GetAssetMetadata",
+			Handler:    _AssetService_GetAssetMetadata_Handler,
+		},
+		{
+			MethodName: "ListMyAssets",
+			Handler:    _AssetService_ListMyAssets_Handler,
+		},
+		{
+			MethodName: "CheckAssetOwnership",
+			Handler:    _AssetService_CheckAssetOwnership_Handler,
+		},
+		{
 			MethodName: "GetAsset",
 			Handler:    _AssetService_GetAsset_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "ReadAsset",
-			Handler:       _AssetService_ReadAsset_Handler,
-			ServerStreams: true,
-		},
-		{
 			StreamName:    "UploadAsset",
 			Handler:       _AssetService_UploadAsset_Handler,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "DownloadAsset",
+			Handler:       _AssetService_DownloadAsset_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "DownloadPublicAsset",
+			Handler:       _AssetService_DownloadPublicAsset_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ReadAsset",
+			Handler:       _AssetService_ReadAsset_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "humanworth/asset/v1/asset.proto",

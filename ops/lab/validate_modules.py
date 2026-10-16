@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import app
 import infra
+import object_store
 import release
 from deployment_health import healthy
 
@@ -34,6 +35,8 @@ def objects(raw):
 
 
 def main():
+    if shutil.which('kubectl') is None or shutil.which('kind') is None or not infra.KUBECONFIG.is_file():
+        raise RuntimeError('INCONCLUSIVE: kubectl, kind and the isolated lab kubeconfig are required')
     namespace='human-worth-verify-'+secrets.token_hex(4)
     original=infra.kube
     port=18444
@@ -83,9 +86,10 @@ def main():
         print('Disposable namespace: '+namespace,flush=True)
         try:
             kube('apply','--server-side','-f','-',input=(infra.HERE/'namespace.yaml').read_text())
-            with patch.object(app,'REPO',source),patch.object(app,'STATE',state),patch.object(app,'kube',kube),patch.object(infra,'kube',kube),patch.object(release,'kube',kube):
+            with patch.object(app,'REPO',source),patch.object(app,'STATE',state),patch.object(app,'kube',kube),patch.object(infra,'kube',kube),patch.object(release,'kube',kube),patch.object(object_store,'apply',lambda text:kube('apply','--server-side','-f','-',input=text)),patch.object(object_store,'kube',kube),patch.object(object_store,'STATE',state),patch.object(object_store,'HERE',source/'ops/lab'):
                 revision=hashlib.sha256((app.source_hash()+(source/'ops/lab/app.py').read_text()).encode()).hexdigest()[:40]
                 modules=app.load_services(source)
+                # app.main reconciles the private Asset store before Asset itself.
                 app.main(revision=revision)
                 with open(Path(directory)/'forward.log','w') as log:
                     forward=subprocess.Popen(['kubectl','--kubeconfig',str(infra.KUBECONFIG),'--context','kind-lab','-n',namespace,'port-forward','--address=127.0.0.1','service/gateway',str(port)+':443'],stdout=log,stderr=log)
@@ -102,7 +106,7 @@ def main():
                         time.sleep(2)
                     print('PASS: completion marker appears only after all modules pass',flush=True)
                     env={**os.environ,'HUMAN_WORTH_VERIFY_NAMESPACE':namespace,'HUMAN_WORTH_VERIFY_STATE':str(state),'HUMAN_WORTH_VERIFY_KUBECONFIG':str(infra.KUBECONFIG),'HUMAN_WORTH_VERIFY_PORT':str(port)}
-                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKindContentDeployment$','-count=1','-timeout=240s','-v'],cwd=app.REPO/'backend',env=env,check=True)
+                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset)Deployment$','-count=1','-timeout=480s','-v'],cwd=source/'backend',env=env,check=True)
                     import check_network
                     with patch.object(check_network,'kube',kube):check_network.main()
                     previous=release.snapshot()

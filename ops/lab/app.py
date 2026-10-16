@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import subprocess
@@ -76,7 +77,31 @@ def build_images(revision=None, services=None):
     return result
 
 
-def database_secrets(services):
+def object_storage_config(state=None):
+    """Explicit lab-only S3 config. No credentials or filesystem fallback in Git."""
+    state = state or STATE
+    path = Path(os.environ.get('ASSET_S3_CONFIG_FILE', str(state/'asset-s3.json')))
+    if path.resolve().is_relative_to(REPO.resolve()):
+        raise RuntimeError('Asset S3 secrets must be outside the repository')
+    try:
+        if path.stat().st_mode & 0o077:
+            raise ValueError('unsafe permissions')
+        config = json.loads(path.read_text())
+        required = {'endpoint','bucket','region','access_key','secret_key','force_path_style'}
+        if set(config) != required or type(config['force_path_style']) is not bool or any(not isinstance(config[k], str) or not config[k].strip() for k in required-{'force_path_style'}):
+            raise ValueError('incomplete configuration')
+        # The shipped lab NetworkPolicy grants access only to this in-cluster
+        # private S3 service. Other destinations require a reviewed policy.
+        if config['endpoint'] != 'http://asset-store.human-worth.svc.cluster.local:8333' or not config['force_path_style']:
+            raise ValueError('endpoint is outside the lab storage policy')
+        if not re.fullmatch(r'[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]', config['bucket']):
+            raise ValueError('invalid bucket')
+        return config
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise RuntimeError('Asset requires a private, complete asset-s3.json and a pre-provisioned S3 bucket') from None
+
+
+def database_secrets(services, storage=None):
     for name, spec in services.items():
         if not spec['database']: continue
         for role in (['owner','runtime','operator'] if name == 'identity' else ['owner','runtime']):
@@ -84,6 +109,9 @@ def database_secrets(services):
             username=name.replace('-', '_')+'_'+role
             secret(name+'-'+role+'-password',{'username':username,'password':password},'kubernetes.io/basic-auth')
             values={'database-url':'postgres://'+username+':'+password+'@database-rw.human-worth.svc.cluster.local:5432/human_worth?sslmode=verify-full&sslrootcert=/database-ca/ca.crt'}
+            if name == 'asset' and role == 'runtime':
+                if storage is None: raise RuntimeError('Asset S3 configuration missing')
+                values.update({'s3-'+key.replace('_','-'): (str(value).lower() if isinstance(value,bool) else value) for key,value in storage.items()})
             if name == 'identity' and role=='runtime':
                 for purpose in ['encryption','signing']:
                     ring=json.dumps({'active':'key1','keys':{'key1':base64.b64encode(secrets.token_bytes(32)).decode()}})
@@ -181,10 +209,19 @@ def main(revision=None, before_activation=None):
     if REPO in STATE.resolve().parents: raise RuntimeError('Lab secrets must be outside the repository')
     if not KUBECONFIG.exists(): raise RuntimeError('Run infra.py first')
     services=load_services(REPO)
+    # Asset's private lab store is an explicit module dependency. It creates no
+    # public endpoint and has no filesystem fallback; installation is idempotent.
+    storage=None
+    install_asset_storage=None
+    if 'asset' in services:
+        from object_store import configuration, install
+        storage=configuration(STATE)
+        install_asset_storage=lambda: install(storage)
     images=build_images(revision,services)
     workloads={name:manifests(name,images['images'][name]['tag']) for name in services}
     if before_activation: before_activation()
-    database_secrets(services)
+    if install_asset_storage: install_asset_storage()
+    database_secrets(services,storage)
     apply(database_manifest(services))
     kube('-n','human-worth','wait','--for=condition=Ready','cluster/database','--timeout=900s')
     primary=database_primary(services)
@@ -230,6 +267,7 @@ def main(revision=None, before_activation=None):
         # Environment and TLS credentials are read on process startup; secret changes require a rollout.
         fingerprint=hashlib.sha256((STATE/(name+'.crt')).read_bytes())
         if spec['database']: fingerprint.update((STATE/(name+'-runtime.password')).read_bytes())
+        if name=='asset': fingerprint.update(json.dumps(storage,sort_keys=True).encode())
         if name=='identity':
             fingerprint.update((STATE/'encryption-keys.json').read_bytes());fingerprint.update((STATE/'signing-keys.json').read_bytes())
             if google.exists(): fingerprint.update(google.read_bytes())

@@ -16,11 +16,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix='human-worth-network-') as directory:
         temp=Path(directory)
         run('env','CGO_ENABLED=0','go','build','-o',str(temp/'probe'),str(source))
+        # The container runs as 65532, not the host builder. A private host
+        # umask must not turn the COPY'd binary into a root-only executable.
+        (temp/'probe').chmod(0o755)
         shutil.copyfile('/etc/ssl/certs/ca-certificates.crt',temp/'ca-certificates.crt')
+        (temp/'ca-certificates.crt').chmod(0o644)
         (temp/'Dockerfile').write_text('FROM scratch\nCOPY probe /probe\nCOPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\nUSER 65532:65532\nENTRYPOINT ["/probe"]\n')
         run('docker','build','--provenance=false','--sbom=false','-t',image,str(temp))
     run('kind','load','docker-image','--name','lab',image)
-    for caller in ['identity','content','gateway','untrusted']:
+    for caller in ['identity','content','asset','gateway','untrusted']:
         name='network-probe-'+caller
         # Matching real policy labels is intentional. A failing readiness probe
         # prevents these test Pods from ever entering application Service endpoints.
@@ -40,8 +44,10 @@ def main():
                 phase=kube('-n','human-worth','get','pod',name,'-o','jsonpath={.status.phase}',capture=True).stdout
                 if phase in ['Succeeded','Failed']:break
                 time.sleep(1)
+            if phase!='Succeeded':
+                kube('-n','human-worth','get','pod',name,'-o','jsonpath={.status}')
+                raise RuntimeError('Network checks failed: '+caller)
             kube('-n','human-worth','logs',name)
-            if phase!='Succeeded':raise RuntimeError('Network checks failed: '+caller)
         finally:
             kube('-n','human-worth','delete','pod',name,'--wait=false')
 

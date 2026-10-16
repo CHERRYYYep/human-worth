@@ -208,3 +208,12 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 - `npm run ci` 退出 0，包括 5 个 Node 测试和 18 个 Python 测试（含上游模块部署控制器回归）。部署控制器测试中的模拟发布输出不代表本次执行过发布。
 - `go test -tags=lab ./internal/identity -run '^$'` 退出 0，仅证明上游 lab 测试可编译，没有执行 kind 测试；`git diff --cached --check` 退出 0。
 - 证据保存在本机 `/tmp/hw-merge-validation/`；临时 PostgreSQL 已停止，测试 DSN/密码文件已删除。原临时工具已不存在，Docker 无访问权限，因此本轮重新下载并校验固定版本 Buf 与 PostgreSQL 源码，只在 `/tmp` 构建使用。未连接业务数据库，也未执行远端 CI、Google 真人登录或公网验收。
+
+
+## 8. Asset 3C 兼容扩展（2026-10-16，Agent Self-Claimed）
+
+首阶段草稿 API 和 `task_drafts` 状态保持不变；`file` 已由 Asset 所有权校验接入，上文首阶段“不支持 file”是历史边界，不再是当前分支行为。
+
+新增 `CheckAssetAccess`（仅 mTLS asset）和 `ApplyAssetReview`（仅 mTLS moderation），以及 `003_reviewed_assets.sql` 的审核快照、稳定作品 ID 和幂等决定回执。Content 唯一持有审核展示状态；Asset 只检查 ready/存储，每次公开读取回查 Content，不跨 schema，也不递归。确切 task/entry/file 引用、published 任务和 approved 作品必须同时满足；下架/撤销提交后新的读取拒绝。旧批准重放只返回原回执，不能复活已收紧状态。
+
+原实现没有审核工作流，本切片只增加受信决定应用端：首次批准冻结指定草稿版本的人类+agent 初始包，之后用审核 revision 处理决定；私有草稿后续编辑不改变冻结内容。未实现 Moderation 服务/案件/投递、公开任务详情、追加作品、Voting 目录与完整投稿状态机。详细技术选择、HTTP-RPC 对照和验收边界见 [Asset 3C](backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	challengepb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
@@ -44,6 +45,7 @@ type Options struct {
 	Challenge            challengepb.ChallengeServiceClient
 	DeploymentStatusFile string
 	Content              contentpb.ContentServiceClient
+	Asset                assetpb.AssetServiceClient
 	Origin               string
 	LogoPath             string
 	TrustedProxies       []netip.Prefix
@@ -118,6 +120,15 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 	}{
 		{"POST", "/api/tasks", "createTaskDraft", h.createDraft},
 		{"GET", "/api/me/submissions", "listMySubmissions", h.listSubmissions},
+		{"POST", "/api/me/assets/upload-sessions", "createAssetUploadSession", h.createAssetUploadSession},
+		{"PUT", "/api/me/assets/upload-sessions/{uploadSessionId}/content", "uploadAsset", h.uploadAsset},
+		{"POST", "/api/me/assets/{assetId}/complete", "completeAsset", h.completeAsset},
+		{"DELETE", "/api/me/assets/upload-sessions/{uploadSessionId}", "abortAsset", h.abortAsset},
+		{"GET", "/api/me/upload-sessions/{uploadSessionId}", "getAssetUploadSession", h.getAssetUploadSession},
+		{"GET", "/api/me/assets", "listMyAssets", h.listMyAssets},
+		{"GET", "/api/me/assets/{assetId}", "getAssetMetadata", h.getAssetMetadata},
+		{"GET", "/api/me/assets/{assetId}/content", "downloadAsset", h.downloadAsset},
+		{"GET", "/api/tasks/{taskId}/entries/{entryId}/assets/{assetId}/content", "downloadPublicAsset", h.downloadPublicAsset},
 		{"GET", "/api/me/tasks/{taskId}", "getMyTaskSubmission", h.getDraft},
 		{"PUT", "/api/me/tasks/{taskId}", "replaceTaskDraft", h.replaceDraft},
 		{"GET", "/api/auth/google", "startGoogleLogin", h.start}, {"GET", "/api/auth/google/callback", "completeGoogleLogin", h.callback},
@@ -219,10 +230,23 @@ func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc
 		if name == "completeGoogleLogin" {
 			timeout = 15 * time.Second
 		}
+		if name == "uploadAsset" {
+			timeout = 15 * time.Minute
+		}
+		if name == "downloadAsset" || name == "downloadPublicAsset" {
+			timeout = 15 * time.Minute
+		}
+		if name == "completeAsset" {
+			timeout = 30 * time.Second
+		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		r = r.WithContext(ctx)
-		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit)
+		maxBody := bodyLimit
+		if name == "uploadAsset" {
+			maxBody = 32<<20 + 1
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		next(w, r)
 	}
 }
@@ -251,6 +275,9 @@ func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
 	switch s.Code() {
 	case codes.InvalidArgument:
 		code = 400
+		if reason == "unsupported_media_type" {
+			code = 415
+		}
 	case codes.Unauthenticated:
 		code = 401
 	case codes.PermissionDenied:

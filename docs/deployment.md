@@ -230,7 +230,7 @@ Nginx 已启用经 CA 验证的私有 HTTPS 上游，其他站点配置摘要保
 
 1. `dev` 的 push `CI` 完整成功后，[Deploy workflow](../.github/workflows/deploy.yml) 通过 `workflow_run` 启动；PR、main、fork、失败或未完成的 CI 不进入部署检查。Deploy 与 CI 分开，避免本机等待 CI 完成而 CI 又等待部署。
 2. 本机既有 timer 每分钟拉取最新 dev，重复核对本仓库、分支、事件、不可变 SHA 与最新 CI 尝试。**实际发布继续由本机拉取控制器驱动**；Action 等待结果并使失败可见，不需要托管 runner 登录宿主机，也不新增云端密钥。
-3. [模块清单](../ops/lab/services.json) 随该 SHA 读取。目前登记 Identity、Content、gateway；其余服务没有条目，不生成空壳部署。控制器按清单构建镜像、生成各自证书、准备隔离数据库角色及 schema、运行迁移和授权，再按依赖顺序滚动；gateway 始终最后。原 `identity-admin` 运维镜像继续构建，不作为常驻模块。
+3. [模块清单](../ops/lab/services.json) 随该 SHA 读取。已发布环境登记 Identity、Content、gateway；当前 Asset 3B 工作分支另登记 Asset，依赖为 `identity → asset → content → gateway`。Asset 激活前控制器调和私有 lab SeaweedFS bucket 和仓库外 S3 Secret，随后按清单构建镜像、生成各自证书、准备隔离数据库角色及 schema、运行迁移和授权，再按依赖顺序滚动；gateway 始终最后。原 `identity-admin` 运维镜像继续构建，不作为常驻模块。Asset 条目尚未合入或发布，单实例 SeaweedFS/PVC 仅为 lab，不是生产 HA。
 4. 每个模块的应用 YAML 同样来自该 SHA，经 [模块校验](../ops/lab/services.py) 限定为自身命名空间资源、固定镜像、双副本、健康探针及允许的凭据引用；不接受 RBAC、跨模块 Secret、其他命名空间或新增公网 NodePort。控制器不执行归档内的 shell/Python 部署脚本。基础设施模板和部署程序仍是仓库外安装的可信代码。
 5. 数据库模块使用 `<module>_owner` 迁移、`<module>_runtime` 运行；密码保存在私有状态目录和 Secret。授权 SQL 在数据库内以模块 owner 连接执行，不获得 postgres 管理员权限，不允许 psql 元命令。CNPG 的新增角色、HBA 和数据库 NetworkPolicy 由登记模块生成，保留 Identity 原有运行与运维角色。
 6. 所有模块滚动和 API 检查通过、再次确认 dev/CI 后，控制器更新 `release-status` ConfigMap。gateway 通过目录挂载读取完成状态，在 `/api/health` 增加可选 `deploymentRevision` / `deployedServices`。Action 必须同时确认当前 gateway SHA、完成 SHA、完整模块集合与登记的只读 API 检查；Content 的检查覆盖本人草稿详情和列表的无会话 401 响应。仅 gateway 已更新，或遗漏没有公开 API 的 worker，都不能标记部署完成。ConfigMap 更新可能延迟，控制器最多等待 180 秒传播。
@@ -297,6 +297,10 @@ sudo systemctl enable --now human-worth-identity-deploy.timer
 - `python3 ops/verify_deployment.py <首次发布 SHA> --timeout=240` 与 `/tmp/human-worth-public-smoke <首次发布 SHA>` 均退出 0；原始输出为 `/tmp/human-worth-public-deployment-verification.log`、`/tmp/human-worth-public-content-smoke.log`，临时验收程序为 `/tmp/human-worth-public-smoke.go`。
 
 这次公网验收没有重复执行真人 Google 授权或数据库主备切换；前者沿用用户此前确认的结果，后者沿用 Identity lab 既有实验记录，不扩大本次证据范围。
+
+#### Asset 3B 本地声明状态（更新至 2026-10-16）
+
+Asset 已在工作分支加入模块 catalog、迁移/授权、双副本 Deployment、mTLS/NetworkPolicy、私有 S3-compatible SeaweedFS/PVC 和 gateway/content 依赖；控制器会在 Asset 激活前调和 bucket。SeaweedFS 共享存储、两实例读写和进程内 HTTP 联调已有本地测试证据。2026-10-16 用户运行 `DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py`，反馈 `validation-exit=0`（约 4 分 21 秒）：Identity、Asset、Content、gateway 均 rollout 成功，重复完整部署通过，临时 namespace `human-worth-verify-a615b6a6` 已清理。本地 kind 模块部署验证为 PASS，但这不表示默认 namespace 保留了 Asset 部署，也不代表新增 Git 提交或远端 CI 通过。同日已扩展并实际运行完整脚本，最终退出 0：临时 namespace `human-worth-verify-88a374d6` 内的 Asset 跨 Pod 上传/续传/完成/下载、Content 私有绑定与版本冲突、A/B 隔离、撤销、Pod 重建、S3 copy+delete 恢复、过期清理与存储暂停/恢复均通过；五类调用方的网络允许/拒绝、失败回滚、迁移重试及重复部署通过，namespace 已清理。新增测试方案与首次失败/修复记录见 [Asset 验收证据](backend-asset.md#10-3b-存储与-kind-lab-状态)。没有 push、合入或公网发布。单实例 SeaweedFS/PVC 是 Agent Self-Claimed lab 方案，不是生产高可用对象存储。
 
 <details>
 <summary>首次安装与入口切换的操作参考</summary>
@@ -598,3 +602,10 @@ Identity 的公网迁移已完成；后续模块通过真实联调后再逐项�
 2026-09-18 图示验证记录：`python3 scripts/check_docs.py` 与 `git diff --check` 退出码均为 0；两张 Mermaid 图经 Mermaid 10.9.3 与本机 Chrome 渲染、查看通过。另核对架构中的九类应用与部署清单一致，图中十八个副本无遗漏，同服务两份位于不同工作节点。渲染工具仅用于本次文档检查，未加入项目依赖。
 
 </details>
+
+
+### Asset 3C 本地部署增量（2026-10-16，Agent Self-Claimed）
+
+本分支 Asset 配置 `CONTENT_TARGET` 与到 Content 的受限 egress，Content 只增加来自 Asset 的 RPC ingress；gRPC 方法仍单独授权。Content 先迁移 `003_reviewed_assets.sql`、更新列级 grants 再滚动。catalog 加入公开未知资源 404 检查。Asset 的 Content 依赖是每次公开请求必须成功的运行时授权依赖，不是启动/readiness 依赖：保留 Asset → Identity、Content → Asset 的部署排序，避免环。Content 停机时公开文件读取 fail closed，Asset 私有管理仍可用。
+
+`validate_modules.py` 对不可变快照运行 Content、Asset 与 PublicAsset 三项真实 kind 业务测试；仅在隔离 namespace，未部署公网。Moderation 测试调用方经临时 CA/mTLS 和 loopback 隧道投递决定，不能将其算成 Moderation 模块部署或该模块网络验收。结果见 [Asset 3C](backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。

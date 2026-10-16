@@ -15,6 +15,11 @@ service ContentService {
   rpc ListMySubmissions(ListMySubmissionsRequest) returns (ListMySubmissionsResponse);
   rpc ReplaceTaskDraft(ReplaceTaskDraftRequest) returns (ReplaceTaskDraftResponse);
 
+  // Public file access is checked only by Asset; no callback to Asset here.
+  rpc CheckAssetAccess(CheckAssetAccessRequest) returns (CheckAssetAccessResponse);
+  // Trusted Moderation decision application, NOT an admin/browser approval API.
+  rpc ApplyAssetReview(ApplyAssetReviewRequest) returns (ApplyAssetReviewResponse);
+
   // Challenge dependencies: implemented by stateful integration fixtures until the full modules land.
   rpc GetChallengeTaskDescription(GetChallengeTaskDescriptionRequest) returns (GetChallengeTaskDescriptionResponse);
   rpc ListChallengeWorks(ListChallengeWorksRequest) returns (ListChallengeWorksResponse);
@@ -74,6 +79,8 @@ message CreateTaskDraftRequest {
   string actor_assertion = 1;
   string idempotency_key = 2;
   TaskDraftInput content = 3;
+  // Gateway obtains this assertion for the same web session and Asset method.
+  string asset_actor_assertion = 4;
 }
 message CreateTaskDraftResponse { TaskSubmission submission = 1; }
 message GetMyTaskSubmissionRequest {
@@ -99,6 +106,7 @@ message ReplaceTaskDraftRequest {
   string task_id = 2;
   int64 expected_revision = 3;
   TaskDraftInput content = 4;
+  string asset_actor_assertion = 5;
 }
 message ReplaceTaskDraftResponse { TaskSubmission submission = 1; }
 
@@ -213,4 +221,53 @@ message GetChallengeRegistrationRequest {
 }
 message GetChallengeRegistrationResponse {
   RegistrationReceipt receipt = 1;
+}
+
+// An immutable reviewed snapshot, separate from the author's editable draft.
+enum ReviewedTaskState {
+  REVIEWED_TASK_STATE_UNSPECIFIED = 0;
+  REVIEWED_TASK_STATE_PUBLISHED = 1;
+  REVIEWED_TASK_STATE_TAKEN_DOWN = 2;
+}
+enum ReviewedEntryState {
+  REVIEWED_ENTRY_STATE_UNSPECIFIED = 0;
+  REVIEWED_ENTRY_STATE_APPROVED = 1;
+  REVIEWED_ENTRY_STATE_APPROVAL_REVOKED = 2;
+}
+message EntryAssetReview {
+  string entry_id = 1;
+  ReviewedEntryState state = 2;
+}
+// decision_id is globally unique and immutable. Same request replays its receipt;
+// different content conflicts. expected_revision serializes all task/entry
+// decisions. The first approval (expected_revision=0) freezes submission_revision
+// and approves the complete human+agent initial bundle. Later decisions cannot
+// replace that snapshot. mTLS moderation only; 2s, safe exact-request retry.
+message ApplyAssetReviewRequest {
+  string decision_id = 1;
+  string task_id = 2;
+  int64 submission_revision = 3;
+  int64 expected_revision = 4;
+  oneof decision {
+    ReviewedTaskState task_state = 5;
+    EntryAssetReview entry_review = 6;
+  }
+}
+message ReviewedEntry {
+  string id = 1;
+  int32 position = 2;
+  ReviewedEntryState state = 3;
+}
+message ApplyAssetReviewResponse {
+  int64 revision = 1;
+  repeated ReviewedEntry entries = 2;
+}
+message CheckAssetAccessRequest {
+  humanworth.asset.v1.PublicAssetReference reference = 1;
+}
+// allowed requires the exact file reference, a published task and approved entry.
+// No owner bypass, no grant/cache. mTLS asset only; 2s; read-only safe retry.
+message CheckAssetAccessResponse {
+  bool allowed = 1;
+  int64 revision = 2;
 }

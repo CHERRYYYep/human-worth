@@ -1,6 +1,7 @@
 package grpc
 
 import (
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	challengepb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
@@ -31,5 +32,14 @@ func Targets() []application.Target {
 		{Operation: domain.CancelRun, Audience: "challenge", Method: challengepb.ChallengeService_CancelRun_FullMethodName},
 		{Operation: domain.RestartRun, Audience: "challenge", Method: challengepb.ChallengeService_RestartRun_FullMethodName},
 		{Operation: domain.RegisterCandidate, Audience: "challenge", Method: challengepb.ChallengeService_RegisterCandidate_FullMethodName},
+		{Operation: domain.CreateAssetUploadSession, Audience: "asset", Method: assetpb.AssetService_CreateUploadSession_FullMethodName},
+		{Operation: domain.UploadAsset, Audience: "asset", Method: assetpb.AssetService_UploadAsset_FullMethodName},
+		{Operation: domain.CompleteAssetUpload, Audience: "asset", Method: assetpb.AssetService_CompleteUpload_FullMethodName},
+		{Operation: domain.AbortAssetUpload, Audience: "asset", Method: assetpb.AssetService_AbortUpload_FullMethodName},
+		{Operation: domain.GetAssetUploadSession, Audience: "asset", Method: assetpb.AssetService_GetUploadSession_FullMethodName},
+		{Operation: domain.GetAssetMetadata, Audience: "asset", Method: assetpb.AssetService_GetAssetMetadata_FullMethodName},
+		{Operation: domain.ListMyAssets, Audience: "asset", Method: assetpb.AssetService_ListMyAssets_FullMethodName},
+		{Operation: domain.CheckAssetOwnership, Audience: "asset", Method: assetpb.AssetService_CheckAssetOwnership_FullMethodName},
+		{Operation: domain.DownloadAsset, Audience: "asset", Method: assetpb.AssetService_DownloadAsset_FullMethodName},
 	}
 }

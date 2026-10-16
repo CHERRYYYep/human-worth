@@ -52,3 +52,14 @@ func TestUnaryUsesMethodDeadline(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicAssetTimeouts(t *testing.T) {
+	if methodTimeout("/humanworth.asset.v1.AssetService/DownloadPublicAsset") != 15*time.Minute {
+		t.Fatal("public stream deadline mismatch")
+	}
+	for _, method := range []string{"/humanworth.content.v1.ContentService/CheckAssetAccess", "/humanworth.content.v1.ContentService/ApplyAssetReview"} {
+		if methodTimeout(method) != 2*time.Second {
+			t.Fatal("public control-plane deadline mismatch", method)
+		}
+	}
+}

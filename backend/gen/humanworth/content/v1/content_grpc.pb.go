@@ -23,6 +23,8 @@ const (
 	ContentService_GetMyTaskSubmission_FullMethodName         = "/humanworth.content.v1.ContentService/GetMyTaskSubmission"
 	ContentService_ListMySubmissions_FullMethodName           = "/humanworth.content.v1.ContentService/ListMySubmissions"
 	ContentService_ReplaceTaskDraft_FullMethodName            = "/humanworth.content.v1.ContentService/ReplaceTaskDraft"
+	ContentService_CheckAssetAccess_FullMethodName            = "/humanworth.content.v1.ContentService/CheckAssetAccess"
+	ContentService_ApplyAssetReview_FullMethodName            = "/humanworth.content.v1.ContentService/ApplyAssetReview"
 	ContentService_GetChallengeTaskDescription_FullMethodName = "/humanworth.content.v1.ContentService/GetChallengeTaskDescription"
 	ContentService_ListChallengeWorks_FullMethodName          = "/humanworth.content.v1.ContentService/ListChallengeWorks"
 	ContentService_ListChallengeComments_FullMethodName       = "/humanworth.content.v1.ContentService/ListChallengeComments"
@@ -43,6 +45,10 @@ type ContentServiceClient interface {
 	GetMyTaskSubmission(ctx context.Context, in *GetMyTaskSubmissionRequest, opts ...grpc.CallOption) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(ctx context.Context, in *ListMySubmissionsRequest, opts ...grpc.CallOption) (*ListMySubmissionsResponse, error)
 	ReplaceTaskDraft(ctx context.Context, in *ReplaceTaskDraftRequest, opts ...grpc.CallOption) (*ReplaceTaskDraftResponse, error)
+	// Public file access is checked only by Asset; no callback to Asset here.
+	CheckAssetAccess(ctx context.Context, in *CheckAssetAccessRequest, opts ...grpc.CallOption) (*CheckAssetAccessResponse, error)
+	// Trusted Moderation decision application, NOT an admin/browser approval API.
+	ApplyAssetReview(ctx context.Context, in *ApplyAssetReviewRequest, opts ...grpc.CallOption) (*ApplyAssetReviewResponse, error)
 	// Challenge dependencies: implemented by stateful integration fixtures until the full modules land.
 	GetChallengeTaskDescription(ctx context.Context, in *GetChallengeTaskDescriptionRequest, opts ...grpc.CallOption) (*GetChallengeTaskDescriptionResponse, error)
 	ListChallengeWorks(ctx context.Context, in *ListChallengeWorksRequest, opts ...grpc.CallOption) (*ListChallengeWorksResponse, error)
@@ -96,6 +102,26 @@ func (c *contentServiceClient) ReplaceTaskDraft(ctx context.Context, in *Replace
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReplaceTaskDraftResponse)
 	err := c.cc.Invoke(ctx, ContentService_ReplaceTaskDraft_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) CheckAssetAccess(ctx context.Context, in *CheckAssetAccessRequest, opts ...grpc.CallOption) (*CheckAssetAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckAssetAccessResponse)
+	err := c.cc.Invoke(ctx, ContentService_CheckAssetAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) ApplyAssetReview(ctx context.Context, in *ApplyAssetReviewRequest, opts ...grpc.CallOption) (*ApplyAssetReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyAssetReviewResponse)
+	err := c.cc.Invoke(ctx, ContentService_ApplyAssetReview_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +218,10 @@ type ContentServiceServer interface {
 	GetMyTaskSubmission(context.Context, *GetMyTaskSubmissionRequest) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(context.Context, *ListMySubmissionsRequest) (*ListMySubmissionsResponse, error)
 	ReplaceTaskDraft(context.Context, *ReplaceTaskDraftRequest) (*ReplaceTaskDraftResponse, error)
+	// Public file access is checked only by Asset; no callback to Asset here.
+	CheckAssetAccess(context.Context, *CheckAssetAccessRequest) (*CheckAssetAccessResponse, error)
+	// Trusted Moderation decision application, NOT an admin/browser approval API.
+	ApplyAssetReview(context.Context, *ApplyAssetReviewRequest) (*ApplyAssetReviewResponse, error)
 	// Challenge dependencies: implemented by stateful integration fixtures until the full modules land.
 	GetChallengeTaskDescription(context.Context, *GetChallengeTaskDescriptionRequest) (*GetChallengeTaskDescriptionResponse, error)
 	ListChallengeWorks(context.Context, *ListChallengeWorksRequest) (*ListChallengeWorksResponse, error)
@@ -222,6 +252,12 @@ func (UnimplementedContentServiceServer) ListMySubmissions(context.Context, *Lis
 }
 func (UnimplementedContentServiceServer) ReplaceTaskDraft(context.Context, *ReplaceTaskDraftRequest) (*ReplaceTaskDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReplaceTaskDraft not implemented")
+}
+func (UnimplementedContentServiceServer) CheckAssetAccess(context.Context, *CheckAssetAccessRequest) (*CheckAssetAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckAssetAccess not implemented")
+}
+func (UnimplementedContentServiceServer) ApplyAssetReview(context.Context, *ApplyAssetReviewRequest) (*ApplyAssetReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApplyAssetReview not implemented")
 }
 func (UnimplementedContentServiceServer) GetChallengeTaskDescription(context.Context, *GetChallengeTaskDescriptionRequest) (*GetChallengeTaskDescriptionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetChallengeTaskDescription not implemented")
@@ -336,6 +372,42 @@ func _ContentService_ReplaceTaskDraft_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ContentServiceServer).ReplaceTaskDraft(ctx, req.(*ReplaceTaskDraftRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_CheckAssetAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckAssetAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).CheckAssetAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_CheckAssetAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).CheckAssetAccess(ctx, req.(*CheckAssetAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_ApplyAssetReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyAssetReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ApplyAssetReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ApplyAssetReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ApplyAssetReview(ctx, req.(*ApplyAssetReviewRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -506,6 +578,14 @@ var ContentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReplaceTaskDraft",
 			Handler:    _ContentService_ReplaceTaskDraft_Handler,
+		},
+		{
+			MethodName: "CheckAssetAccess",
+			Handler:    _ContentService_CheckAssetAccess_Handler,
+		},
+		{
+			MethodName: "ApplyAssetReview",
+			Handler:    _ContentService_ApplyAssetReview_Handler,
 		},
 		{
 			MethodName: "GetChallengeTaskDescription",

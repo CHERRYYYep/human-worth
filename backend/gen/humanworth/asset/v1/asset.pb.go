@@ -9,6 +9,7 @@ package assetv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -21,7 +22,117 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Asset 描述已完成校验的不可变文件，正文经有界流传输。
+type AssetState int32
+
+const (
+	AssetState_ASSET_STATE_UNSPECIFIED AssetState = 0
+	AssetState_ASSET_STATE_STAGING     AssetState = 1
+	AssetState_ASSET_STATE_READY       AssetState = 2
+	AssetState_ASSET_STATE_FAILED      AssetState = 3
+	AssetState_ASSET_STATE_DELETED     AssetState = 4
+)
+
+// Enum value maps for AssetState.
+var (
+	AssetState_name = map[int32]string{
+		0: "ASSET_STATE_UNSPECIFIED",
+		1: "ASSET_STATE_STAGING",
+		2: "ASSET_STATE_READY",
+		3: "ASSET_STATE_FAILED",
+		4: "ASSET_STATE_DELETED",
+	}
+	AssetState_value = map[string]int32{
+		"ASSET_STATE_UNSPECIFIED": 0,
+		"ASSET_STATE_STAGING":     1,
+		"ASSET_STATE_READY":       2,
+		"ASSET_STATE_FAILED":      3,
+		"ASSET_STATE_DELETED":     4,
+	}
+)
+
+func (x AssetState) Enum() *AssetState {
+	p := new(AssetState)
+	*p = x
+	return p
+}
+
+func (x AssetState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AssetState) Descriptor() protoreflect.EnumDescriptor {
+	return file_humanworth_asset_v1_asset_proto_enumTypes[0].Descriptor()
+}
+
+func (AssetState) Type() protoreflect.EnumType {
+	return &file_humanworth_asset_v1_asset_proto_enumTypes[0]
+}
+
+func (x AssetState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AssetState.Descriptor instead.
+func (AssetState) EnumDescriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{0}
+}
+
+type UploadSessionState int32
+
+const (
+	UploadSessionState_UPLOAD_SESSION_STATE_UNSPECIFIED UploadSessionState = 0
+	UploadSessionState_UPLOAD_SESSION_STATE_ACTIVE      UploadSessionState = 1
+	UploadSessionState_UPLOAD_SESSION_STATE_COMPLETED   UploadSessionState = 2
+	UploadSessionState_UPLOAD_SESSION_STATE_ABORTED     UploadSessionState = 3
+	UploadSessionState_UPLOAD_SESSION_STATE_EXPIRED     UploadSessionState = 4
+)
+
+// Enum value maps for UploadSessionState.
+var (
+	UploadSessionState_name = map[int32]string{
+		0: "UPLOAD_SESSION_STATE_UNSPECIFIED",
+		1: "UPLOAD_SESSION_STATE_ACTIVE",
+		2: "UPLOAD_SESSION_STATE_COMPLETED",
+		3: "UPLOAD_SESSION_STATE_ABORTED",
+		4: "UPLOAD_SESSION_STATE_EXPIRED",
+	}
+	UploadSessionState_value = map[string]int32{
+		"UPLOAD_SESSION_STATE_UNSPECIFIED": 0,
+		"UPLOAD_SESSION_STATE_ACTIVE":      1,
+		"UPLOAD_SESSION_STATE_COMPLETED":   2,
+		"UPLOAD_SESSION_STATE_ABORTED":     3,
+		"UPLOAD_SESSION_STATE_EXPIRED":     4,
+	}
+)
+
+func (x UploadSessionState) Enum() *UploadSessionState {
+	p := new(UploadSessionState)
+	*p = x
+	return p
+}
+
+func (x UploadSessionState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UploadSessionState) Descriptor() protoreflect.EnumDescriptor {
+	return file_humanworth_asset_v1_asset_proto_enumTypes[1].Descriptor()
+}
+
+func (UploadSessionState) Type() protoreflect.EnumType {
+	return &file_humanworth_asset_v1_asset_proto_enumTypes[1]
+}
+
+func (x UploadSessionState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UploadSessionState.Descriptor instead.
+func (UploadSessionState) EnumDescriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{1}
+}
+
+// Asset is the stable, immutable file contract used by Challenge.
 type Asset struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -398,23 +509,360 @@ func (x *ReadAssetResponse) GetSha256() string {
 	return ""
 }
 
-// 首帧带元数据，后续帧仅带数据；同 upload_id 必须找回同一结果，不能重复建文件。
-type UploadAssetRequest struct {
+type AssetMetadata struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	OwnerId          string                 `protobuf:"bytes,2,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	OriginalFilename string                 `protobuf:"bytes,3,opt,name=original_filename,json=originalFilename,proto3" json:"original_filename,omitempty"`
+	MediaType        string                 `protobuf:"bytes,4,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	Bytes            int64                  `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	Sha256           string                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	State            AssetState             `protobuf:"varint,7,opt,name=state,proto3,enum=humanworth.asset.v1.AssetState" json:"state,omitempty"`
+	CreatedAt        *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CompletedAt      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *AssetMetadata) Reset() {
+	*x = AssetMetadata{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AssetMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AssetMetadata) ProtoMessage() {}
+
+func (x *AssetMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AssetMetadata.ProtoReflect.Descriptor instead.
+func (*AssetMetadata) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AssetMetadata) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AssetMetadata) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *AssetMetadata) GetOriginalFilename() string {
+	if x != nil {
+		return x.OriginalFilename
+	}
+	return ""
+}
+
+func (x *AssetMetadata) GetMediaType() string {
+	if x != nil {
+		return x.MediaType
+	}
+	return ""
+}
+
+func (x *AssetMetadata) GetBytes() int64 {
+	if x != nil {
+		return x.Bytes
+	}
+	return 0
+}
+
+func (x *AssetMetadata) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *AssetMetadata) GetState() AssetState {
+	if x != nil {
+		return x.State
+	}
+	return AssetState_ASSET_STATE_UNSPECIFIED
+}
+
+func (x *AssetMetadata) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *AssetMetadata) GetCompletedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return nil
+}
+
+type UploadSession struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Access        *Access                `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`
-	UploadId      string                 `protobuf:"bytes,2,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
-	Filename      string                 `protobuf:"bytes,3,opt,name=filename,proto3" json:"filename,omitempty"`
-	MediaType     string                 `protobuf:"bytes,4,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
-	Bytes         int64                  `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
-	Sha256        string                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
-	Chunk         []byte                 `protobuf:"bytes,7,opt,name=chunk,proto3" json:"chunk,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	AssetId       string                 `protobuf:"bytes,2,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	ReceivedBytes int64                  `protobuf:"varint,3,opt,name=received_bytes,json=receivedBytes,proto3" json:"received_bytes,omitempty"`
+	ExpectedBytes int64                  `protobuf:"varint,4,opt,name=expected_bytes,json=expectedBytes,proto3" json:"expected_bytes,omitempty"`
+	State         UploadSessionState     `protobuf:"varint,5,opt,name=state,proto3,enum=humanworth.asset.v1.UploadSessionState" json:"state,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
+func (x *UploadSession) Reset() {
+	*x = UploadSession{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadSession) ProtoMessage() {}
+
+func (x *UploadSession) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadSession.ProtoReflect.Descriptor instead.
+func (*UploadSession) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *UploadSession) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UploadSession) GetAssetId() string {
+	if x != nil {
+		return x.AssetId
+	}
+	return ""
+}
+
+func (x *UploadSession) GetReceivedBytes() int64 {
+	if x != nil {
+		return x.ReceivedBytes
+	}
+	return 0
+}
+
+func (x *UploadSession) GetExpectedBytes() int64 {
+	if x != nil {
+		return x.ExpectedBytes
+	}
+	return 0
+}
+
+func (x *UploadSession) GetState() UploadSessionState {
+	if x != nil {
+		return x.State
+	}
+	return UploadSessionState_UPLOAD_SESSION_STATE_UNSPECIFIED
+}
+
+func (x *UploadSession) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+type CreateUploadSessionRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion    string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	IdempotencyKey    string                 `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	OriginalFilename  string                 `protobuf:"bytes,3,opt,name=original_filename,json=originalFilename,proto3" json:"original_filename,omitempty"`
+	DeclaredMediaType string                 `protobuf:"bytes,4,opt,name=declared_media_type,json=declaredMediaType,proto3" json:"declared_media_type,omitempty"`
+	ExpectedBytes     int64                  `protobuf:"varint,5,opt,name=expected_bytes,json=expectedBytes,proto3" json:"expected_bytes,omitempty"`
+	ExpectedSha256    string                 `protobuf:"bytes,6,opt,name=expected_sha256,json=expectedSha256,proto3" json:"expected_sha256,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *CreateUploadSessionRequest) Reset() {
+	*x = CreateUploadSessionRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateUploadSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateUploadSessionRequest) ProtoMessage() {}
+
+func (x *CreateUploadSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateUploadSessionRequest.ProtoReflect.Descriptor instead.
+func (*CreateUploadSessionRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CreateUploadSessionRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *CreateUploadSessionRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *CreateUploadSessionRequest) GetOriginalFilename() string {
+	if x != nil {
+		return x.OriginalFilename
+	}
+	return ""
+}
+
+func (x *CreateUploadSessionRequest) GetDeclaredMediaType() string {
+	if x != nil {
+		return x.DeclaredMediaType
+	}
+	return ""
+}
+
+func (x *CreateUploadSessionRequest) GetExpectedBytes() int64 {
+	if x != nil {
+		return x.ExpectedBytes
+	}
+	return 0
+}
+
+func (x *CreateUploadSessionRequest) GetExpectedSha256() string {
+	if x != nil {
+		return x.ExpectedSha256
+	}
+	return ""
+}
+
+type CreateUploadSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Asset         *AssetMetadata         `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	UploadSession *UploadSession         `protobuf:"bytes,2,opt,name=upload_session,json=uploadSession,proto3" json:"upload_session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateUploadSessionResponse) Reset() {
+	*x = CreateUploadSessionResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateUploadSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateUploadSessionResponse) ProtoMessage() {}
+
+func (x *CreateUploadSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateUploadSessionResponse.ProtoReflect.Descriptor instead.
+func (*CreateUploadSessionResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreateUploadSessionResponse) GetAsset() *AssetMetadata {
+	if x != nil {
+		return x.Asset
+	}
+	return nil
+}
+
+func (x *CreateUploadSessionResponse) GetUploadSession() *UploadSession {
+	if x != nil {
+		return x.UploadSession
+	}
+	return nil
+}
+
+// Browser upload frames use actor_assertion/upload_session_id/offset. Challenge
+// upload frames use access/upload_id/filename/media_type/bytes/sha256. Keeping
+// both forms in one stream preserves one AssetService while separating auth
+// and ownership rules in the server implementation.
+type UploadAssetRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Access          *Access                `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`
+	UploadId        string                 `protobuf:"bytes,2,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	Filename        string                 `protobuf:"bytes,3,opt,name=filename,proto3" json:"filename,omitempty"`
+	MediaType       string                 `protobuf:"bytes,4,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	Bytes           int64                  `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	Sha256          string                 `protobuf:"bytes,6,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	Chunk           []byte                 `protobuf:"bytes,7,opt,name=chunk,proto3" json:"chunk,omitempty"`
+	ActorAssertion  string                 `protobuf:"bytes,8,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	UploadSessionId string                 `protobuf:"bytes,9,opt,name=upload_session_id,json=uploadSessionId,proto3" json:"upload_session_id,omitempty"`
+	Offset          int64                  `protobuf:"varint,10,opt,name=offset,proto3" json:"offset,omitempty"`
+	UploadAttemptId string                 `protobuf:"bytes,11,opt,name=upload_attempt_id,json=uploadAttemptId,proto3" json:"upload_attempt_id,omitempty"`
+	ChunkId         string                 `protobuf:"bytes,12,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkSha256     string                 `protobuf:"bytes,13,opt,name=chunk_sha256,json=chunkSha256,proto3" json:"chunk_sha256,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
 func (x *UploadAssetRequest) Reset() {
 	*x = UploadAssetRequest{}
-	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[6]
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -426,7 +874,7 @@ func (x *UploadAssetRequest) String() string {
 func (*UploadAssetRequest) ProtoMessage() {}
 
 func (x *UploadAssetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[6]
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -439,7 +887,7 @@ func (x *UploadAssetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadAssetRequest.ProtoReflect.Descriptor instead.
 func (*UploadAssetRequest) Descriptor() ([]byte, []int) {
-	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{6}
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UploadAssetRequest) GetAccess() *Access {
@@ -491,16 +939,62 @@ func (x *UploadAssetRequest) GetChunk() []byte {
 	return nil
 }
 
+func (x *UploadAssetRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *UploadAssetRequest) GetUploadSessionId() string {
+	if x != nil {
+		return x.UploadSessionId
+	}
+	return ""
+}
+
+func (x *UploadAssetRequest) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *UploadAssetRequest) GetUploadAttemptId() string {
+	if x != nil {
+		return x.UploadAttemptId
+	}
+	return ""
+}
+
+func (x *UploadAssetRequest) GetChunkId() string {
+	if x != nil {
+		return x.ChunkId
+	}
+	return ""
+}
+
+func (x *UploadAssetRequest) GetChunkSha256() string {
+	if x != nil {
+		return x.ChunkSha256
+	}
+	return ""
+}
+
 type UploadAssetResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Asset         *Asset                 `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Asset           *Asset                 `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	UploadSessionId string                 `protobuf:"bytes,2,opt,name=upload_session_id,json=uploadSessionId,proto3" json:"upload_session_id,omitempty"`
+	ReceivedBytes   int64                  `protobuf:"varint,3,opt,name=received_bytes,json=receivedBytes,proto3" json:"received_bytes,omitempty"`
+	NextOffset      int64                  `protobuf:"varint,4,opt,name=next_offset,json=nextOffset,proto3" json:"next_offset,omitempty"`
+	State           UploadSessionState     `protobuf:"varint,5,opt,name=state,proto3,enum=humanworth.asset.v1.UploadSessionState" json:"state,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UploadAssetResponse) Reset() {
 	*x = UploadAssetResponse{}
-	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[7]
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +1006,7 @@ func (x *UploadAssetResponse) String() string {
 func (*UploadAssetResponse) ProtoMessage() {}
 
 func (x *UploadAssetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[7]
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +1019,7 @@ func (x *UploadAssetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadAssetResponse.ProtoReflect.Descriptor instead.
 func (*UploadAssetResponse) Descriptor() ([]byte, []int) {
-	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{7}
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UploadAssetResponse) GetAsset() *Asset {
@@ -535,11 +1029,939 @@ func (x *UploadAssetResponse) GetAsset() *Asset {
 	return nil
 }
 
+func (x *UploadAssetResponse) GetUploadSessionId() string {
+	if x != nil {
+		return x.UploadSessionId
+	}
+	return ""
+}
+
+func (x *UploadAssetResponse) GetReceivedBytes() int64 {
+	if x != nil {
+		return x.ReceivedBytes
+	}
+	return 0
+}
+
+func (x *UploadAssetResponse) GetNextOffset() int64 {
+	if x != nil {
+		return x.NextOffset
+	}
+	return 0
+}
+
+func (x *UploadAssetResponse) GetState() UploadSessionState {
+	if x != nil {
+		return x.State
+	}
+	return UploadSessionState_UPLOAD_SESSION_STATE_UNSPECIFIED
+}
+
+type CompleteUploadRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion  string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	UploadSessionId string                 `protobuf:"bytes,2,opt,name=upload_session_id,json=uploadSessionId,proto3" json:"upload_session_id,omitempty"`
+	AssetId         string                 `protobuf:"bytes,3,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CompleteUploadRequest) Reset() {
+	*x = CompleteUploadRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompleteUploadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompleteUploadRequest) ProtoMessage() {}
+
+func (x *CompleteUploadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompleteUploadRequest.ProtoReflect.Descriptor instead.
+func (*CompleteUploadRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CompleteUploadRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *CompleteUploadRequest) GetUploadSessionId() string {
+	if x != nil {
+		return x.UploadSessionId
+	}
+	return ""
+}
+
+func (x *CompleteUploadRequest) GetAssetId() string {
+	if x != nil {
+		return x.AssetId
+	}
+	return ""
+}
+
+type CompleteUploadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Asset         *AssetMetadata         `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompleteUploadResponse) Reset() {
+	*x = CompleteUploadResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompleteUploadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompleteUploadResponse) ProtoMessage() {}
+
+func (x *CompleteUploadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompleteUploadResponse.ProtoReflect.Descriptor instead.
+func (*CompleteUploadResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CompleteUploadResponse) GetAsset() *AssetMetadata {
+	if x != nil {
+		return x.Asset
+	}
+	return nil
+}
+
+type AbortUploadRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion  string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	UploadSessionId string                 `protobuf:"bytes,2,opt,name=upload_session_id,json=uploadSessionId,proto3" json:"upload_session_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AbortUploadRequest) Reset() {
+	*x = AbortUploadRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AbortUploadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AbortUploadRequest) ProtoMessage() {}
+
+func (x *AbortUploadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AbortUploadRequest.ProtoReflect.Descriptor instead.
+func (*AbortUploadRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AbortUploadRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *AbortUploadRequest) GetUploadSessionId() string {
+	if x != nil {
+		return x.UploadSessionId
+	}
+	return ""
+}
+
+type AbortUploadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UploadSession *UploadSession         `protobuf:"bytes,1,opt,name=upload_session,json=uploadSession,proto3" json:"upload_session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AbortUploadResponse) Reset() {
+	*x = AbortUploadResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AbortUploadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AbortUploadResponse) ProtoMessage() {}
+
+func (x *AbortUploadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AbortUploadResponse.ProtoReflect.Descriptor instead.
+func (*AbortUploadResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *AbortUploadResponse) GetUploadSession() *UploadSession {
+	if x != nil {
+		return x.UploadSession
+	}
+	return nil
+}
+
+type GetUploadSessionRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion  string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	UploadSessionId string                 `protobuf:"bytes,2,opt,name=upload_session_id,json=uploadSessionId,proto3" json:"upload_session_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *GetUploadSessionRequest) Reset() {
+	*x = GetUploadSessionRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUploadSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUploadSessionRequest) ProtoMessage() {}
+
+func (x *GetUploadSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUploadSessionRequest.ProtoReflect.Descriptor instead.
+func (*GetUploadSessionRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetUploadSessionRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *GetUploadSessionRequest) GetUploadSessionId() string {
+	if x != nil {
+		return x.UploadSessionId
+	}
+	return ""
+}
+
+type GetUploadSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UploadSession *UploadSession         `protobuf:"bytes,1,opt,name=upload_session,json=uploadSession,proto3" json:"upload_session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUploadSessionResponse) Reset() {
+	*x = GetUploadSessionResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUploadSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUploadSessionResponse) ProtoMessage() {}
+
+func (x *GetUploadSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUploadSessionResponse.ProtoReflect.Descriptor instead.
+func (*GetUploadSessionResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetUploadSessionResponse) GetUploadSession() *UploadSession {
+	if x != nil {
+		return x.UploadSession
+	}
+	return nil
+}
+
+type GetAssetMetadataRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	AssetId        string                 `protobuf:"bytes,2,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetAssetMetadataRequest) Reset() {
+	*x = GetAssetMetadataRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAssetMetadataRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAssetMetadataRequest) ProtoMessage() {}
+
+func (x *GetAssetMetadataRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAssetMetadataRequest.ProtoReflect.Descriptor instead.
+func (*GetAssetMetadataRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GetAssetMetadataRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *GetAssetMetadataRequest) GetAssetId() string {
+	if x != nil {
+		return x.AssetId
+	}
+	return ""
+}
+
+type GetAssetMetadataResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Asset         *AssetMetadata         `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAssetMetadataResponse) Reset() {
+	*x = GetAssetMetadataResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAssetMetadataResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAssetMetadataResponse) ProtoMessage() {}
+
+func (x *GetAssetMetadataResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAssetMetadataResponse.ProtoReflect.Descriptor instead.
+func (*GetAssetMetadataResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetAssetMetadataResponse) GetAsset() *AssetMetadata {
+	if x != nil {
+		return x.Asset
+	}
+	return nil
+}
+
+type ListMyAssetsRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	Limit          int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor         string                 `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ListMyAssetsRequest) Reset() {
+	*x = ListMyAssetsRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyAssetsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyAssetsRequest) ProtoMessage() {}
+
+func (x *ListMyAssetsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyAssetsRequest.ProtoReflect.Descriptor instead.
+func (*ListMyAssetsRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ListMyAssetsRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *ListMyAssetsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListMyAssetsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListMyAssetsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*AssetMetadata       `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyAssetsResponse) Reset() {
+	*x = ListMyAssetsResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyAssetsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyAssetsResponse) ProtoMessage() {}
+
+func (x *ListMyAssetsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyAssetsResponse.ProtoReflect.Descriptor instead.
+func (*ListMyAssetsResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ListMyAssetsResponse) GetItems() []*AssetMetadata {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListMyAssetsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type CheckAssetOwnershipRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	AssetIds       []string               `protobuf:"bytes,2,rep,name=asset_ids,json=assetIds,proto3" json:"asset_ids,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CheckAssetOwnershipRequest) Reset() {
+	*x = CheckAssetOwnershipRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckAssetOwnershipRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckAssetOwnershipRequest) ProtoMessage() {}
+
+func (x *CheckAssetOwnershipRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckAssetOwnershipRequest.ProtoReflect.Descriptor instead.
+func (*CheckAssetOwnershipRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *CheckAssetOwnershipRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *CheckAssetOwnershipRequest) GetAssetIds() []string {
+	if x != nil {
+		return x.AssetIds
+	}
+	return nil
+}
+
+type CheckAssetOwnershipResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Assets        []*AssetMetadata       `protobuf:"bytes,1,rep,name=assets,proto3" json:"assets,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckAssetOwnershipResponse) Reset() {
+	*x = CheckAssetOwnershipResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckAssetOwnershipResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckAssetOwnershipResponse) ProtoMessage() {}
+
+func (x *CheckAssetOwnershipResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckAssetOwnershipResponse.ProtoReflect.Descriptor instead.
+func (*CheckAssetOwnershipResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *CheckAssetOwnershipResponse) GetAssets() []*AssetMetadata {
+	if x != nil {
+		return x.Assets
+	}
+	return nil
+}
+
+type DownloadAssetRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	AssetId        string                 `protobuf:"bytes,2,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DownloadAssetRequest) Reset() {
+	*x = DownloadAssetRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadAssetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadAssetRequest) ProtoMessage() {}
+
+func (x *DownloadAssetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadAssetRequest.ProtoReflect.Descriptor instead.
+func (*DownloadAssetRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *DownloadAssetRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *DownloadAssetRequest) GetAssetId() string {
+	if x != nil {
+		return x.AssetId
+	}
+	return ""
+}
+
+type DownloadAssetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Offset        int64                  `protobuf:"varint,1,opt,name=offset,proto3" json:"offset,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadAssetResponse) Reset() {
+	*x = DownloadAssetResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadAssetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadAssetResponse) ProtoMessage() {}
+
+func (x *DownloadAssetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadAssetResponse.ProtoReflect.Descriptor instead.
+func (*DownloadAssetResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *DownloadAssetResponse) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *DownloadAssetResponse) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type PublicAssetReference struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	EntryId       string                 `protobuf:"bytes,2,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	AssetId       string                 `protobuf:"bytes,3,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PublicAssetReference) Reset() {
+	*x = PublicAssetReference{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PublicAssetReference) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PublicAssetReference) ProtoMessage() {}
+
+func (x *PublicAssetReference) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PublicAssetReference.ProtoReflect.Descriptor instead.
+func (*PublicAssetReference) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *PublicAssetReference) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *PublicAssetReference) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *PublicAssetReference) GetAssetId() string {
+	if x != nil {
+		return x.AssetId
+	}
+	return ""
+}
+
+type DownloadPublicAssetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reference     *PublicAssetReference  `protobuf:"bytes,1,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadPublicAssetRequest) Reset() {
+	*x = DownloadPublicAssetRequest{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadPublicAssetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadPublicAssetRequest) ProtoMessage() {}
+
+func (x *DownloadPublicAssetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadPublicAssetRequest.ProtoReflect.Descriptor instead.
+func (*DownloadPublicAssetRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *DownloadPublicAssetRequest) GetReference() *PublicAssetReference {
+	if x != nil {
+		return x.Reference
+	}
+	return nil
+}
+
+// Metadata is emitted exactly once, after authorization and opening the object;
+// subsequent frames contain data only. Offsets start at zero and are contiguous.
+type DownloadPublicAssetResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Value:
+	//
+	//	*DownloadPublicAssetResponse_Metadata
+	//	*DownloadPublicAssetResponse_Data
+	Value         isDownloadPublicAssetResponse_Value `protobuf_oneof:"value"`
+	Offset        int64                               `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadPublicAssetResponse) Reset() {
+	*x = DownloadPublicAssetResponse{}
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadPublicAssetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadPublicAssetResponse) ProtoMessage() {}
+
+func (x *DownloadPublicAssetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_asset_v1_asset_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadPublicAssetResponse.ProtoReflect.Descriptor instead.
+func (*DownloadPublicAssetResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_asset_v1_asset_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *DownloadPublicAssetResponse) GetValue() isDownloadPublicAssetResponse_Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *DownloadPublicAssetResponse) GetMetadata() *Asset {
+	if x != nil {
+		if x, ok := x.Value.(*DownloadPublicAssetResponse_Metadata); ok {
+			return x.Metadata
+		}
+	}
+	return nil
+}
+
+func (x *DownloadPublicAssetResponse) GetData() []byte {
+	if x != nil {
+		if x, ok := x.Value.(*DownloadPublicAssetResponse_Data); ok {
+			return x.Data
+		}
+	}
+	return nil
+}
+
+func (x *DownloadPublicAssetResponse) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+type isDownloadPublicAssetResponse_Value interface {
+	isDownloadPublicAssetResponse_Value()
+}
+
+type DownloadPublicAssetResponse_Metadata struct {
+	Metadata *Asset `protobuf:"bytes,1,opt,name=metadata,proto3,oneof"`
+}
+
+type DownloadPublicAssetResponse_Data struct {
+	Data []byte `protobuf:"bytes,2,opt,name=data,proto3,oneof"`
+}
+
+func (*DownloadPublicAssetResponse_Metadata) isDownloadPublicAssetResponse_Value() {}
+
+func (*DownloadPublicAssetResponse_Data) isDownloadPublicAssetResponse_Value() {}
+
 var File_humanworth_asset_v1_asset_proto protoreflect.FileDescriptor
 
 const file_humanworth_asset_v1_asset_proto_rawDesc = "" +
 	"\n" +
-	"\x1fhumanworth/asset/v1/asset.proto\x12\x13humanworth.asset.v1\"\xb6\x01\n" +
+	"\x1fhumanworth/asset/v1/asset.proto\x12\x13humanworth.asset.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb6\x01\n" +
 	"\x05Asset\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bfilename\x18\x02 \x01(\tR\bfilename\x12\x1d\n" +
@@ -568,7 +1990,37 @@ const file_humanworth_asset_v1_asset_proto_rawDesc = "" +
 	"\x11ReadAssetResponse\x12\x14\n" +
 	"\x05chunk\x18\x01 \x01(\fR\x05chunk\x12\x16\n" +
 	"\x06offset\x18\x02 \x01(\x03R\x06offset\x12\x16\n" +
-	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"\xe5\x01\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"\xe5\x02\n" +
+	"\rAssetMetadata\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
+	"\bowner_id\x18\x02 \x01(\tR\aownerId\x12+\n" +
+	"\x11original_filename\x18\x03 \x01(\tR\x10originalFilename\x12\x1d\n" +
+	"\n" +
+	"media_type\x18\x04 \x01(\tR\tmediaType\x12\x14\n" +
+	"\x05bytes\x18\x05 \x01(\x03R\x05bytes\x12\x16\n" +
+	"\x06sha256\x18\x06 \x01(\tR\x06sha256\x125\n" +
+	"\x05state\x18\a \x01(\x0e2\x1f.humanworth.asset.v1.AssetStateR\x05state\x129\n" +
+	"\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12=\n" +
+	"\fcompleted_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\"\x82\x02\n" +
+	"\rUploadSession\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
+	"\basset_id\x18\x02 \x01(\tR\aassetId\x12%\n" +
+	"\x0ereceived_bytes\x18\x03 \x01(\x03R\rreceivedBytes\x12%\n" +
+	"\x0eexpected_bytes\x18\x04 \x01(\x03R\rexpectedBytes\x12=\n" +
+	"\x05state\x18\x05 \x01(\x0e2'.humanworth.asset.v1.UploadSessionStateR\x05state\x129\n" +
+	"\n" +
+	"expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x9b\x02\n" +
+	"\x1aCreateUploadSessionRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12+\n" +
+	"\x11original_filename\x18\x03 \x01(\tR\x10originalFilename\x12.\n" +
+	"\x13declared_media_type\x18\x04 \x01(\tR\x11declaredMediaType\x12%\n" +
+	"\x0eexpected_bytes\x18\x05 \x01(\x03R\rexpectedBytes\x12'\n" +
+	"\x0fexpected_sha256\x18\x06 \x01(\tR\x0eexpectedSha256\"\xa2\x01\n" +
+	"\x1bCreateUploadSessionResponse\x128\n" +
+	"\x05asset\x18\x01 \x01(\v2\".humanworth.asset.v1.AssetMetadataR\x05asset\x12I\n" +
+	"\x0eupload_session\x18\x02 \x01(\v2\".humanworth.asset.v1.UploadSessionR\ruploadSession\"\xbc\x03\n" +
 	"\x12UploadAssetRequest\x123\n" +
 	"\x06access\x18\x01 \x01(\v2\x1b.humanworth.asset.v1.AccessR\x06access\x12\x1b\n" +
 	"\tupload_id\x18\x02 \x01(\tR\buploadId\x12\x1a\n" +
@@ -577,13 +2029,99 @@ const file_humanworth_asset_v1_asset_proto_rawDesc = "" +
 	"media_type\x18\x04 \x01(\tR\tmediaType\x12\x14\n" +
 	"\x05bytes\x18\x05 \x01(\x03R\x05bytes\x12\x16\n" +
 	"\x06sha256\x18\x06 \x01(\tR\x06sha256\x12\x14\n" +
-	"\x05chunk\x18\a \x01(\fR\x05chunk\"G\n" +
+	"\x05chunk\x18\a \x01(\fR\x05chunk\x12'\n" +
+	"\x0factor_assertion\x18\b \x01(\tR\x0eactorAssertion\x12*\n" +
+	"\x11upload_session_id\x18\t \x01(\tR\x0fuploadSessionId\x12\x16\n" +
+	"\x06offset\x18\n" +
+	" \x01(\x03R\x06offset\x12*\n" +
+	"\x11upload_attempt_id\x18\v \x01(\tR\x0fuploadAttemptId\x12\x19\n" +
+	"\bchunk_id\x18\f \x01(\tR\achunkId\x12!\n" +
+	"\fchunk_sha256\x18\r \x01(\tR\vchunkSha256\"\xfa\x01\n" +
 	"\x13UploadAssetResponse\x120\n" +
-	"\x05asset\x18\x01 \x01(\v2\x1a.humanworth.asset.v1.AssetR\x05asset2\xa9\x02\n" +
-	"\fAssetService\x12W\n" +
+	"\x05asset\x18\x01 \x01(\v2\x1a.humanworth.asset.v1.AssetR\x05asset\x12*\n" +
+	"\x11upload_session_id\x18\x02 \x01(\tR\x0fuploadSessionId\x12%\n" +
+	"\x0ereceived_bytes\x18\x03 \x01(\x03R\rreceivedBytes\x12\x1f\n" +
+	"\vnext_offset\x18\x04 \x01(\x03R\n" +
+	"nextOffset\x12=\n" +
+	"\x05state\x18\x05 \x01(\x0e2'.humanworth.asset.v1.UploadSessionStateR\x05state\"\x87\x01\n" +
+	"\x15CompleteUploadRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12*\n" +
+	"\x11upload_session_id\x18\x02 \x01(\tR\x0fuploadSessionId\x12\x19\n" +
+	"\basset_id\x18\x03 \x01(\tR\aassetId\"R\n" +
+	"\x16CompleteUploadResponse\x128\n" +
+	"\x05asset\x18\x01 \x01(\v2\".humanworth.asset.v1.AssetMetadataR\x05asset\"i\n" +
+	"\x12AbortUploadRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12*\n" +
+	"\x11upload_session_id\x18\x02 \x01(\tR\x0fuploadSessionId\"`\n" +
+	"\x13AbortUploadResponse\x12I\n" +
+	"\x0eupload_session\x18\x01 \x01(\v2\".humanworth.asset.v1.UploadSessionR\ruploadSession\"n\n" +
+	"\x17GetUploadSessionRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12*\n" +
+	"\x11upload_session_id\x18\x02 \x01(\tR\x0fuploadSessionId\"e\n" +
+	"\x18GetUploadSessionResponse\x12I\n" +
+	"\x0eupload_session\x18\x01 \x01(\v2\".humanworth.asset.v1.UploadSessionR\ruploadSession\"]\n" +
+	"\x17GetAssetMetadataRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x19\n" +
+	"\basset_id\x18\x02 \x01(\tR\aassetId\"T\n" +
+	"\x18GetAssetMetadataResponse\x128\n" +
+	"\x05asset\x18\x01 \x01(\v2\".humanworth.asset.v1.AssetMetadataR\x05asset\"l\n" +
+	"\x13ListMyAssetsRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"q\n" +
+	"\x14ListMyAssetsResponse\x128\n" +
+	"\x05items\x18\x01 \x03(\v2\".humanworth.asset.v1.AssetMetadataR\x05items\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"b\n" +
+	"\x1aCheckAssetOwnershipRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x1b\n" +
+	"\tasset_ids\x18\x02 \x03(\tR\bassetIds\"Y\n" +
+	"\x1bCheckAssetOwnershipResponse\x12:\n" +
+	"\x06assets\x18\x01 \x03(\v2\".humanworth.asset.v1.AssetMetadataR\x06assets\"Z\n" +
+	"\x14DownloadAssetRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x19\n" +
+	"\basset_id\x18\x02 \x01(\tR\aassetId\"C\n" +
+	"\x15DownloadAssetResponse\x12\x16\n" +
+	"\x06offset\x18\x01 \x01(\x03R\x06offset\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"e\n" +
+	"\x14PublicAssetReference\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x19\n" +
+	"\bentry_id\x18\x02 \x01(\tR\aentryId\x12\x19\n" +
+	"\basset_id\x18\x03 \x01(\tR\aassetId\"e\n" +
+	"\x1aDownloadPublicAssetRequest\x12G\n" +
+	"\treference\x18\x01 \x01(\v2).humanworth.asset.v1.PublicAssetReferenceR\treference\"\x8e\x01\n" +
+	"\x1bDownloadPublicAssetResponse\x128\n" +
+	"\bmetadata\x18\x01 \x01(\v2\x1a.humanworth.asset.v1.AssetH\x00R\bmetadata\x12\x14\n" +
+	"\x04data\x18\x02 \x01(\fH\x00R\x04data\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offsetB\a\n" +
+	"\x05value*\x8a\x01\n" +
+	"\n" +
+	"AssetState\x12\x1b\n" +
+	"\x17ASSET_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13ASSET_STATE_STAGING\x10\x01\x12\x15\n" +
+	"\x11ASSET_STATE_READY\x10\x02\x12\x16\n" +
+	"\x12ASSET_STATE_FAILED\x10\x03\x12\x17\n" +
+	"\x13ASSET_STATE_DELETED\x10\x04*\xc3\x01\n" +
+	"\x12UploadSessionState\x12$\n" +
+	" UPLOAD_SESSION_STATE_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bUPLOAD_SESSION_STATE_ACTIVE\x10\x01\x12\"\n" +
+	"\x1eUPLOAD_SESSION_STATE_COMPLETED\x10\x02\x12 \n" +
+	"\x1cUPLOAD_SESSION_STATE_ABORTED\x10\x03\x12 \n" +
+	"\x1cUPLOAD_SESSION_STATE_EXPIRED\x10\x042\x97\n" +
+	"\n" +
+	"\fAssetService\x12x\n" +
+	"\x13CreateUploadSession\x12/.humanworth.asset.v1.CreateUploadSessionRequest\x1a0.humanworth.asset.v1.CreateUploadSessionResponse\x12b\n" +
+	"\vUploadAsset\x12'.humanworth.asset.v1.UploadAssetRequest\x1a(.humanworth.asset.v1.UploadAssetResponse(\x01\x12i\n" +
+	"\x0eCompleteUpload\x12*.humanworth.asset.v1.CompleteUploadRequest\x1a+.humanworth.asset.v1.CompleteUploadResponse\x12`\n" +
+	"\vAbortUpload\x12'.humanworth.asset.v1.AbortUploadRequest\x1a(.humanworth.asset.v1.AbortUploadResponse\x12o\n" +
+	"\x10GetUploadSession\x12,.humanworth.asset.v1.GetUploadSessionRequest\x1a-.humanworth.asset.v1.GetUploadSessionResponse\x12o\n" +
+	"\x10GetAssetMetadata\x12,.humanworth.asset.v1.GetAssetMetadataRequest\x1a-.humanworth.asset.v1.GetAssetMetadataResponse\x12c\n" +
+	"\fListMyAssets\x12(.humanworth.asset.v1.ListMyAssetsRequest\x1a).humanworth.asset.v1.ListMyAssetsResponse\x12x\n" +
+	"\x13CheckAssetOwnership\x12/.humanworth.asset.v1.CheckAssetOwnershipRequest\x1a0.humanworth.asset.v1.CheckAssetOwnershipResponse\x12h\n" +
+	"\rDownloadAsset\x12).humanworth.asset.v1.DownloadAssetRequest\x1a*.humanworth.asset.v1.DownloadAssetResponse0\x01\x12z\n" +
+	"\x13DownloadPublicAsset\x12/.humanworth.asset.v1.DownloadPublicAssetRequest\x1a0.humanworth.asset.v1.DownloadPublicAssetResponse0\x01\x12W\n" +
 	"\bGetAsset\x12$.humanworth.asset.v1.GetAssetRequest\x1a%.humanworth.asset.v1.GetAssetResponse\x12\\\n" +
-	"\tReadAsset\x12%.humanworth.asset.v1.ReadAssetRequest\x1a&.humanworth.asset.v1.ReadAssetResponse0\x01\x12b\n" +
-	"\vUploadAsset\x12'.humanworth.asset.v1.UploadAssetRequest\x1a(.humanworth.asset.v1.UploadAssetResponse(\x01BIZGgithub.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1;assetv1b\x06proto3"
+	"\tReadAsset\x12%.humanworth.asset.v1.ReadAssetRequest\x1a&.humanworth.asset.v1.ReadAssetResponse0\x01BIZGgithub.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1;assetv1b\x06proto3"
 
 var (
 	file_humanworth_asset_v1_asset_proto_rawDescOnce sync.Once
@@ -597,34 +2135,93 @@ func file_humanworth_asset_v1_asset_proto_rawDescGZIP() []byte {
 	return file_humanworth_asset_v1_asset_proto_rawDescData
 }
 
-var file_humanworth_asset_v1_asset_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_humanworth_asset_v1_asset_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_humanworth_asset_v1_asset_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_humanworth_asset_v1_asset_proto_goTypes = []any{
-	(*Asset)(nil),               // 0: humanworth.asset.v1.Asset
-	(*Access)(nil),              // 1: humanworth.asset.v1.Access
-	(*GetAssetRequest)(nil),     // 2: humanworth.asset.v1.GetAssetRequest
-	(*GetAssetResponse)(nil),    // 3: humanworth.asset.v1.GetAssetResponse
-	(*ReadAssetRequest)(nil),    // 4: humanworth.asset.v1.ReadAssetRequest
-	(*ReadAssetResponse)(nil),   // 5: humanworth.asset.v1.ReadAssetResponse
-	(*UploadAssetRequest)(nil),  // 6: humanworth.asset.v1.UploadAssetRequest
-	(*UploadAssetResponse)(nil), // 7: humanworth.asset.v1.UploadAssetResponse
+	(AssetState)(0),                     // 0: humanworth.asset.v1.AssetState
+	(UploadSessionState)(0),             // 1: humanworth.asset.v1.UploadSessionState
+	(*Asset)(nil),                       // 2: humanworth.asset.v1.Asset
+	(*Access)(nil),                      // 3: humanworth.asset.v1.Access
+	(*GetAssetRequest)(nil),             // 4: humanworth.asset.v1.GetAssetRequest
+	(*GetAssetResponse)(nil),            // 5: humanworth.asset.v1.GetAssetResponse
+	(*ReadAssetRequest)(nil),            // 6: humanworth.asset.v1.ReadAssetRequest
+	(*ReadAssetResponse)(nil),           // 7: humanworth.asset.v1.ReadAssetResponse
+	(*AssetMetadata)(nil),               // 8: humanworth.asset.v1.AssetMetadata
+	(*UploadSession)(nil),               // 9: humanworth.asset.v1.UploadSession
+	(*CreateUploadSessionRequest)(nil),  // 10: humanworth.asset.v1.CreateUploadSessionRequest
+	(*CreateUploadSessionResponse)(nil), // 11: humanworth.asset.v1.CreateUploadSessionResponse
+	(*UploadAssetRequest)(nil),          // 12: humanworth.asset.v1.UploadAssetRequest
+	(*UploadAssetResponse)(nil),         // 13: humanworth.asset.v1.UploadAssetResponse
+	(*CompleteUploadRequest)(nil),       // 14: humanworth.asset.v1.CompleteUploadRequest
+	(*CompleteUploadResponse)(nil),      // 15: humanworth.asset.v1.CompleteUploadResponse
+	(*AbortUploadRequest)(nil),          // 16: humanworth.asset.v1.AbortUploadRequest
+	(*AbortUploadResponse)(nil),         // 17: humanworth.asset.v1.AbortUploadResponse
+	(*GetUploadSessionRequest)(nil),     // 18: humanworth.asset.v1.GetUploadSessionRequest
+	(*GetUploadSessionResponse)(nil),    // 19: humanworth.asset.v1.GetUploadSessionResponse
+	(*GetAssetMetadataRequest)(nil),     // 20: humanworth.asset.v1.GetAssetMetadataRequest
+	(*GetAssetMetadataResponse)(nil),    // 21: humanworth.asset.v1.GetAssetMetadataResponse
+	(*ListMyAssetsRequest)(nil),         // 22: humanworth.asset.v1.ListMyAssetsRequest
+	(*ListMyAssetsResponse)(nil),        // 23: humanworth.asset.v1.ListMyAssetsResponse
+	(*CheckAssetOwnershipRequest)(nil),  // 24: humanworth.asset.v1.CheckAssetOwnershipRequest
+	(*CheckAssetOwnershipResponse)(nil), // 25: humanworth.asset.v1.CheckAssetOwnershipResponse
+	(*DownloadAssetRequest)(nil),        // 26: humanworth.asset.v1.DownloadAssetRequest
+	(*DownloadAssetResponse)(nil),       // 27: humanworth.asset.v1.DownloadAssetResponse
+	(*PublicAssetReference)(nil),        // 28: humanworth.asset.v1.PublicAssetReference
+	(*DownloadPublicAssetRequest)(nil),  // 29: humanworth.asset.v1.DownloadPublicAssetRequest
+	(*DownloadPublicAssetResponse)(nil), // 30: humanworth.asset.v1.DownloadPublicAssetResponse
+	(*timestamppb.Timestamp)(nil),       // 31: google.protobuf.Timestamp
 }
 var file_humanworth_asset_v1_asset_proto_depIdxs = []int32{
-	1, // 0: humanworth.asset.v1.GetAssetRequest.access:type_name -> humanworth.asset.v1.Access
-	0, // 1: humanworth.asset.v1.GetAssetResponse.asset:type_name -> humanworth.asset.v1.Asset
-	1, // 2: humanworth.asset.v1.ReadAssetRequest.access:type_name -> humanworth.asset.v1.Access
-	1, // 3: humanworth.asset.v1.UploadAssetRequest.access:type_name -> humanworth.asset.v1.Access
-	0, // 4: humanworth.asset.v1.UploadAssetResponse.asset:type_name -> humanworth.asset.v1.Asset
-	2, // 5: humanworth.asset.v1.AssetService.GetAsset:input_type -> humanworth.asset.v1.GetAssetRequest
-	4, // 6: humanworth.asset.v1.AssetService.ReadAsset:input_type -> humanworth.asset.v1.ReadAssetRequest
-	6, // 7: humanworth.asset.v1.AssetService.UploadAsset:input_type -> humanworth.asset.v1.UploadAssetRequest
-	3, // 8: humanworth.asset.v1.AssetService.GetAsset:output_type -> humanworth.asset.v1.GetAssetResponse
-	5, // 9: humanworth.asset.v1.AssetService.ReadAsset:output_type -> humanworth.asset.v1.ReadAssetResponse
-	7, // 10: humanworth.asset.v1.AssetService.UploadAsset:output_type -> humanworth.asset.v1.UploadAssetResponse
-	8, // [8:11] is the sub-list for method output_type
-	5, // [5:8] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	3,  // 0: humanworth.asset.v1.GetAssetRequest.access:type_name -> humanworth.asset.v1.Access
+	2,  // 1: humanworth.asset.v1.GetAssetResponse.asset:type_name -> humanworth.asset.v1.Asset
+	3,  // 2: humanworth.asset.v1.ReadAssetRequest.access:type_name -> humanworth.asset.v1.Access
+	0,  // 3: humanworth.asset.v1.AssetMetadata.state:type_name -> humanworth.asset.v1.AssetState
+	31, // 4: humanworth.asset.v1.AssetMetadata.created_at:type_name -> google.protobuf.Timestamp
+	31, // 5: humanworth.asset.v1.AssetMetadata.completed_at:type_name -> google.protobuf.Timestamp
+	1,  // 6: humanworth.asset.v1.UploadSession.state:type_name -> humanworth.asset.v1.UploadSessionState
+	31, // 7: humanworth.asset.v1.UploadSession.expires_at:type_name -> google.protobuf.Timestamp
+	8,  // 8: humanworth.asset.v1.CreateUploadSessionResponse.asset:type_name -> humanworth.asset.v1.AssetMetadata
+	9,  // 9: humanworth.asset.v1.CreateUploadSessionResponse.upload_session:type_name -> humanworth.asset.v1.UploadSession
+	3,  // 10: humanworth.asset.v1.UploadAssetRequest.access:type_name -> humanworth.asset.v1.Access
+	2,  // 11: humanworth.asset.v1.UploadAssetResponse.asset:type_name -> humanworth.asset.v1.Asset
+	1,  // 12: humanworth.asset.v1.UploadAssetResponse.state:type_name -> humanworth.asset.v1.UploadSessionState
+	8,  // 13: humanworth.asset.v1.CompleteUploadResponse.asset:type_name -> humanworth.asset.v1.AssetMetadata
+	9,  // 14: humanworth.asset.v1.AbortUploadResponse.upload_session:type_name -> humanworth.asset.v1.UploadSession
+	9,  // 15: humanworth.asset.v1.GetUploadSessionResponse.upload_session:type_name -> humanworth.asset.v1.UploadSession
+	8,  // 16: humanworth.asset.v1.GetAssetMetadataResponse.asset:type_name -> humanworth.asset.v1.AssetMetadata
+	8,  // 17: humanworth.asset.v1.ListMyAssetsResponse.items:type_name -> humanworth.asset.v1.AssetMetadata
+	8,  // 18: humanworth.asset.v1.CheckAssetOwnershipResponse.assets:type_name -> humanworth.asset.v1.AssetMetadata
+	28, // 19: humanworth.asset.v1.DownloadPublicAssetRequest.reference:type_name -> humanworth.asset.v1.PublicAssetReference
+	2,  // 20: humanworth.asset.v1.DownloadPublicAssetResponse.metadata:type_name -> humanworth.asset.v1.Asset
+	10, // 21: humanworth.asset.v1.AssetService.CreateUploadSession:input_type -> humanworth.asset.v1.CreateUploadSessionRequest
+	12, // 22: humanworth.asset.v1.AssetService.UploadAsset:input_type -> humanworth.asset.v1.UploadAssetRequest
+	14, // 23: humanworth.asset.v1.AssetService.CompleteUpload:input_type -> humanworth.asset.v1.CompleteUploadRequest
+	16, // 24: humanworth.asset.v1.AssetService.AbortUpload:input_type -> humanworth.asset.v1.AbortUploadRequest
+	18, // 25: humanworth.asset.v1.AssetService.GetUploadSession:input_type -> humanworth.asset.v1.GetUploadSessionRequest
+	20, // 26: humanworth.asset.v1.AssetService.GetAssetMetadata:input_type -> humanworth.asset.v1.GetAssetMetadataRequest
+	22, // 27: humanworth.asset.v1.AssetService.ListMyAssets:input_type -> humanworth.asset.v1.ListMyAssetsRequest
+	24, // 28: humanworth.asset.v1.AssetService.CheckAssetOwnership:input_type -> humanworth.asset.v1.CheckAssetOwnershipRequest
+	26, // 29: humanworth.asset.v1.AssetService.DownloadAsset:input_type -> humanworth.asset.v1.DownloadAssetRequest
+	29, // 30: humanworth.asset.v1.AssetService.DownloadPublicAsset:input_type -> humanworth.asset.v1.DownloadPublicAssetRequest
+	4,  // 31: humanworth.asset.v1.AssetService.GetAsset:input_type -> humanworth.asset.v1.GetAssetRequest
+	6,  // 32: humanworth.asset.v1.AssetService.ReadAsset:input_type -> humanworth.asset.v1.ReadAssetRequest
+	11, // 33: humanworth.asset.v1.AssetService.CreateUploadSession:output_type -> humanworth.asset.v1.CreateUploadSessionResponse
+	13, // 34: humanworth.asset.v1.AssetService.UploadAsset:output_type -> humanworth.asset.v1.UploadAssetResponse
+	15, // 35: humanworth.asset.v1.AssetService.CompleteUpload:output_type -> humanworth.asset.v1.CompleteUploadResponse
+	17, // 36: humanworth.asset.v1.AssetService.AbortUpload:output_type -> humanworth.asset.v1.AbortUploadResponse
+	19, // 37: humanworth.asset.v1.AssetService.GetUploadSession:output_type -> humanworth.asset.v1.GetUploadSessionResponse
+	21, // 38: humanworth.asset.v1.AssetService.GetAssetMetadata:output_type -> humanworth.asset.v1.GetAssetMetadataResponse
+	23, // 39: humanworth.asset.v1.AssetService.ListMyAssets:output_type -> humanworth.asset.v1.ListMyAssetsResponse
+	25, // 40: humanworth.asset.v1.AssetService.CheckAssetOwnership:output_type -> humanworth.asset.v1.CheckAssetOwnershipResponse
+	27, // 41: humanworth.asset.v1.AssetService.DownloadAsset:output_type -> humanworth.asset.v1.DownloadAssetResponse
+	30, // 42: humanworth.asset.v1.AssetService.DownloadPublicAsset:output_type -> humanworth.asset.v1.DownloadPublicAssetResponse
+	5,  // 43: humanworth.asset.v1.AssetService.GetAsset:output_type -> humanworth.asset.v1.GetAssetResponse
+	7,  // 44: humanworth.asset.v1.AssetService.ReadAsset:output_type -> humanworth.asset.v1.ReadAssetResponse
+	33, // [33:45] is the sub-list for method output_type
+	21, // [21:33] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_humanworth_asset_v1_asset_proto_init() }
@@ -632,18 +2229,23 @@ func file_humanworth_asset_v1_asset_proto_init() {
 	if File_humanworth_asset_v1_asset_proto != nil {
 		return
 	}
+	file_humanworth_asset_v1_asset_proto_msgTypes[28].OneofWrappers = []any{
+		(*DownloadPublicAssetResponse_Metadata)(nil),
+		(*DownloadPublicAssetResponse_Data)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_humanworth_asset_v1_asset_proto_rawDesc), len(file_humanworth_asset_v1_asset_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   8,
+			NumEnums:      2,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_humanworth_asset_v1_asset_proto_goTypes,
 		DependencyIndexes: file_humanworth_asset_v1_asset_proto_depIdxs,
+		EnumInfos:         file_humanworth_asset_v1_asset_proto_enumTypes,
 		MessageInfos:      file_humanworth_asset_v1_asset_proto_msgTypes,
 	}.Build()
 	File_humanworth_asset_v1_asset_proto = out.File

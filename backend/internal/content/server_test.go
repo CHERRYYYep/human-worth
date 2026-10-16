@@ -43,7 +43,7 @@ func TestDraftValidationAndFingerprint(t *testing.T) {
 		{`{"title":"t","summary":"","entries":[]}`, codes.InvalidArgument},
 		{`{"title":"\u0000","summary":"","description":"","entries":[]}`, codes.InvalidArgument},
 		{`{"title":"t","summary":"","description":"","entries":[{"side":"human","title":"w","source":"s","artifacts":[{"kind":"link","url":"javascript:alert(1)"}],"permissions":{"cloudUse":false}}]}`, codes.InvalidArgument},
-		{`{"title":"t","summary":"","description":"","entries":[{"side":"human","title":"w","source":"s","artifacts":[{"kind":"file","assetId":"somebody-elses-file"}],"permissions":{"cloudUse":false}}]}`, codes.FailedPrecondition},
+		{`{"title":"t","summary":"","description":"","entries":[{"side":"human","title":"w","source":"s","artifacts":[{"kind":"file","assetId":""}],"permissions":{"cloudUse":false}}]}`, codes.InvalidArgument},
 		{`{"title":"t","summary":"","description":"","entries":[{"side":"human","title":"w","source":"s","artifacts":[{"kind":"link","url":"https://example.com"}],"permissions":{}}]}`, codes.InvalidArgument},
 		{`{"title":"t","summary":"","description":"","entries":[{"side":"agent","title":"w","source":"s","artifacts":[{"kind":"link","url":"https://example.com"}],"permissions":{"cloudUse":false}}]}`, codes.InvalidArgument},
 	} {

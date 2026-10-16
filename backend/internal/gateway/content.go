@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -81,6 +82,23 @@ func (h *Handler) contentActor(w http.ResponseWriter, r *http.Request, method st
 	}
 	return h.actorFor(w, r, "content", method)
 }
+func (h *Handler) assetActor(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
+	if h.options.Asset == nil {
+		problem(w, 503, "asset_unavailable")
+		return "", false
+	}
+	return h.actorFor(w, r, "asset", method)
+}
+func hasFileArtifact(input *pb.TaskDraftInput) bool {
+	for _, entry := range input.GetEntries() {
+		for _, artifact := range entry.GetArtifacts() {
+			if artifact.GetKind() == "file" {
+				return true
+			}
+		}
+	}
+	return false
+}
 func (h *Handler) createDraft(w http.ResponseWriter, r *http.Request) {
 	actor, ok := h.contentActor(w, r, pb.ContentService_CreateTaskDraft_FullMethodName)
 	if !ok {
@@ -99,7 +117,15 @@ func (h *Handler) createDraft(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "invalid_draft")
 		return
 	}
-	response, err := h.options.Content.CreateTaskDraft(r.Context(), &pb.CreateTaskDraftRequest{ActorAssertion: actor, IdempotencyKey: r.Header.Get("Idempotency-Key"), Content: input})
+	assetActor := ""
+	if hasFileArtifact(input) {
+		var assetOK bool
+		assetActor, assetOK = h.assetActor(w, r, assetpb.AssetService_CheckAssetOwnership_FullMethodName)
+		if !assetOK {
+			return
+		}
+	}
+	response, err := h.options.Content.CreateTaskDraft(r.Context(), &pb.CreateTaskDraftRequest{ActorAssertion: actor, AssetActorAssertion: assetActor, IdempotencyKey: r.Header.Get("Idempotency-Key"), Content: input})
 	if err != nil {
 		contentError(w, err)
 		return
@@ -210,7 +236,15 @@ func (h *Handler) replaceDraft(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "invalid_draft")
 		return
 	}
-	response, err := h.options.Content.ReplaceTaskDraft(r.Context(), &pb.ReplaceTaskDraftRequest{ActorAssertion: actor, TaskId: r.PathValue("taskId"), ExpectedRevision: body.ExpectedRevision, Content: input})
+	assetActor := ""
+	if hasFileArtifact(input) {
+		var assetOK bool
+		assetActor, assetOK = h.assetActor(w, r, assetpb.AssetService_CheckAssetOwnership_FullMethodName)
+		if !assetOK {
+			return
+		}
+	}
+	response, err := h.options.Content.ReplaceTaskDraft(r.Context(), &pb.ReplaceTaskDraftRequest{ActorAssertion: actor, AssetActorAssertion: assetActor, TaskId: r.PathValue("taskId"), ExpectedRevision: body.ExpectedRevision, Content: input})
 	if err != nil {
 		contentError(w, err)
 		return
