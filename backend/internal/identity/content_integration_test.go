@@ -123,7 +123,7 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	var migrationCount, indexCount int
 	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM content.schema_migrations`).Scan(&migrationCount))
 	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='content' AND indexname='task_drafts_author_created_id'`).Scan(&indexCount))
-	if migrationCount != 3 || indexCount != 1 {
+	if migrationCount != 4 || indexCount != 1 {
 		t.Fatalf("Content list migration missing: migrations=%d indexes=%d", migrationCount, indexCount)
 	}
 	for _, row := range legacyRows {
@@ -144,13 +144,13 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	_, err = lab.db.Exec(ctx, `GRANT USAGE ON SCHEMA content TO `+roleID+`;
  GRANT SELECT ON content.schema_migrations,content.task_drafts TO `+roleID+`;
  GRANT INSERT ON content.task_drafts TO `+roleID+`;
- GRANT UPDATE(content,revision,updated_at) ON content.task_drafts TO `+roleID+`;`)
+ GRANT UPDATE(content,revision,state,review_id,rejection_reason,updated_at) ON content.task_drafts TO `+roleID+`;`)
 	must(t, err)
 	cfg.ConnConfig.User = runtimeRole
 	runtimeDB, err := pgxpool.NewWithConfig(ctx, cfg)
 	must(t, err)
 	t.Cleanup(runtimeDB.Close)
-	for _, query := range []string{"SELECT * FROM identity.accounts", "CREATE TABLE content.forbidden(id int)", "UPDATE content.task_drafts SET author_id='forged'", "UPDATE content.task_drafts SET state='published'", "DELETE FROM content.task_drafts"} {
+	for _, query := range []string{"SELECT * FROM identity.accounts", "CREATE TABLE content.forbidden(id int)", "UPDATE content.task_drafts SET author_id='forged'", "UPDATE content.task_drafts SET create_key='forged'", "DELETE FROM content.task_drafts"} {
 		if _, err := runtimeDB.Exec(ctx, query); err == nil {
 			t.Fatalf("content runtime overprivileged: %s", query)
 		}
@@ -317,7 +317,7 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	for _, path := range []string{
 		"/api/me/submissions?kind=entry",
 		"/api/me/submissions?kind=",
-		"/api/me/submissions?state=published",
+		"/api/me/submissions?state=unsupported",
 		"/api/me/submissions?state=",
 		"/api/me/submissions?category=",
 		"/api/me/submissions?category=" + strings.Repeat("a", 12001),

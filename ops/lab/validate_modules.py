@@ -2,7 +2,8 @@
 """Exercise module deployment in a disposable namespace of the existing kind lab.
 
 Uses the real manifests/controller, an isolated single-instance PostgreSQL and
-ClusterIP gateway. Never changes the public namespace, NodePort or its secrets.
+private, dynamically allocated Gateway NodePort. Never changes the public
+namespace, its fixed NodePort or its secrets.
 """
 import base64
 import hashlib
@@ -50,7 +51,7 @@ def main():
         if value.get('namespace')=='human-worth':value['namespace']=namespace
         if value.get('kind')=='Namespace':value['metadata']['name']=namespace
         if value.get('kind')=='Service' and value['spec'].get('type')=='NodePort':
-            value['spec']['type']='ClusterIP'
+            # Keep real Service endpoint selection; do not reuse public 30443.
             for item in value['spec']['ports']:item.pop('nodePort',None)
         if value.get('kind')=='Cluster':
             value['spec']['instances']=1
@@ -73,6 +74,11 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix='human-worth-module-validation-') as directory:
         state=Path(directory)/'private';state.mkdir(mode=0o700)
+        # Agent Self-Claimed: synthetic OAuth configuration exercises only URL
+        # construction/login-flow persistence, never Google exchange or real keys.
+        oauth=state/'test-google-oauth.json'
+        oauth.write_text(json.dumps({'client_id':'module-validation.apps.googleusercontent.com','client_secret':secrets.token_urlsafe(32)}))
+        oauth.chmod(0o600)
         source=Path(directory)/'source'
         # Keep one immutable test input even if the developer continues editing.
         paths=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','-z'],cwd=app.REPO).decode().split('\0')
@@ -86,11 +92,14 @@ def main():
         print('Disposable namespace: '+namespace,flush=True)
         try:
             kube('apply','--server-side','-f','-',input=(infra.HERE/'namespace.yaml').read_text())
-            with patch.object(app,'REPO',source),patch.object(app,'STATE',state),patch.object(app,'kube',kube),patch.object(infra,'kube',kube),patch.object(release,'kube',kube),patch.object(object_store,'apply',lambda text:kube('apply','--server-side','-f','-',input=text)),patch.object(object_store,'kube',kube),patch.object(object_store,'STATE',state),patch.object(object_store,'HERE',source/'ops/lab'):
+            with patch.dict(os.environ,{'GOOGLE_OAUTH_FILE':str(oauth)}),patch.object(app,'REPO',source),patch.object(app,'STATE',state),patch.object(app,'kube',kube),patch.object(infra,'kube',kube),patch.object(release,'kube',kube),patch.object(object_store,'apply',lambda text:kube('apply','--server-side','-f','-',input=text)),patch.object(object_store,'kube',kube),patch.object(object_store,'STATE',state),patch.object(object_store,'HERE',source/'ops/lab'):
                 revision=hashlib.sha256((app.source_hash()+(source/'ops/lab/app.py').read_text()).encode()).hexdigest()[:40]
                 modules=app.load_services(source)
                 # app.main reconciles the private Asset store before Asset itself.
                 app.main(revision=revision)
+                node_port=kube('-n',namespace,'get','service','gateway','-o','jsonpath={.spec.ports[0].nodePort}',capture=True).stdout.strip()
+                node_ip=subprocess.check_output(['docker','inspect','lab-control-plane','--format','{{(index .NetworkSettings.Networks "kind").IPAddress}}'],text=True).strip()
+                if not node_ip or not node_port.isdigit():raise RuntimeError('Private validation NodePort unavailable')
                 with open(Path(directory)/'forward.log','w') as log:
                     forward=subprocess.Popen(['kubectl','--kubeconfig',str(infra.KUBECONFIG),'--context','kind-lab','-n',namespace,'port-forward','--address=127.0.0.1','service/gateway',str(port)+':443'],stdout=log,stderr=log)
                     deadline=time.monotonic()+45
@@ -105,8 +114,8 @@ def main():
                         if time.monotonic()>=deadline:raise RuntimeError('Completion ConfigMap did not reach the gateway')
                         time.sleep(2)
                     print('PASS: completion marker appears only after all modules pass',flush=True)
-                    env={**os.environ,'HUMAN_WORTH_VERIFY_NAMESPACE':namespace,'HUMAN_WORTH_VERIFY_STATE':str(state),'HUMAN_WORTH_VERIFY_KUBECONFIG':str(infra.KUBECONFIG),'HUMAN_WORTH_VERIFY_PORT':str(port)}
-                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset)Deployment$','-count=1','-timeout=480s','-v'],cwd=source/'backend',env=env,check=True)
+                    env={**os.environ,'HUMAN_WORTH_VERIFY_NAMESPACE':namespace,'HUMAN_WORTH_VERIFY_STATE':str(state),'HUMAN_WORTH_VERIFY_KUBECONFIG':str(infra.KUBECONFIG),'HUMAN_WORTH_VERIFY_PORT':str(port),'HUMAN_WORTH_VERIFY_GATEWAY_ADDRESS':node_ip+':'+node_port}
+                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset|Moderation)Deployment$','-count=1','-timeout=720s','-v'],cwd=source/'backend',env=env,check=True)
                     import check_network
                     with patch.object(check_network,'kube',kube):check_network.main()
                     previous=release.snapshot()

@@ -78,7 +78,7 @@ func TestSubmissionFilterAndCursor(t *testing.T) {
 	tooLargeCategory := strings.Repeat("a", maxDraftBytes+1)
 	for _, request := range []*pb.ListMySubmissionsRequest{
 		{Kind: "entry"},
-		{State: "published"},
+		{State: "unsupported"},
 		{Category: new(string)},
 		{Category: &tooLargeCategory},
 		{Limit: -1},
@@ -176,5 +176,28 @@ func TestSubmissionPageUsesProtobufBudget(t *testing.T) {
 	values := page.Items[0].Content.Entries[0].AgentConfiguration.Parameters.Fields["nested"].GetStructValue().Fields["values"].GetListValue().Values
 	if len(values) != 3000 {
 		t.Fatalf("parameters were truncated: %d", len(values))
+	}
+}
+
+func TestReviewDecisionRejectsInvalidReasonBeforeDatabase(t *testing.T) {
+	for _, reason := range []string{"", " \n", "bad\x00reason", string([]byte{0xff}), strings.Repeat("x", 4001)} {
+		_, err := (&Server{}).ApplyReviewDecision(serviceContext("moderation"), &pb.ApplyReviewDecisionRequest{
+			DecisionId: "dec_" + strings.Repeat("a", 32), ReviewId: "rev_" + strings.Repeat("b", 32),
+			TaskId: "tsk_" + strings.Repeat("c", 32), SubmissionRevision: 1,
+			Outcome: pb.ReviewOutcome_REVIEW_OUTCOME_REJECT, Reason: &reason,
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("invalid rejection reason reached persistence: %v", err)
+		}
+	}
+	for _, reason := range []string{"bad\x00reason", string([]byte{0xff}), strings.Repeat("x", 4001), strings.Repeat("绘", 1334)} {
+		_, err := (&Server{}).ApplyReviewDecision(serviceContext("moderation"), &pb.ApplyReviewDecisionRequest{
+			DecisionId: "dec_" + strings.Repeat("a", 32), ReviewId: "rev_" + strings.Repeat("b", 32),
+			TaskId: "tsk_" + strings.Repeat("c", 32), SubmissionRevision: 1,
+			Outcome: pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE, Reason: &reason,
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("invalid approval reason reached persistence: %v", err)
+		}
 	}
 }

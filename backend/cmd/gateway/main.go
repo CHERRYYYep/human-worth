@@ -7,6 +7,7 @@ import (
 	challengepb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
+	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -99,6 +100,15 @@ func run() error {
 			proxies = append(proxies, network)
 		}
 	}
+	var moderationClient moderationpb.ModerationServiceClient
+	if target := os.Getenv("MODERATION_TARGET"); target != "" {
+		c, e := platform.Client(target, "moderation")
+		if e != nil {
+			return e
+		}
+		defer c.Close()
+		moderationClient = moderationpb.NewModerationServiceClient(c)
+	}
 	ready := func(ctx context.Context) error {
 		response, err := healthpb.NewHealthClient(conn).Check(ctx, &healthpb.HealthCheckRequest{})
 		if err != nil {
@@ -119,6 +129,9 @@ func run() error {
 				return errors.New("asset unavailable")
 			}
 		}
+		// Moderation is an optional route dependency, not a Gateway readiness
+		// dependency. Its outage must not remove login/upload/draft endpoints;
+		// review RPCs fail closed and Content durably queues new submissions.
 		return nil
 	}
 	var challengeClient challengepb.ChallengeServiceClient
@@ -130,7 +143,7 @@ func run() error {
 		defer challengeConnection.Close()
 		challengeClient = challengepb.NewChallengeServiceClient(challengeConnection)
 	}
-	handler, err := gateway.New(pb.NewIdentityServiceClient(conn), gateway.Options{Challenge: challengeClient, Content: contentClient, Asset: assetClient, DeploymentStatusFile: os.Getenv("DEPLOYMENT_STATUS_FILE"), Origin: origin, LogoPath: platform.Value("SITE_LOGO_FILE", "../public/brand/logo.png"), TrustedProxies: proxies, Logger: runtime.Log, Registry: runtime.Registry, Ready: ready})
+	handler, err := gateway.New(pb.NewIdentityServiceClient(conn), gateway.Options{Moderation: moderationClient, Challenge: challengeClient, Content: contentClient, Asset: assetClient, DeploymentStatusFile: os.Getenv("DEPLOYMENT_STATUS_FILE"), Origin: origin, LogoPath: platform.Value("SITE_LOGO_FILE", "../public/brand/logo.png"), TrustedProxies: proxies, Logger: runtime.Log, Registry: runtime.Registry, Ready: ready})
 	if err != nil {
 		return err
 	}

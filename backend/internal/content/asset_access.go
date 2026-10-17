@@ -3,10 +3,8 @@ package content
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"regexp"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
@@ -109,9 +107,8 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 		return nil, storage(err)
 	}
 	// All decisions for a task and private draft edits lock the same row first.
-	var snapshot []byte
 	var draftRevision int64
-	err = tx.QueryRow(ctx, `SELECT content,revision FROM content.task_drafts WHERE id=$1 FOR UPDATE`, r.TaskId).Scan(&snapshot, &draftRevision)
+	err = tx.QueryRow(ctx, `SELECT revision FROM content.task_drafts WHERE id=$1 FOR UPDATE`, r.TaskId).Scan(&draftRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.NotFound, "task_not_found")
 	}
@@ -133,43 +130,21 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, storage(err)
 	}
+	// Formal submissions cannot bypass the case/decision protocol. Existing
+	// receipts above remain replayable; tightening existing visibility is allowed.
+	if taskState == "published" || entryState == "approved" {
+		var formal bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM content.review_requests WHERE task_id=$1)`, r.TaskId).Scan(&formal); err != nil {
+			return nil, storage(err)
+		}
+		if formal {
+			return nil, status.Error(codes.FailedPrecondition, "formal_review_required")
+		}
+	}
 	var revision, sourceRevision int64
 	err = tx.QueryRow(ctx, `SELECT revision,source_revision FROM content.reviewed_tasks WHERE task_id=$1 FOR UPDATE`, r.TaskId).Scan(&revision, &sourceRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if r.ExpectedRevision != 0 || r.SubmissionRevision != draftRevision || taskState != "published" {
-			return nil, status.Error(codes.Aborted, "revision_conflict")
-		}
-		input := &pb.TaskDraftInput{}
-		if err = protojson.Unmarshal(snapshot, input); err != nil {
-			return nil, status.Error(codes.Internal, "invalid_stored_draft")
-		}
-		human, agent := false, false
-		for _, e := range input.Entries {
-			human = human || e.GetSide() == "human"
-			agent = agent || e.GetSide() == "agent"
-		}
-		if !human || !agent {
-			return nil, status.Error(codes.FailedPrecondition, "initial_bundle_required")
-		}
-		// Validate persisted data as well; old/corrupt rows cannot bypass the boundary.
-		if _, err = validate(input); err != nil {
-			return nil, err
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO content.reviewed_tasks(task_id,source_revision,revision,state,snapshot) VALUES($1,$2,1,'published',$3)`, r.TaskId, draftRevision, snapshot)
-		if err != nil {
-			return nil, storage(err)
-		}
-		for i := range input.Entries {
-			var id [16]byte
-			if _, err = rand.Read(id[:]); err != nil {
-				return nil, status.Error(codes.Internal, "internal_error")
-			}
-			_, err = tx.Exec(ctx, `INSERT INTO content.reviewed_entries(id,task_id,position,state) VALUES($1,$2,$3,'approved')`, fmt.Sprintf("ent_%x", id), r.TaskId, i)
-			if err != nil {
-				return nil, storage(err)
-			}
-		}
-		revision = 1
+		return nil, status.Error(codes.FailedPrecondition, "formal_review_required")
 	} else {
 		if err != nil {
 			return nil, storage(err)
@@ -193,6 +168,12 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 			return nil, storage(err)
 		}
 		revision++
+	}
+	if taskState == "taken_down" {
+		_, err = tx.Exec(ctx, `UPDATE content.task_drafts SET state='taken_down',updated_at=clock_timestamp() WHERE id=$1 AND review_id IS NOT NULL`, r.TaskId)
+		if err != nil {
+			return nil, storage(err)
+		}
 	}
 	result := &pb.ApplyAssetReviewResponse{Revision: revision}
 	rows, err := tx.Query(ctx, `SELECT id,position,state FROM content.reviewed_entries WHERE task_id=$1 ORDER BY position`, r.TaskId)

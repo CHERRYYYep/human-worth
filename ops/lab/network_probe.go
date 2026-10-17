@@ -29,11 +29,12 @@ func main() {
 		name, address string
 		allow         bool
 	}{
-		{"identity-rpc", "identity:8443", source == "gateway" || source == "content" || source == "asset"},
-		{"content-rpc", "content:8443", source == "gateway" || source == "asset"},
+		{"identity-rpc", "identity:8443", source == "gateway" || source == "content" || source == "asset" || source == "moderation"},
+		{"content-rpc", "content:8443", source == "gateway" || source == "asset" || source == "moderation"},
+		{"moderation-rpc", "moderation:8443", source == "gateway" || source == "content"},
 		{"asset-rpc", "asset:8443", source == "gateway" || source == "content"},
 		{"asset-store", "asset-store:8333", source == "asset"},
-		{"database", "database-rw:5432", source == "identity" || source == "content" || source == "asset"},
+		{"database", "database-rw:5432", source == "identity" || source == "content" || source == "asset" || source == "moderation"},
 		{"google-proxy", "google-egress:3128", source == "identity"},
 		{"direct-internet", "www.googleapis.com:443", false},
 	} {

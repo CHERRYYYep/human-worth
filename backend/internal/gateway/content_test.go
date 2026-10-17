@@ -51,12 +51,12 @@ func TestSubmissionListQuery(t *testing.T) {
 		t.Fatalf("legacy category query: request=%+v reason=%q", request, reason)
 	}
 	cases := map[string]string{
-		"kind=entry":      "unsupported_submission_filter",
-		"kind=":           "unsupported_submission_filter",
-		"state=published": "unsupported_submission_filter",
-		"state=":          "unsupported_submission_filter",
-		"category=":       "invalid_category",
-		"category=%00":    "invalid_category",
+		"kind=entry":        "unsupported_submission_filter",
+		"kind=":             "unsupported_submission_filter",
+		"state=unsupported": "unsupported_submission_filter",
+		"state=":            "unsupported_submission_filter",
+		"category=":         "invalid_category",
+		"category=%00":      "invalid_category",
 		"category=" + strings.Repeat("a", maxCategoryBytes+1): "invalid_category",
 		"limit=0":                 "invalid_request",
 		"limit=101":               "invalid_request",

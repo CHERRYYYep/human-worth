@@ -19,6 +19,9 @@ service AssetService {
   rpc ListMyAssets(ListMyAssetsRequest) returns (ListMyAssetsResponse);
   rpc CheckAssetOwnership(CheckAssetOwnershipRequest) returns (CheckAssetOwnershipResponse);
   rpc DownloadAsset(DownloadAssetRequest) returns (stream DownloadAssetResponse);
+  // Gateway mTLS, dedicated administrator web assertion. Content verifies exact
+  // pending snapshot reference twice. First metadata then contiguous data; 15m.
+  rpc DownloadReviewAsset(DownloadReviewAssetRequest) returns (stream DownloadReviewAssetResponse);
   // Gateway only. Anonymous public read, not an ownership bypass. Asset checks
   // Content on every new stream. No URL/grant; 15 minute transport budget.
   rpc DownloadPublicAsset(DownloadPublicAssetRequest) returns (stream DownloadPublicAssetResponse);
@@ -204,6 +207,21 @@ message DownloadPublicAssetRequest {
 // Metadata is emitted exactly once, after authorization and opening the object;
 // subsequent frames contain data only. Offsets start at zero and are contiguous.
 message DownloadPublicAssetResponse {
+  oneof value {
+    Asset metadata = 1;
+    bytes data = 2;
+  }
+  int64 offset = 3;
+}
+
+message DownloadReviewAssetRequest {
+  string actor_assertion = 1;
+  string content_actor_assertion = 2;
+  string review_id = 3;
+  string asset_id = 4;
+}
+
+message DownloadReviewAssetResponse {
   oneof value {
     Asset metadata = 1;
     bytes data = 2;

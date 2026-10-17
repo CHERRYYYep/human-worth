@@ -35,7 +35,8 @@
     "dependencies": [
       "identity",
       "content",
-      "asset"
+      "asset",
+      "moderation"
     ],
     "database": false,
     "checks": []
@@ -56,6 +57,21 @@
         "path": "/api/tasks/tsk_00000000000000000000000000000000/entries/ent_00000000000000000000000000000000/assets/ast_00000000000000000000000000000000/content",
         "status": 404,
         "code": "asset_not_found"
+      }
+    ]
+  },
+  "moderation": {
+    "dependencies": [
+      "identity",
+      "content"
+    ],
+    "database": true,
+    "grants": "ops/moderation/grants.sql",
+    "checks": [
+      {
+        "path": "/api/admin/reviews",
+        "status": 401,
+        "code": "unauthenticated"
       }
     ]
   }

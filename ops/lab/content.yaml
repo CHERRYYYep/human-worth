@@ -44,6 +44,7 @@ spec:
           env:
             - {name: CONTENT_DATABASE_URL_FILE, value: /content-secrets/database-url}
             - {name: IDENTITY_TARGET, value: "dns:///identity.human-worth.svc.cluster.local:8443"}
+            - {name: MODERATION_TARGET, value: "dns:///moderation.human-worth.svc.cluster.local:8443"}
             - {name: ASSET_TARGET, value: "dns:///asset.human-worth.svc.cluster.local:8443"}
             - {name: SERVICE_CERT_FILE, value: /tls/tls.crt}
             - {name: SERVICE_KEY_FILE, value: /tls/tls.key}
@@ -77,9 +78,11 @@ spec:
   podSelector: {matchLabels: {app: content}}
   policyTypes: [Ingress, Egress]
   ingress:
-    - from: [{podSelector: {matchLabels: {app: gateway}}}, {podSelector: {matchLabels: {app: asset}}}]
+    - from: [{podSelector: {matchLabels: {app: gateway}}}, {podSelector: {matchLabels: {app: asset}}}, {podSelector: {matchLabels: {app: moderation}}}]
       ports: [{protocol: TCP, port: 8443}]
   egress:
+    - to: [{podSelector: {matchLabels: {app: moderation}}}]
+      ports: [{protocol: TCP, port: 8443}]
     - to: [{podSelector: {matchLabels: {app: asset}}}]
       ports: [{protocol: TCP, port: 8443}]
     - to: [{podSelector: {matchLabels: {app: identity}}}]

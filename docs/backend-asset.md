@@ -523,3 +523,9 @@ sg docker -c 'umask 022; DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" py
 阶段 3（3A/3B/3C）可按**本地实现与验收完成**收尾。第 14 节“修复后未重跑 kind”的缺口已补齐；本次之后仅更新验收文档，不修改业务代码、Proto、生成代码或部署配置。
 
 后续仍需通过 PR/远端 CI 进入 dev，发布与公网验收另行执行，本地验证不替代这些门槛。下一阶段优先推进真正的 Moderation 最小闭环：送审、管理员审核、决定的可靠投递与 Content 幂等应用；这是后续建议，不是本阶段已实现能力。新版草稿重新送审、公开任务/作品详情、Moderation Pod 网络投递，以及生产对象存储 HA/备份/加密/容量均不在本次完成声明内。已开始下载的字节仍无法追回，撤销拒绝针对提交后的新授权检查。本次未创建 PR、合并 dev 或部署公网。
+
+## 16. 阶段4的待审材料读取增量（Agent Self-Claimed，本地未发布）
+
+正式审核由 [Moderation](backend-moderation.md) 与 Content 拥有。Asset 不增加审核状态/案件表，也不访问其他schema。新增 `DownloadReviewAsset`（仅gateway mTLS＋专用管理员网站断言），HTTP为 `GET /api/admin/reviews/{reviewId}/assets/{assetId}/content`；Content专用断言由Content复核，确切pending快照绑定且ready才允许。打开存储后再次复核管理员会话与Content，不缓存、不发长期URL、不能通过owner/admin头绕过；终审后待审入口404，过审文件仍使用原公开入口。两种受控流复用长度/offset/首帧校验；普通本人上传/下载及Challenge协议不变。
+
+旧ApplyAssetReview新草稿首次批准关闭，历史回执/展示收紧保留；新批准必须正式送审并由真实Moderation流程产生执行回执。旧3C验收记录为历史，不自动证明这一增量已验证或已部署；新测试结果见Moderation设计文档的实际验收节。

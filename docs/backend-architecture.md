@@ -151,3 +151,7 @@ worth.oopsbox.cn 经私有 TLS 隧道连接集群，应用只部署通过 dev pu
 ### Asset 3C 本地增量（2026-10-16，Agent Self-Claimed）
 
 Content 新增受信 `ApplyAssetReview` 审核决定应用端及 `CheckAssetAccess`；不是 Moderation 服务或完整审核产品流程。每次匿名作品文件下载为 Gateway → Asset → Content 权威快照检查，Content 此方法不回调 Asset。私有草稿绑定仍走另一条 Content → Asset 链路，不形成单次请求循环。审核状态与稳定作品引用只存在 Content schema，不在 Asset 复制授权缓存。具体阶段边界及真实验证见 [Asset 3C](backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。
+
+### 阶段4审核闭环增量（2026-10-16，Agent Self-Claimed）
+
+[Moderation设计与验收](backend-moderation.md)正式划分送审快照/投稿状态（Content）、案件/管理员决定/投递和回执（Moderation）、文件及可用性（Asset）。新流程用两端PostgreSQL outbox＋租约worker＋mTLS gRPC，事务内不等待外部RPC；待审冻结，不留可编辑工作副本，驳回后新revision重提保留旧历史。管理员待审文件采用专用断言和Content确切快照授权，不增Asset审核状态。旧ApplyAssetReview仅保留历史回执/收紧和既有旧快照兼容，不能绕过新送审批准。本轮不建设举报审计平台，也不声明公开任务/作品浏览已完成；实际验证见专门文档。

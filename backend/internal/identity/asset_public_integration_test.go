@@ -22,6 +22,7 @@ import (
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -111,7 +112,24 @@ func TestReviewedAssetHTTPAccess(t *testing.T) {
 	wrongSource.DecisionId = "review-wrong-source1"
 	wrongSource.SubmissionRevision = 99
 	_, err = reviewer.ApplyAssetReview(t.Context(), wrongSource)
-	grpcCode(t, err, codes.Aborted)
+	grpcCode(t, err, codes.FailedPrecondition)
+	// Migration compatibility fixture: these are records an older deployed 3C
+	// service already approved. New first approvals now require formal send-review.
+	legacyEntries := []*contentpb.ReviewedEntry{{Id: "ent_" + strings.Repeat("a", 32), Position: 0, State: contentpb.ReviewedEntryState_REVIEWED_ENTRY_STATE_APPROVED}, {Id: "ent_" + strings.Repeat("b", 32), Position: 1, State: contentpb.ReviewedEntryState_REVIEWED_ENTRY_STATE_APPROVED}}
+	legacyReceipt := &contentpb.ApplyAssetReviewResponse{Revision: 1, Entries: legacyEntries}
+	wire, e := (proto.MarshalOptions{Deterministic: true}).Marshal(request)
+	must(t, e)
+	h := sha256.Sum256(wire)
+	raw, e := protojson.Marshal(legacyReceipt)
+	must(t, e)
+	_, e = l.db.Exec(t.Context(), `INSERT INTO content.reviewed_tasks(task_id,source_revision,revision,state,snapshot) SELECT id,revision,1,'published',content FROM content.task_drafts WHERE id=$1`, task.ID)
+	must(t, e)
+	for _, entry := range legacyEntries {
+		_, e = l.db.Exec(t.Context(), `INSERT INTO content.reviewed_entries(id,task_id,position,state) VALUES($1,$2,$3,'approved')`, entry.Id, task.ID, entry.Position)
+		must(t, e)
+	}
+	_, e = l.db.Exec(t.Context(), `INSERT INTO content.asset_review_receipts(decision_id,task_id,request_hash,response) VALUES($1,$2,$3,$4)`, request.DecisionId, task.ID, h[:], raw)
+	must(t, e)
 	receipt, err := reviewer.ApplyAssetReview(t.Context(), request)
 	must(t, err)
 	if receipt.Revision != 1 || len(receipt.Entries) != 2 {

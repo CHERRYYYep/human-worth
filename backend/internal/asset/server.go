@@ -91,7 +91,7 @@ func assetPeer(ctx context.Context, method string) error {
 			pb.AssetService_GetAssetMetadata_FullMethodName,
 			pb.AssetService_ListMyAssets_FullMethodName,
 			pb.AssetService_DownloadAsset_FullMethodName,
-			pb.AssetService_DownloadPublicAsset_FullMethodName:
+			pb.AssetService_DownloadPublicAsset_FullMethodName, pb.AssetService_DownloadReviewAsset_FullMethodName:
 			return nil
 		}
 	case "content":

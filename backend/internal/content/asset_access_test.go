@@ -22,8 +22,8 @@ func serviceContext(name string) context.Context {
 }
 func TestContentAssetServiceBoundary(t *testing.T) {
 	for _, caller := range []string{"gateway", "asset", "content", "moderation", "challenge"} {
-		for _, method := range []string{pb.ContentService_CheckAssetAccess_FullMethodName, pb.ContentService_ApplyAssetReview_FullMethodName, pb.ContentService_CreateTaskDraft_FullMethodName} {
-			allowed := (caller == "asset" && method == pb.ContentService_CheckAssetAccess_FullMethodName) || (caller == "moderation" && method == pb.ContentService_ApplyAssetReview_FullMethodName) || (caller == "gateway" && method == pb.ContentService_CreateTaskDraft_FullMethodName)
+		for _, method := range []string{pb.ContentService_CheckAssetAccess_FullMethodName, pb.ContentService_CheckReviewAssetAccess_FullMethodName, pb.ContentService_ApplyAssetReview_FullMethodName, pb.ContentService_ApplyReviewDecision_FullMethodName, pb.ContentService_GetReviewSnapshot_FullMethodName, pb.ContentService_RequestTaskReview_FullMethodName, pb.ContentService_CreateTaskDraft_FullMethodName} {
+			allowed := (caller == "asset" && (method == pb.ContentService_CheckAssetAccess_FullMethodName || method == pb.ContentService_CheckReviewAssetAccess_FullMethodName)) || (caller == "moderation" && (method == pb.ContentService_ApplyAssetReview_FullMethodName || method == pb.ContentService_ApplyReviewDecision_FullMethodName || method == pb.ContentService_GetReviewSnapshot_FullMethodName)) || (caller == "gateway" && (method == pb.ContentService_CreateTaskDraft_FullMethodName || method == pb.ContentService_RequestTaskReview_FullMethodName))
 			called := false
 			_, err := Authorization(serviceContext(caller), nil, &grpc.UnaryServerInfo{FullMethod: method}, func(context.Context, any) (any, error) { called = true; return nil, nil })
 			if called != allowed || (err == nil) != allowed {

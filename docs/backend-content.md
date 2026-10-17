@@ -217,3 +217,13 @@ mTLS 客户端同时验证证书 DNS 和 SPIFFE URI 的预期服务名称，不�
 新增 `CheckAssetAccess`（仅 mTLS asset）和 `ApplyAssetReview`（仅 mTLS moderation），以及 `003_reviewed_assets.sql` 的审核快照、稳定作品 ID 和幂等决定回执。Content 唯一持有审核展示状态；Asset 只检查 ready/存储，每次公开读取回查 Content，不跨 schema，也不递归。确切 task/entry/file 引用、published 任务和 approved 作品必须同时满足；下架/撤销提交后新的读取拒绝。旧批准重放只返回原回执，不能复活已收紧状态。
 
 原实现没有审核工作流，本切片只增加受信决定应用端：首次批准冻结指定草稿版本的人类+agent 初始包，之后用审核 revision 处理决定；私有草稿后续编辑不改变冻结内容。未实现 Moderation 服务/案件/投递、公开任务详情、追加作品、Voting 目录与完整投稿状态机。详细技术选择、HTTP-RPC 对照和验收边界见 [Asset 3C](backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。
+
+## 9. 正式送审增量（阶段4，Agent Self-Claimed，本地未发布）
+
+本轮以 [Moderation设计](backend-moderation.md) 覆盖上文历史的“只存在draft”和“审核尚未实现”边界。Content唯一持有作者、不可变送审快照、当前投稿与展示状态；Moderation持有案件/决定/outbox/回执。新迁移004扩展task_drafts状态与review引用，不修改已应用001～003；runtime新增必要列级权限，不可更新快照或作者。
+
+新增 `RequestTaskReview`、`GetReviewSnapshot`、`ApplyReviewDecision`、`CheckReviewAssetAccess`。送审前事务外复核Asset，事务内重查revision，原子保存快照+pending+outbox，绝不在事务里调用其他服务。缺双方可保存草稿但送审422。pending禁止修改（无工作副本）；rejected可PUT回draft且revision+1，再POST生成新快照/案件。相同旧版本重试找回原快照/结果，不覆盖新版本。详情返回reviewId/rejectionReason；本人分页默认仍draft，显式state支持pending_review/rejected/published/taken_down，其余键集/字节预算/隔离规则不变。
+
+正式批准只复制已送审快照及其冻结entry ID，不临时读取可变草稿；决定ID/哈希/回执同事务持久化。旧ApplyAssetReview首次冻结入口停止接受新批准（409 formal_review_required），历史精确回执仍可找回；正式投稿仅允许经旧协议收紧，禁止通过旧批准重放恢复展示。CheckReviewAssetAccess专用管理员网站断言，只读确切待审file关系，不回调Asset。既有公开CheckAssetAccess继续每次查当前权威展示状态。
+
+本轮真实测试/部署证据以Moderation文档为准；不以历史3C测试证书替代真实Moderation Pod，也不包含公开任务/作品浏览或Voting目录协调。

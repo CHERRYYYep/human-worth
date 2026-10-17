@@ -269,7 +269,7 @@ sudo systemctl enable --now human-worth-identity-deploy.timer
 
 #### 本地验收入口
 
-`python3 ops/lab/validate_modules.py` 在现有 kind lab 内创建临时 `human-worth-verify-*` 命名空间，使用真实模块声明与独立 PostgreSQL，gateway 改为 ClusterIP 并通过本机临时转发验证；不接入公网、不会复用产品数据。测试源码先复制为固定快照，结束删除临时命名空间和状态文件。它覆盖真实草稿 HTTP/mTLS/数据库链路、Content 重启后读取、网络允许与拒绝路径、完成标记传播、错误镜像回退、失败迁移同 SHA 重试及重复发布。临时数据库只有一个实例，不把此结果当作生产主备切换验收。
+`python3 ops/lab/validate_modules.py` 在现有 kind lab 内创建临时 `human-worth-verify-*` 命名空间，使用真实模块声明与独立 PostgreSQL，gateway 使用动态分配的私有 NodePort（不复用固定30443）。常规健康/回退检查仍有本机诊断转发；Moderation 停机隔离测试必须通过 kind 节点私网 NodePort → 正常 Service/ready endpoints，以新 TCP 连接验证不受影响的业务。此为 Agent Self-Claimed 验收方案，不接入公网、不会复用产品数据。测试源码先复制为固定快照，结束删除临时命名空间和状态文件。它覆盖真实草稿 HTTP/mTLS/数据库链路、Content 重启后读取、网络允许与拒绝路径、完成标记传播、错误镜像回退、失败迁移同 SHA 重试及重复发布。临时数据库只有一个实例，不把此结果当作生产主备切换验收。
 
 其他检查为 `npm run ci`、Go 的 Buf / vet / race 集成检查，以及 `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml .github/workflows/deploy.yml`。公网实际启用还需对应 dev SHA 的真实 Deploy 运行和公网接口证据。
 
@@ -609,3 +609,11 @@ Identity 的公网迁移已完成；后续模块通过真实联调后再逐项�
 本分支 Asset 配置 `CONTENT_TARGET` 与到 Content 的受限 egress，Content 只增加来自 Asset 的 RPC ingress；gRPC 方法仍单独授权。Content 先迁移 `003_reviewed_assets.sql`、更新列级 grants 再滚动。catalog 加入公开未知资源 404 检查。Asset 的 Content 依赖是每次公开请求必须成功的运行时授权依赖，不是启动/readiness 依赖：保留 Asset → Identity、Content → Asset 的部署排序，避免环。Content 停机时公开文件读取 fail closed，Asset 私有管理仍可用。
 
 `validate_modules.py` 对不可变快照运行 Content、Asset 与 PublicAsset 三项真实 kind 业务测试；仅在隔离 namespace，未部署公网。Moderation 测试调用方经临时 CA/mTLS 和 loopback 隧道投递决定，不能将其算成 Moderation 模块部署或该模块网络验收。结果见 [Asset 3C](backend-asset.md#13-3ccontent-权威授权与过审作品文件agent-self-claimed-实现方案)。
+
+### 阶段4 Moderation 模块增量（2026-10-16，Agent Self-Claimed）
+
+本轮在任务分支添加 `ops/lab/moderation.yaml`、catalog与grants：真实独立服务、两个非root/只读根Pod、mTLS moderation身份、独立owner/runtime、startup/live/ready探针和PDB，不是platform进程。kind依赖为Identity→Asset→Content→Moderation→gateway；Content后台MODERATION_TARGET与Moderation CONTENT_TARGET是双向运行时协作，不互相健康依赖。NetworkPolicy显式开放Content↔Moderation、Moderation→Identity/数据库、gateway→Moderation，不开放跨schema查询。新增Content004迁移、Moderation001及最小列级授权；运行服务不DDL。
+
+`validate_modules.py`在一次性namespace运行 `TestKindModerationDeployment`，真实HTTP→Identity→Moderation/Content→PostgreSQL/S3，真实停止/恢复Pod，覆盖送审与决定outbox、待审管理员文件、驳回重提和回执重放。旧3C证书测试只作为旧快照/回执升级回归。网络探针增加Moderation允许/拒绝方向。必要代码和集成先通过再运行kind；**当前执行结果以[Moderation验收记录](backend-moderation.md)为准**，不以YAML能解析或命令启动声明部署成功。本轮不发布公网、不自动提交/push/PR。
+
+2026-10-17 故障隔离修正（Agent Self-Claimed）：Gateway readiness 不包含 Moderation 健康。Moderation 停机时仅相关审核 RPC fail closed 为503，Content 仍可事务保存送审待办；不应移除 Gateway 正常 Service endpoints。`services.json` 中 gateway→moderation 是部署排序，不是此全局就绪依赖。新增 Moderation 002 迁移放开批准理由且保留旧案件，先迁移再滚动；不改001校验和。

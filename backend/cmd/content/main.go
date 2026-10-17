@@ -14,6 +14,7 @@ import (
 	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
+	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/content"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
@@ -95,7 +96,16 @@ func run() error {
 	}()
 	runtime.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "human_worth_database_connections", Help: "Open connections in this replica's pool"}, func() float64 { return float64(db.Stat().TotalConns()) }))
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, content.Authorization), grpc.StreamInterceptor(content.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(65536), grpc.MaxSendMsgSize(4<<20), grpc.MaxConcurrentStreams(64))
-	pb.RegisterContentServiceServer(server, &content.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn), Asset: assetClient})
+	app := &content.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn), Asset: assetClient}
+	pb.RegisterContentServiceServer(server, app)
+	if target := os.Getenv("MODERATION_TARGET"); target != "" {
+		c, e := platform.Client(target, "moderation")
+		if e != nil {
+			return e
+		}
+		defer c.Close()
+		go app.RunReviewDelivery(ctx, moderationpb.NewModerationServiceClient(c))
+	}
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
