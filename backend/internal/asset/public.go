@@ -56,29 +56,34 @@ func (s *Server) DownloadPublicAsset(r *pb.DownloadPublicAssetRequest, stream pb
 	if err != nil {
 		return err
 	}
-	if err = storageReady(s); err != nil {
+	return s.streamAuthorizedAsset(stream.Context(), row, func(ctx context.Context) (bool, error) {
+		access, err := s.Content.CheckAssetAccess(ctx, &contentpb.CheckAssetAccessRequest{Reference: r.Reference})
+		return access.GetAllowed(), err
+	}, stream.Send)
+}
+func (s *Server) streamAuthorizedAsset(ctx context.Context, row assetRow, authorize func(context.Context) (bool, error), send func(*pb.DownloadPublicAssetResponse) error) error {
+	if err := storageReady(s); err != nil {
 		return err
 	}
-	size, err := s.Storage.Stat(stream.Context(), row.FinalKey)
+	size, err := s.Storage.Stat(ctx, row.FinalKey)
 	if err != nil || size != row.Expected {
 		return status.Error(codes.Unavailable, "asset_unavailable")
 	}
-	reader, err := s.Storage.Open(stream.Context(), row.FinalKey)
+	reader, err := s.Storage.Open(ctx, row.FinalKey)
 	if err != nil {
 		return unavailable(err)
 	}
 	defer reader.Close()
-	// Slow storage open must not create a stale approval window before headers.
-	check, cancel := context.WithTimeout(stream.Context(), publicAccessTimeout)
-	access, err := s.Content.CheckAssetAccess(check, &contentpb.CheckAssetAccessRequest{Reference: r.Reference})
+	check, cancel := context.WithTimeout(ctx, publicAccessTimeout)
+	allowed, err := authorize(check)
 	cancel()
 	if err != nil {
-		return unavailable(err)
+		return err
 	}
-	if !access.GetAllowed() {
+	if !allowed {
 		return status.Error(codes.NotFound, "asset_not_found")
 	}
-	if err = stream.Send(&pb.DownloadPublicAssetResponse{Value: &pb.DownloadPublicAssetResponse_Metadata{Metadata: assetContract(row)}}); err != nil {
+	if err = send(&pb.DownloadPublicAssetResponse{Value: &pb.DownloadPublicAssetResponse_Metadata{Metadata: assetContract(row)}}); err != nil {
 		return unavailable(err)
 	}
 	buf := make([]byte, 64<<10)
@@ -89,7 +94,7 @@ func (s *Server) DownloadPublicAsset(r *pb.DownloadPublicAssetRequest, stream pb
 			if offset+int64(n) > row.Expected {
 				return status.Error(codes.Unavailable, "asset_unavailable")
 			}
-			if err = stream.Send(&pb.DownloadPublicAssetResponse{Offset: offset, Value: &pb.DownloadPublicAssetResponse_Data{Data: append([]byte(nil), buf[:n]...)}}); err != nil {
+			if err = send(&pb.DownloadPublicAssetResponse{Offset: offset, Value: &pb.DownloadPublicAssetResponse_Data{Data: append([]byte(nil), buf[:n]...)}}); err != nil {
 				return unavailable(err)
 			}
 			offset += int64(n)

@@ -28,6 +28,7 @@ const (
 	AssetService_ListMyAssets_FullMethodName        = "/humanworth.asset.v1.AssetService/ListMyAssets"
 	AssetService_CheckAssetOwnership_FullMethodName = "/humanworth.asset.v1.AssetService/CheckAssetOwnership"
 	AssetService_DownloadAsset_FullMethodName       = "/humanworth.asset.v1.AssetService/DownloadAsset"
+	AssetService_DownloadReviewAsset_FullMethodName = "/humanworth.asset.v1.AssetService/DownloadReviewAsset"
 	AssetService_DownloadPublicAsset_FullMethodName = "/humanworth.asset.v1.AssetService/DownloadPublicAsset"
 	AssetService_GetAsset_FullMethodName            = "/humanworth.asset.v1.AssetService/GetAsset"
 	AssetService_ReadAsset_FullMethodName           = "/humanworth.asset.v1.AssetService/ReadAsset"
@@ -50,6 +51,9 @@ type AssetServiceClient interface {
 	ListMyAssets(ctx context.Context, in *ListMyAssetsRequest, opts ...grpc.CallOption) (*ListMyAssetsResponse, error)
 	CheckAssetOwnership(ctx context.Context, in *CheckAssetOwnershipRequest, opts ...grpc.CallOption) (*CheckAssetOwnershipResponse, error)
 	DownloadAsset(ctx context.Context, in *DownloadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadAssetResponse], error)
+	// Gateway mTLS, dedicated administrator web assertion. Content verifies exact
+	// pending snapshot reference twice. First metadata then contiguous data; 15m.
+	DownloadReviewAsset(ctx context.Context, in *DownloadReviewAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadReviewAssetResponse], error)
 	// Gateway only. Anonymous public read, not an ownership bypass. Asset checks
 	// Content on every new stream. No URL/grant; 15 minute transport budget.
 	DownloadPublicAsset(ctx context.Context, in *DownloadPublicAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPublicAssetResponse], error)
@@ -169,9 +173,28 @@ func (c *assetServiceClient) DownloadAsset(ctx context.Context, in *DownloadAsse
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AssetService_DownloadAssetClient = grpc.ServerStreamingClient[DownloadAssetResponse]
 
+func (c *assetServiceClient) DownloadReviewAsset(ctx context.Context, in *DownloadReviewAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadReviewAssetResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[2], AssetService_DownloadReviewAsset_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadReviewAssetRequest, DownloadReviewAssetResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_DownloadReviewAssetClient = grpc.ServerStreamingClient[DownloadReviewAssetResponse]
+
 func (c *assetServiceClient) DownloadPublicAsset(ctx context.Context, in *DownloadPublicAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DownloadPublicAssetResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[2], AssetService_DownloadPublicAsset_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[3], AssetService_DownloadPublicAsset_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +223,7 @@ func (c *assetServiceClient) GetAsset(ctx context.Context, in *GetAssetRequest, 
 
 func (c *assetServiceClient) ReadAsset(ctx context.Context, in *ReadAssetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadAssetResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[3], AssetService_ReadAsset_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &AssetService_ServiceDesc.Streams[4], AssetService_ReadAsset_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -234,6 +257,9 @@ type AssetServiceServer interface {
 	ListMyAssets(context.Context, *ListMyAssetsRequest) (*ListMyAssetsResponse, error)
 	CheckAssetOwnership(context.Context, *CheckAssetOwnershipRequest) (*CheckAssetOwnershipResponse, error)
 	DownloadAsset(*DownloadAssetRequest, grpc.ServerStreamingServer[DownloadAssetResponse]) error
+	// Gateway mTLS, dedicated administrator web assertion. Content verifies exact
+	// pending snapshot reference twice. First metadata then contiguous data; 15m.
+	DownloadReviewAsset(*DownloadReviewAssetRequest, grpc.ServerStreamingServer[DownloadReviewAssetResponse]) error
 	// Gateway only. Anonymous public read, not an ownership bypass. Asset checks
 	// Content on every new stream. No URL/grant; 15 minute transport budget.
 	DownloadPublicAsset(*DownloadPublicAssetRequest, grpc.ServerStreamingServer[DownloadPublicAssetResponse]) error
@@ -277,6 +303,9 @@ func (UnimplementedAssetServiceServer) CheckAssetOwnership(context.Context, *Che
 }
 func (UnimplementedAssetServiceServer) DownloadAsset(*DownloadAssetRequest, grpc.ServerStreamingServer[DownloadAssetResponse]) error {
 	return status.Error(codes.Unimplemented, "method DownloadAsset not implemented")
+}
+func (UnimplementedAssetServiceServer) DownloadReviewAsset(*DownloadReviewAssetRequest, grpc.ServerStreamingServer[DownloadReviewAssetResponse]) error {
+	return status.Error(codes.Unimplemented, "method DownloadReviewAsset not implemented")
 }
 func (UnimplementedAssetServiceServer) DownloadPublicAsset(*DownloadPublicAssetRequest, grpc.ServerStreamingServer[DownloadPublicAssetResponse]) error {
 	return status.Error(codes.Unimplemented, "method DownloadPublicAsset not implemented")
@@ -452,6 +481,17 @@ func _AssetService_DownloadAsset_Handler(srv interface{}, stream grpc.ServerStre
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AssetService_DownloadAssetServer = grpc.ServerStreamingServer[DownloadAssetResponse]
 
+func _AssetService_DownloadReviewAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadReviewAssetRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AssetServiceServer).DownloadReviewAsset(m, &grpc.GenericServerStream[DownloadReviewAssetRequest, DownloadReviewAssetResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AssetService_DownloadReviewAssetServer = grpc.ServerStreamingServer[DownloadReviewAssetResponse]
+
 func _AssetService_DownloadPublicAsset_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(DownloadPublicAssetRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -541,6 +581,11 @@ var AssetService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "DownloadAsset",
 			Handler:       _AssetService_DownloadAsset_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "DownloadReviewAsset",
+			Handler:       _AssetService_DownloadReviewAsset_Handler,
 			ServerStreams: true,
 		},
 		{

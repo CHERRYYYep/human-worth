@@ -47,13 +47,13 @@ func Authorization(ctx context.Context, request any, info *grpc.UnaryServerInfo,
 }
 func contentPeer(ctx context.Context, method string) error {
 	switch method {
-	case pb.ContentService_CheckAssetAccess_FullMethodName:
+	case pb.ContentService_CheckAssetAccess_FullMethodName, pb.ContentService_CheckReviewAssetAccess_FullMethodName:
 		return requireContentCaller(ctx, "asset")
-	case pb.ContentService_ApplyAssetReview_FullMethodName:
+	case pb.ContentService_ApplyAssetReview_FullMethodName, pb.ContentService_GetReviewSnapshot_FullMethodName, pb.ContentService_ApplyReviewDecision_FullMethodName:
 		return requireContentCaller(ctx, "moderation")
 	case "/grpc.health.v1.Health/Check":
 		name, err := platform.ServiceName(ctx)
-		if err == nil && name == "asset" {
+		if err == nil && (name == "asset" || name == "moderation") {
 			return nil
 		}
 	}
@@ -252,7 +252,7 @@ func (s *Server) CreateTaskDraft(ctx context.Context, r *pb.CreateTaskDraftReque
 		return nil, storage(err)
 	}
 	var original []byte
-	submission, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash FROM content.task_drafts WHERE author_id=$1 AND create_key=$2`, author, r.IdempotencyKey), &original)
+	submission, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE author_id=$1 AND create_key=$2`, author, r.IdempotencyKey), &original)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ type rowScanner interface {
 func scan(row rowScanner, hash *[]byte, extra ...any) (*pb.TaskSubmission, error) {
 	result := &pb.TaskSubmission{Content: &pb.TaskDraftInput{}}
 	var data []byte
-	values := []any{&result.Id, &result.AuthorId, &result.Revision, &result.State, &data, hash}
+	values := []any{&result.Id, &result.AuthorId, &result.Revision, &result.State, &data, hash, &result.ReviewId, &result.RejectionReason}
 	values = append(values, extra...)
 	err := row.Scan(values...)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -296,7 +296,7 @@ func (s *Server) GetMyTaskSubmission(ctx context.Context, r *pb.GetMyTaskSubmiss
 		return nil, status.Error(codes.NotFound, "task_not_found")
 	}
 	var hash []byte
-	result, err := scan(s.DB.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author), &hash)
+	result, err := scan(s.DB.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author), &hash)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ func effectiveSubmissionFilter(r *pb.ListMySubmissionsRequest) (submissionFilter
 	if filter.State == "" {
 		filter.State = "draft"
 	}
-	if filter.Kind != "task" || filter.State != "draft" {
+	if filter.Kind != "task" || !validSubmissionState(filter.State) {
 		return submissionFilter{}, 0, invalid("unsupported_submission_filter")
 	}
 	if r.Category != nil {
@@ -381,8 +381,8 @@ func (s *Server) ListMySubmissions(ctx context.Context, r *pb.ListMySubmissionsR
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT id,author_id,revision,state,content,create_hash,created_at FROM content.task_drafts WHERE author_id=$1 AND state='draft'`
-	args := []any{author}
+	query := `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason,created_at FROM content.task_drafts WHERE author_id=$1 AND state=$2`
+	args := []any{author, filter.State}
 	if filter.Category != nil {
 		args = append(args, *filter.Category)
 		query += fmt.Sprintf(` AND content->>'category'=$%d`, len(args))
@@ -485,14 +485,14 @@ func (s *Server) ReplaceTaskDraft(ctx context.Context, r *pb.ReplaceTaskDraftReq
 	}
 	defer tx.Rollback(ctx)
 	var hash []byte
-	previous, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author), &hash)
+	previous, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author), &hash)
 	if err != nil {
 		return nil, err
 	}
-	if previous.State != "draft" || previous.Revision != r.ExpectedRevision {
+	if (previous.State != "draft" && previous.State != "rejected") || previous.Revision != r.ExpectedRevision {
 		return nil, status.Error(codes.Aborted, "revision_conflict")
 	}
-	result, err := scan(tx.QueryRow(ctx, `UPDATE content.task_drafts SET content=$3,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 AND author_id=$2 RETURNING id,author_id,revision,state,content,create_hash`, r.TaskId, author, data), &hash)
+	result, err := scan(tx.QueryRow(ctx, `UPDATE content.task_drafts SET content=$3,revision=revision+1,state='draft',review_id=NULL,rejection_reason=NULL,updated_at=clock_timestamp() WHERE id=$1 AND author_id=$2 RETURNING id,author_id,revision,state,content,create_hash,review_id,rejection_reason`, r.TaskId, author, data), &hash)
 	if err != nil {
 		return nil, err
 	}
@@ -522,4 +522,12 @@ func validJSONStrings(value any) bool {
 		}
 	}
 	return true
+}
+
+func validSubmissionState(s string) bool {
+	switch s {
+	case "draft", "pending_review", "rejected", "published", "taken_down":
+		return true
+	}
+	return false
 }

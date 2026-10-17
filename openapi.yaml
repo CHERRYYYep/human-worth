@@ -489,8 +489,8 @@ paths:
       operationId: listMySubmissions
       summary: 找回本人的任务草稿、投稿与审核结果
       description: |
-        首阶段只返回当前网站会话账号自己的完整 TaskSubmission 草稿；不查询 EntrySubmission、审核或公开内容。
-        kind 缺省等同 task，state 缺省等同 draft；明确传入其他值或空 kind/state 返回 400 unsupported_submission_filter，未知或重复参数返回 400 invalid_request。
+        只返回当前网站会话账号自己的完整 TaskSubmission；不查询 EntrySubmission。审核状态筛选为本轮未发布增量。
+        kind 缺省等同 task，state 缺省等同 draft；state支持draft/pending_review/rejected/published/taken_down，明确传入不支持的值或空kind/state返回400 unsupported_submission_filter，未知或重复参数返回 400 invalid_request。
         category 按草稿写入值精确匹配，不 trim、不改变大小写、不做 Unicode 归一化；缺省不筛选，显式空值返回 400。为容纳合法 UTF-8 值的 URL 编码，该路由允许最多 40 KiB Request-URI；超过时返回 414 invalid_request。
         固定按 created_at DESC、id DESC 排序并使用键集游标。省略 cursor 或 cursor= 都表示第一页；游标最长 2048 字符，绑定账号、有效筛选和排序，损坏、跨账号或换筛选复用返回 400 invalid_cursor。category 为空、含 NUL、不是有效 UTF-8 或超过 12000 个 UTF-8 字节返回 400 invalid_category；该字节上限覆盖所有满足草稿整体 12000 字节约束的既有分类。
         单页最多 limit 条，以 limit+1 查询判断 nextCursor；响应还受 2 MiB 的实际 Protobuf 编码预算约束，因此合法完整对象较大时可少于 limit 条，并以最后一条实际返回记录生成 nextCursor。空结果为 items: []、nextCursor: null，不查询 totalCount。
@@ -508,15 +508,15 @@ paths:
           schema: {type: string, enum: [task]}
         - name: state
           in: query
-          description: 首阶段唯一支持 draft；缺省也表示 draft。
-          schema: {type: string, enum: [draft]}
+          description: 缺省draft；审核生命周期筛选为本轮未发布增量。
+          schema: {type: string, enum: [draft, pending_review, rejected, published, taken_down]}
         - name: category
           in: query
           description: 按任务草稿 category 精确筛选；显式空值非法，最长 12000 个 UTF-8 字节，不建立分类枚举或分类表。
           schema: {type: string, minLength: 1}
       responses:
         '200':
-          description: 首阶段仅含本人完整任务草稿；nextCursor 为 null 时没有下一页
+          description: 本人完整任务投稿；nextCursor为null时没有下一页
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SubmissionPage'}
@@ -532,7 +532,7 @@ paths:
       tags: [Account]
       operationId: getMyTaskSubmission
       summary: 读取本人任务与初始作品的投稿内容
-      description: 首阶段仅存在作者私有 draft；MCP、其他账号（含管理员）均不能读取。
+      description: 作者私有投稿及当前审核结果；MCP、其他账号（含管理员）均不能读取。
       x-scenarios: [S2]
       x-implementation-status: implemented
       x-deployment-status: published
@@ -549,10 +549,10 @@ paths:
       operationId: replaceTaskDraft
       summary: 替换本人任务草稿
       description: |
-        完整替换可编辑内容与初始作品列表，仍为 draft。首阶段只创建/编辑 draft，不实现审核或驳回重提。
+        完整替换draft或rejected内容及初始作品列表，revision+1并回draft，清除当前review引用但保留历史。
         expectedRevision 必须等于当前版本，每次成功加一，否则 409 revision_conflict；同一旧版本重复 PUT 也返回 409。
         客户端遇到超时先 GET 核对当前版本与内容，不自动用新版本重放旧编辑。其他账号与不存在的任务均返回 404。
-        后续接入审核时允许 rejected 修订回 draft 并保留审核历史；pending_review、published、taken_down 不可编辑。
+        pending_review、published、taken_down 不可编辑；修改后仍需显式送审。旧3C快照的兼容工作副本不得通过送审复活。
         与创建共用文件拒绝、内容/作品数量上限，写入成功不公开、不送审。
       x-scenarios: [S2]
       x-implementation-status: implemented
@@ -578,10 +578,15 @@ paths:
       summary: 将本人任务及双方初始作品一起送审
       description: |
         服务端校验 expectedRevision、完整任务信息及至少一件 human 和一件 agent 作品；缺少任一方返回 422。
-        所有材料须可用且授权有效；校验失败时保留草稿，不部分送审。
+        所有 file 材料须属于本人且 ready；保留来源与显式 cloudUse，cloudUse=false 不阻止送审。
+        同事务保存不可变快照、pending_review 与 outbox，不在事务中调用其他服务。
+        待审期间不保留可编辑工作副本；驳回后先 PUT 修改为新 revision/draft，再显式送审。
+        同一旧版本重试仍返回该版本的审核记录，不会批准或覆盖新版本。
         同一版本重复请求找回原审核记录；通过后任务发布、初始作品获准展示，在同一事务生效。发布不启动云端 agent。
       x-scenarios: [S2]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
+      security: [{WebSession: [], CsrfToken: []}]
       requestBody:
         required: true
         content:
@@ -593,6 +598,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TaskSubmission'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/InvalidSubmission'}
         default: {$ref: '#/components/responses/Problem'}
 
@@ -1067,7 +1073,13 @@ paths:
       operationId: listReviews
       summary: 分页读取任务及作品审核队列
       x-scenarios: [S4]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
+      description: |
+        管理员网站会话专用；MCP 禁止。默认 pending，limit 20 最大100。
+        cursor 缺省或空为第一页；非法、重复、未知参数及超过2048字符或跨账号/筛选游标400。
+        固定 created_at DESC,id DESC，按完整Proto字节预算最多limit条，不查totalCount。
+        最后一页 nextCursor 为 null；改变status从第一页查询。
       security: [{WebSession: [admin]}]
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
@@ -1077,11 +1089,52 @@ paths:
           schema: {type: string, enum: [pending, approved, rejected], default: pending}
       responses:
         '200':
-          description: 包含新任务及双方初始作品、追加作品和云端作品
+          description: 当前仅初始任务及双方作品的完整快照；追加/云端投稿未实现
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReviewPage'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/admin/reviews/{reviewId}:
+    parameters:
+      - {name: reviewId, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    get:
+      tags: [Administration]
+      operationId: getReview
+      summary: 管理员读取确切送审快照与执行状态
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
+      security: [{WebSession: [admin]}]
+      responses:
+        '200':
+          description: 不可变送审快照，决定及执行回执状态；query不允许
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Review'}
+        default: {$ref: '#/components/responses/Problem'}
+
+  /api/admin/reviews/{reviewId}/assets/{assetId}/content:
+    parameters:
+      - {name: reviewId, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+      - {name: assetId, in: path, required: true, schema: {$ref: '#/components/schemas/Id'}}
+    get:
+      tags: [Administration, Assets]
+      operationId: downloadReviewAsset
+      summary: 管理员读取待审快照中的ready文件
+      description: |
+        管理员网站会话专用，专用Asset和Content断言；不使用owner/admin头或通用授权绕过。
+        每次及Open后复核确切pending快照引用，非引用/已终审/文件不可用404；依赖失败503。
+        不接受query；no-store、attachment、nosniff，不发永久URL。已发送字节不能追回。
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
+      security: [{WebSession: [admin]}]
+      responses:
+        '200':
+          description: 已检测媒体类型的文件流
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
         default: {$ref: '#/components/responses/Problem'}
 
   /api/admin/reviews/{reviewId}/decision:
@@ -1096,10 +1149,14 @@ paths:
       summary: 通过或驳回一次审核
       description: |
         仅处理仍为 pending 的该次投稿快照；拒绝过时版本。新任务与双方初始作品一起通过才公开。
-        追加及云端作品只改变作品审核状态，不重审已发布任务；通过即为 approved 并允许展示，不另设公开状态。原任务已下架时不得通过新作品。
+        当前只支持初始任务整体审核；追加/云端投稿未实现。
+        先持久化决定及outbox；未收到Content回执时status仍pending、deliveryState=pending，返回202。
+        Content确认后status才approved/rejected、deliveryState=applied；原样重试返回200与同一结果。
+        approve可选reason并原样保存；reject理由必填且不能全为空白。提供的理由须为有效UTF-8、无NUL且不超过4000字节。
         驳回必须填写原因；同一决定重试返回已有结果，不同决定返回 409。留存管理员身份、时间与结果。
       x-scenarios: [S2, S3, S4]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       security: [{WebSession: [admin], CsrfToken: []}]
       requestBody:
         required: true
@@ -1109,6 +1166,11 @@ paths:
       responses:
         '200':
           description: 审核结果及对应投稿快照
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Review'}
+        '202':
+          description: 决定已持久化，等待Content执行回执；不得声称已生效
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Review'}
@@ -2031,13 +2093,18 @@ components:
           required: [decision]
           properties:
             decision: {type: string, const: approve}
-            reason: {type: string}
+            reason:
+              type: string
+              description: 批准理由可选；提供时原样保存并参与决定幂等比较。有效 UTF-8、无 NUL，最多 4000 UTF-8 字节；允许空字符串。
         - type: object
           additionalProperties: false
           required: [decision, reason]
           properties:
             decision: {type: string, const: reject}
-            reason: {type: string, minLength: 1}
+            reason:
+              type: string
+              minLength: 1
+              description: 驳回理由必填且不能全为空白；有效 UTF-8、无 NUL，最多 4000 UTF-8 字节，原样保存并参与决定幂等比较。
     Review:
       type: object
       additionalProperties: false
@@ -2054,6 +2121,10 @@ components:
         reviewerId: {$ref: '#/components/schemas/NullableId'}
         createdAt: {$ref: '#/components/schemas/Timestamp'}
         decidedAt: {$ref: '#/components/schemas/NullableTime'}
+        decision: {type: [string, 'null'], enum: [approve, reject, null]}
+        deliveryState: {type: string, enum: [undecided, pending, applied, blocked], description: 只有applied表示Content回执确认生效；blocked需处理不可恢复的版本冲突}
+        entryIds: {type: array, items: {$ref: '#/components/schemas/Id'}, description: 按初始作品顺序冻结的稳定ID，不是可重排草稿的数组索引}
+        applicationRevision: {type: [integer, 'null'], minimum: 1, description: Content已应用的投稿revision，不是工作副本当前revision}
     Quantity:
       type: object
       additionalProperties: false

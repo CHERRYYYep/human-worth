@@ -162,7 +162,7 @@ func submissionListRequest(rawQuery string) (*pb.ListMySubmissionsRequest, strin
 	}
 	if query.Has("state") {
 		request.State = query.Get("state")
-		if request.State != "draft" {
+		if request.State != "draft" && request.State != "pending_review" && request.State != "rejected" && request.State != "published" && request.State != "taken_down" {
 			return nil, "unsupported_submission_filter"
 		}
 	}
@@ -259,7 +259,14 @@ func taskJSON(task *pb.TaskSubmission) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"kind": "task", "id": task.Id, "authorId": task.AuthorId, "revision": task.Revision, "state": task.State, "content": json.RawMessage(data), "reviewId": nil, "rejectionReason": nil}, nil
+	var review, reason any
+	if task.ReviewId != nil {
+		review = *task.ReviewId
+	}
+	if task.RejectionReason != nil {
+		reason = *task.RejectionReason
+	}
+	return map[string]any{"kind": "task", "id": task.Id, "authorId": task.AuthorId, "revision": task.Revision, "state": task.State, "content": json.RawMessage(data), "reviewId": review, "rejectionReason": reason}, nil
 }
 func taskResponse(w http.ResponseWriter, code int, task *pb.TaskSubmission) {
 	value, err := taskJSON(task)

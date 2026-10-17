@@ -1,6 +1,6 @@
 # Go 后端
 
-当前已发布 `gateway`、`IdentityService`、`ContentService` 四个本人草稿接口；Asset 的私有上传服务已在本分支实现并已接入本分支 kind lab，2026-10-16 本地隔离模块 rollout、重复部署及 Asset 跨 Pod 文件业务验收通过，但尚未合入或公网发布。Asset 使用 S3-compatible 共享存储，`FileStorage` 仅限显式单进程测试；本地 SeaweedFS 和 kind 验收不等于生产 HA 或公网验收。`ChallengeService`、challenge-worker 与 P/R/E Completion 适配器已本地实现，真实 PostgreSQL 与依赖 fake 联调已有记录，真实 E 沙箱及完整依赖闭环仍待验收，未发布。见 [Identity](../docs/backend-identity.md)、[Content](../docs/backend-content.md)、[Asset](../docs/backend-asset.md)、[Challenge](../docs/backend-challenge.md#implementation)和[部署文档](../docs/deployment.md#identity-lab)。
+当前已发布 `gateway`、`IdentityService`、`ContentService` 四个本人草稿接口；Asset 的私有上传服务已在本分支实现并已接入本分支 kind lab，Moderation 已完成本地审核闭环与双副本 kind 验收；这些改动尚未合入或公网发布。Asset 使用 S3-compatible 共享存储，`FileStorage` 仅限显式单进程测试；本地 SeaweedFS 和 kind 验收不等于生产 HA 或公网验收。`ChallengeService`、challenge-worker 与 P/R/E Completion 适配器已本地实现，真实 PostgreSQL 与依赖 fake 联调已有记录，真实 E 沙箱及完整依赖闭环仍待验收，未发布。见 [Identity](../docs/backend-identity.md)、[Content](../docs/backend-content.md)、[Asset](../docs/backend-asset.md)、[Challenge](../docs/backend-challenge.md#implementation)和[部署文档](../docs/deployment.md#identity-lab)。
 
 ## Asset 3C：过审作品文件读取（本地分支，未发布）
 
@@ -170,3 +170,29 @@ Content 集成测试复用 Identity 测试供应方与登录流程，启动 **�
 Content 已接入 [模块自动部署](../docs/deployment.md#module-deployment)：数据库角色、证书、网络规则、迁移、双副本及部署检查进入同一 CI 后流程。2026-09-21 首次发布 `cbca132` 的 Deploy Action 与公网草稿创建、读取、更新和权限验收均通过；完整记录见部署文档。
 
 后续模块实现时同时登记 [services.json](../ops/lab/services.json) 和自己的应用 YAML，声明依赖、数据库与只读部署检查；不为每个模块另写 Action。`/api/health` 的可选 `deploymentRevision` 与 `deployedServices` 由控制器在全部模块成功后写入，普通 `revision` 只表示当前 gateway 版本。
+
+## 阶段 4：正式送审与 Moderation（本地增量，未发布）
+
+设计与兼容规则见 [Moderation](../docs/backend-moderation.md)。Asset PR #27 已合入上游 dev；本轮 `backend/feat-moderation-review` 从 `b2a7399` 开始。下述技术选择为 **Agent Self-Claimed**。
+
+- `POST /api/me/tasks/{taskId}/review-requests`：网站＋CSRF，`{"expectedRevision":1}`；齐备human/agent与ready本人file后，同事务保存不可变快照、pending状态及outbox。相同任务/版本找回原记录。待审不可编辑；驳回后PUT产生新revision/draft，再送审产生新案件，历史保留。
+- 管理员 `GET /api/admin/reviews`、`GET /api/admin/reviews/{reviewId}`、`POST /api/admin/reviews/{reviewId}/decision`；拒绝普通用户/MCP，approve可选reason并原样保存，reject必填非空白reason；有效UTF-8、无NUL、最多4000字节。决定落库返回202/pending，收到Content回执才200/applied，旧决定重放不改变新版本或恢复展示；相同决定但不同理由409。新增Moderation `002_approval_reason.sql`兼容旧案件，保留001校验和。
+- `GET /api/admin/reviews/{reviewId}/assets/{assetId}/content`：管理员专用Asset/Content断言＋确切pending快照引用，Open后再次验证，非通用管理员下载/owner绕过。Asset无审核状态。
+- `cmd/moderation` 独立服务，`MODERATION_DATABASE_URL_FILE`、`IDENTITY_TARGET`、`CONTENT_TARGET` 和已有 `SERVICE_*_FILE`；服务身份moderation。`cmd/moderation migrate`只用owner DSN，运行时用受限runtime。新增 `ops/moderation/bootstrap.sql` / `grants.sql`。Content新增004迁移并重跑其grants，不改001～003；迁移不由运行服务执行。
+- Content和gateway增加 `MODERATION_TARGET`。双方PostgreSQL outbox领取提交后才调用gRPC，15秒持久租约，1秒轮询、每条5秒RPC，关闭自动RPC重试。Content就绪不依赖Moderation、Moderation就绪不依赖Content，避免启动环；Gateway就绪也不依赖Moderation，审核路由单独503，登录/草稿/上传与Content送审继续可用。catalog部署排序不同于请求期readiness；其余必要依赖故障仍fail-closed。
+- 旧 `ApplyAssetReview` 保留编号和历史回执及下架/撤销；新草稿首次批准必须正式送审，正式投稿不能通过旧RPC重新批准。既有3C测试明确作为旧已部署快照升级兼容测试，不能冒充真正Moderation验收。
+
+真实组件测试复用Identity专用数据库/OIDC/PKI夹具（不是产品库）：
+
+```sh
+cd backend
+IDENTITY_TEST_DATABASE_URL_FILE=/path/to/private/test-dsn \
+ go test -race -tags=integration ./internal/identity \
+ -run '^TestModeration(HTTPOutbox|IdentityAuthorization|ApprovalMigration)$' -count=1 -timeout=120s
+```
+
+真实kind：根目录运行 `DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py`，含真实Moderation两Pod和 `TestKindModerationDeployment`。一次性namespace使用动态私有NodePort，不占公网固定端口；Moderation停机后通过正常Service/ready endpoints、新TCP连接验证其他接口可用及审核503，再恢复投递。Content停机的回执恢复子测试仍用诊断port-forward，不声明全局Content故障隔离。不使用测试reviewer证书替代新审核工作流。此前3C测试证书记录只证明兼容应用端。普通/真实PG/FileStorage/共享S3/kind分别记录；执行结果追加到Moderation文档，不从命令启动或Proto生成推断PASS。
+
+validator的登录发起检查使用临时合成OAuth client，仅验证真实Identity登录流程持久化和302构造，不跟随跳转/换码、不读取真人凭据，不代表真人Google登录成功。配置与隔离namespace一起清理。
+
+本轮不实现公开任务/作品详情、追加投稿、举报平台、Voting、Discovery、Challenge完整联调、自动审核/病毒扫描、生产S3 HA或公网部署。最多声明“审核及过审文件链路”，不能声明“公开内容浏览”。本地kind双副本共享SeaweedFS不等于生产HA。

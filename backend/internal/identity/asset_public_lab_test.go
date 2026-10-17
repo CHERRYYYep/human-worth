@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -92,6 +94,23 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 		return result
 	}
 	approval := &contentpb.ApplyAssetReviewRequest{DecisionId: "kind-public-approval01", TaskId: task.ID, SubmissionRevision: 1, Decision: &contentpb.ApplyAssetReviewRequest_TaskState{TaskState: contentpb.ReviewedTaskState_REVIEWED_TASK_STATE_PUBLISHED}}
+	// Only seed an OLD deployed 3C snapshot/receipt to verify rolling-upgrade
+	// compatibility. Formal moderation is exercised by TestKindModerationDeployment.
+	wire, e := (proto.MarshalOptions{Deterministic: true}).Marshal(approval)
+	if e != nil {
+		t.Fatal(e)
+	}
+	hash := sha256.Sum256(wire)
+	legacyReceipt := &contentpb.ApplyAssetReviewResponse{Revision: 1, Entries: []*contentpb.ReviewedEntry{{Id: "ent_" + strings.Repeat("a", 32), Position: 0, State: contentpb.ReviewedEntryState_REVIEWED_ENTRY_STATE_APPROVED}, {Id: "ent_" + strings.Repeat("b", 32), Position: 1, State: contentpb.ReviewedEntryState_REVIEWED_ENTRY_STATE_APPROVED}}}
+	raw, e := protojson.Marshal(legacyReceipt)
+	if e != nil {
+		t.Fatal(e)
+	}
+	l.sql(fmt.Sprintf(`INSERT INTO content.reviewed_tasks(task_id,source_revision,revision,state,snapshot) SELECT id,revision,1,'published',content FROM content.task_drafts WHERE id='%s';`, task.ID))
+	for _, entry := range legacyReceipt.Entries {
+		l.sql(fmt.Sprintf(`INSERT INTO content.reviewed_entries(id,task_id,position,state) VALUES('%s','%s',%d,'approved');`, entry.Id, task.ID, entry.Position))
+	}
+	l.sql(fmt.Sprintf(`INSERT INTO content.asset_review_receipts(decision_id,task_id,request_hash,response) VALUES('%s','%s',decode('%x','hex'),'%s');`, approval.DecisionId, task.ID, hash, raw))
 	receipt := apply(approval)
 	if receipt.Revision != 1 || len(receipt.Entries) != 2 {
 		t.Fatal("invalid review receipt")

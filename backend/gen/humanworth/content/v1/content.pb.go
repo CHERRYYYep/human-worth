@@ -123,6 +123,55 @@ func (ReviewedEntryState) EnumDescriptor() ([]byte, []int) {
 	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{1}
 }
 
+type ReviewOutcome int32
+
+const (
+	ReviewOutcome_REVIEW_OUTCOME_UNSPECIFIED ReviewOutcome = 0
+	ReviewOutcome_REVIEW_OUTCOME_APPROVE     ReviewOutcome = 1
+	ReviewOutcome_REVIEW_OUTCOME_REJECT      ReviewOutcome = 2
+)
+
+// Enum value maps for ReviewOutcome.
+var (
+	ReviewOutcome_name = map[int32]string{
+		0: "REVIEW_OUTCOME_UNSPECIFIED",
+		1: "REVIEW_OUTCOME_APPROVE",
+		2: "REVIEW_OUTCOME_REJECT",
+	}
+	ReviewOutcome_value = map[string]int32{
+		"REVIEW_OUTCOME_UNSPECIFIED": 0,
+		"REVIEW_OUTCOME_APPROVE":     1,
+		"REVIEW_OUTCOME_REJECT":      2,
+	}
+)
+
+func (x ReviewOutcome) Enum() *ReviewOutcome {
+	p := new(ReviewOutcome)
+	*p = x
+	return p
+}
+
+func (x ReviewOutcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReviewOutcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_humanworth_content_v1_content_proto_enumTypes[2].Descriptor()
+}
+
+func (ReviewOutcome) Type() protoreflect.EnumType {
+	return &file_humanworth_content_v1_content_proto_enumTypes[2]
+}
+
+func (x ReviewOutcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReviewOutcome.Descriptor instead.
+func (ReviewOutcome) EnumDescriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{2}
+}
+
 type ArtifactInput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
@@ -488,11 +537,13 @@ type TaskSubmission struct {
 	// Always derived from VerifyActor; not accepted in any input.
 	AuthorId string `protobuf:"bytes,2,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
 	Revision int64  `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
-	// Always draft in this phase. No public/private flag or client-controlled state.
-	State         string          `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
-	Content       *TaskDraftInput `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Authoritative publication state; not a client-controlled visibility flag.
+	State           string          `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
+	Content         *TaskDraftInput `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	ReviewId        *string         `protobuf:"bytes,6,opt,name=review_id,json=reviewId,proto3,oneof" json:"review_id,omitempty"`
+	RejectionReason *string         `protobuf:"bytes,7,opt,name=rejection_reason,json=rejectionReason,proto3,oneof" json:"rejection_reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TaskSubmission) Reset() {
@@ -558,6 +609,20 @@ func (x *TaskSubmission) GetContent() *TaskDraftInput {
 		return x.Content
 	}
 	return nil
+}
+
+func (x *TaskSubmission) GetReviewId() string {
+	if x != nil && x.ReviewId != nil {
+		return *x.ReviewId
+	}
+	return ""
+}
+
+func (x *TaskSubmission) GetRejectionReason() string {
+	if x != nil && x.RejectionReason != nil {
+		return *x.RejectionReason
+	}
+	return ""
 }
 
 type CreateTaskDraftRequest struct {
@@ -2448,11 +2513,11 @@ func (x *EntryAssetReview) GetState() ReviewedEntryState {
 	return ReviewedEntryState_REVIEWED_ENTRY_STATE_UNSPECIFIED
 }
 
-// decision_id is globally unique and immutable. Same request replays its receipt;
-// different content conflicts. expected_revision serializes all task/entry
-// decisions. The first approval (expected_revision=0) freezes submission_revision
-// and approves the complete human+agent initial bundle. Later decisions cannot
-// replace that snapshot. mTLS moderation only; 2s, safe exact-request retry.
+// Legacy 3C compatibility only. Exact historical requests replay their receipts.
+// First approval of an unsubmitted draft is now FailedPrecondition; formal
+// submissions can only be tightened (taken down/revoked), not approved here.
+// Existing legacy snapshots retain expected_revision serialization. mTLS
+// moderation only; 2s, safe exact-request retry. Use ApplyReviewDecision for new cases.
 type ApplyAssetReviewRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	DecisionId         string                 `protobuf:"bytes,1,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
@@ -2777,6 +2842,539 @@ func (x *CheckAssetAccessResponse) GetRevision() int64 {
 	return 0
 }
 
+// Content owns this immutable initial-bundle submission, including stable entry IDs.
+type ReviewSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReviewId      string                 `protobuf:"bytes,1,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	Submission    *TaskSubmission        `protobuf:"bytes,2,opt,name=submission,proto3" json:"submission,omitempty"`
+	EntryIds      []string               `protobuf:"bytes,3,rep,name=entry_ids,json=entryIds,proto3" json:"entry_ids,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReviewSnapshot) Reset() {
+	*x = ReviewSnapshot{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReviewSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReviewSnapshot) ProtoMessage() {}
+
+func (x *ReviewSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReviewSnapshot.ProtoReflect.Descriptor instead.
+func (*ReviewSnapshot) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *ReviewSnapshot) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *ReviewSnapshot) GetSubmission() *TaskSubmission {
+	if x != nil {
+		return x.Submission
+	}
+	return nil
+}
+
+func (x *ReviewSnapshot) GetEntryIds() []string {
+	if x != nil {
+		return x.EntryIds
+	}
+	return nil
+}
+
+func (x *ReviewSnapshot) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type RequestTaskReviewRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion      string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId              string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ExpectedRevision    int64                  `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	AssetActorAssertion string                 `protobuf:"bytes,4,opt,name=asset_actor_assertion,json=assetActorAssertion,proto3" json:"asset_actor_assertion,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *RequestTaskReviewRequest) Reset() {
+	*x = RequestTaskReviewRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestTaskReviewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestTaskReviewRequest) ProtoMessage() {}
+
+func (x *RequestTaskReviewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestTaskReviewRequest.ProtoReflect.Descriptor instead.
+func (*RequestTaskReviewRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *RequestTaskReviewRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *RequestTaskReviewRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *RequestTaskReviewRequest) GetExpectedRevision() int64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *RequestTaskReviewRequest) GetAssetActorAssertion() string {
+	if x != nil {
+		return x.AssetActorAssertion
+	}
+	return ""
+}
+
+type RequestTaskReviewResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Submission    *TaskSubmission        `protobuf:"bytes,1,opt,name=submission,proto3" json:"submission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestTaskReviewResponse) Reset() {
+	*x = RequestTaskReviewResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestTaskReviewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestTaskReviewResponse) ProtoMessage() {}
+
+func (x *RequestTaskReviewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestTaskReviewResponse.ProtoReflect.Descriptor instead.
+func (*RequestTaskReviewResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *RequestTaskReviewResponse) GetSubmission() *TaskSubmission {
+	if x != nil {
+		return x.Submission
+	}
+	return nil
+}
+
+type GetReviewSnapshotRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReviewId      string                 `protobuf:"bytes,1,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReviewSnapshotRequest) Reset() {
+	*x = GetReviewSnapshotRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReviewSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReviewSnapshotRequest) ProtoMessage() {}
+
+func (x *GetReviewSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReviewSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*GetReviewSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *GetReviewSnapshotRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+type GetReviewSnapshotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Snapshot      *ReviewSnapshot        `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReviewSnapshotResponse) Reset() {
+	*x = GetReviewSnapshotResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReviewSnapshotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReviewSnapshotResponse) ProtoMessage() {}
+
+func (x *GetReviewSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReviewSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*GetReviewSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *GetReviewSnapshotResponse) GetSnapshot() *ReviewSnapshot {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
+type ApplyReviewDecisionRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	DecisionId         string                 `protobuf:"bytes,1,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
+	ReviewId           string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	TaskId             string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	SubmissionRevision int64                  `protobuf:"varint,4,opt,name=submission_revision,json=submissionRevision,proto3" json:"submission_revision,omitempty"`
+	Outcome            ReviewOutcome          `protobuf:"varint,5,opt,name=outcome,proto3,enum=humanworth.content.v1.ReviewOutcome" json:"outcome,omitempty"`
+	Reason             *string                `protobuf:"bytes,6,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ApplyReviewDecisionRequest) Reset() {
+	*x = ApplyReviewDecisionRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyReviewDecisionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyReviewDecisionRequest) ProtoMessage() {}
+
+func (x *ApplyReviewDecisionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyReviewDecisionRequest.ProtoReflect.Descriptor instead.
+func (*ApplyReviewDecisionRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *ApplyReviewDecisionRequest) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *ApplyReviewDecisionRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *ApplyReviewDecisionRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ApplyReviewDecisionRequest) GetSubmissionRevision() int64 {
+	if x != nil {
+		return x.SubmissionRevision
+	}
+	return 0
+}
+
+func (x *ApplyReviewDecisionRequest) GetOutcome() ReviewOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return ReviewOutcome_REVIEW_OUTCOME_UNSPECIFIED
+}
+
+func (x *ApplyReviewDecisionRequest) GetReason() string {
+	if x != nil && x.Reason != nil {
+		return *x.Reason
+	}
+	return ""
+}
+
+type ApplyReviewDecisionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DecisionId    string                 `protobuf:"bytes,1,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
+	ReviewId      string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	State         string                 `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	Revision      int64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	Entries       []*ReviewedEntry       `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyReviewDecisionResponse) Reset() {
+	*x = ApplyReviewDecisionResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyReviewDecisionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyReviewDecisionResponse) ProtoMessage() {}
+
+func (x *ApplyReviewDecisionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyReviewDecisionResponse.ProtoReflect.Descriptor instead.
+func (*ApplyReviewDecisionResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *ApplyReviewDecisionResponse) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *ApplyReviewDecisionResponse) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *ApplyReviewDecisionResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ApplyReviewDecisionResponse) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ApplyReviewDecisionResponse) GetEntries() []*ReviewedEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type CheckReviewAssetAccessRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	ReviewId       string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	AssetId        string                 `protobuf:"bytes,3,opt,name=asset_id,json=assetId,proto3" json:"asset_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CheckReviewAssetAccessRequest) Reset() {
+	*x = CheckReviewAssetAccessRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckReviewAssetAccessRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckReviewAssetAccessRequest) ProtoMessage() {}
+
+func (x *CheckReviewAssetAccessRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckReviewAssetAccessRequest.ProtoReflect.Descriptor instead.
+func (*CheckReviewAssetAccessRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *CheckReviewAssetAccessRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *CheckReviewAssetAccessRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *CheckReviewAssetAccessRequest) GetAssetId() string {
+	if x != nil {
+		return x.AssetId
+	}
+	return ""
+}
+
+type CheckReviewAssetAccessResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Allowed       bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckReviewAssetAccessResponse) Reset() {
+	*x = CheckReviewAssetAccessResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckReviewAssetAccessResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckReviewAssetAccessResponse) ProtoMessage() {}
+
+func (x *CheckReviewAssetAccessResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckReviewAssetAccessResponse.ProtoReflect.Descriptor instead.
+func (*CheckReviewAssetAccessResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *CheckReviewAssetAccessResponse) GetAllowed() bool {
+	if x != nil {
+		return x.Allowed
+	}
+	return false
+}
+
 var File_humanworth_content_v1_content_proto protoreflect.FileDescriptor
 
 const file_humanworth_content_v1_content_proto_rawDesc = "" +
@@ -2825,13 +3423,18 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\n" +
 	"\b_summaryB\x0e\n" +
 	"\f_descriptionB\v\n" +
-	"\t_category\"\xb0\x01\n" +
+	"\t_category\"\xa5\x02\n" +
 	"\x0eTaskSubmission\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tauthor_id\x18\x02 \x01(\tR\bauthorId\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x03R\brevision\x12\x14\n" +
 	"\x05state\x18\x04 \x01(\tR\x05state\x12?\n" +
-	"\acontent\x18\x05 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\"\xdf\x01\n" +
+	"\acontent\x18\x05 \x01(\v2%.humanworth.content.v1.TaskDraftInputR\acontent\x12 \n" +
+	"\treview_id\x18\x06 \x01(\tH\x00R\breviewId\x88\x01\x01\x12.\n" +
+	"\x10rejection_reason\x18\a \x01(\tH\x01R\x0frejectionReason\x88\x01\x01B\f\n" +
+	"\n" +
+	"_review_idB\x13\n" +
+	"\x11_rejection_reason\"\xdf\x01\n" +
 	"\x16CreateTaskDraftRequest\x12'\n" +
 	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12?\n" +
@@ -2979,7 +3582,50 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\treference\x18\x01 \x01(\v2).humanworth.asset.v1.PublicAssetReferenceR\treference\"P\n" +
 	"\x18CheckAssetAccessResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1a\n" +
-	"\brevision\x18\x02 \x01(\x03R\brevision*\x7f\n" +
+	"\brevision\x18\x02 \x01(\x03R\brevision\"\xcc\x01\n" +
+	"\x0eReviewSnapshot\x12\x1b\n" +
+	"\treview_id\x18\x01 \x01(\tR\breviewId\x12E\n" +
+	"\n" +
+	"submission\x18\x02 \x01(\v2%.humanworth.content.v1.TaskSubmissionR\n" +
+	"submission\x12\x1b\n" +
+	"\tentry_ids\x18\x03 \x03(\tR\bentryIds\x129\n" +
+	"\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xbd\x01\n" +
+	"\x18RequestTaskReviewRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12+\n" +
+	"\x11expected_revision\x18\x03 \x01(\x03R\x10expectedRevision\x122\n" +
+	"\x15asset_actor_assertion\x18\x04 \x01(\tR\x13assetActorAssertion\"b\n" +
+	"\x19RequestTaskReviewResponse\x12E\n" +
+	"\n" +
+	"submission\x18\x01 \x01(\v2%.humanworth.content.v1.TaskSubmissionR\n" +
+	"submission\"7\n" +
+	"\x18GetReviewSnapshotRequest\x12\x1b\n" +
+	"\treview_id\x18\x01 \x01(\tR\breviewId\"^\n" +
+	"\x19GetReviewSnapshotResponse\x12A\n" +
+	"\bsnapshot\x18\x01 \x01(\v2%.humanworth.content.v1.ReviewSnapshotR\bsnapshot\"\x8c\x02\n" +
+	"\x1aApplyReviewDecisionRequest\x12\x1f\n" +
+	"\vdecision_id\x18\x01 \x01(\tR\n" +
+	"decisionId\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12/\n" +
+	"\x13submission_revision\x18\x04 \x01(\x03R\x12submissionRevision\x12>\n" +
+	"\aoutcome\x18\x05 \x01(\x0e2$.humanworth.content.v1.ReviewOutcomeR\aoutcome\x12\x1b\n" +
+	"\x06reason\x18\x06 \x01(\tH\x00R\x06reason\x88\x01\x01B\t\n" +
+	"\a_reason\"\xcd\x01\n" +
+	"\x1bApplyReviewDecisionResponse\x12\x1f\n" +
+	"\vdecision_id\x18\x01 \x01(\tR\n" +
+	"decisionId\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\x12\x14\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\x03R\brevision\x12>\n" +
+	"\aentries\x18\x05 \x03(\v2$.humanworth.content.v1.ReviewedEntryR\aentries\"\x80\x01\n" +
+	"\x1dCheckReviewAssetAccessRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\x12\x19\n" +
+	"\basset_id\x18\x03 \x01(\tR\aassetId\":\n" +
+	"\x1eCheckReviewAssetAccessResponse\x12\x18\n" +
+	"\aallowed\x18\x01 \x01(\bR\aallowed*\x7f\n" +
 	"\x11ReviewedTaskState\x12#\n" +
 	"\x1fREVIEWED_TASK_STATE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dREVIEWED_TASK_STATE_PUBLISHED\x10\x01\x12\"\n" +
@@ -2987,12 +3633,20 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\x12ReviewedEntryState\x12$\n" +
 	" REVIEWED_ENTRY_STATE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dREVIEWED_ENTRY_STATE_APPROVED\x10\x01\x12)\n" +
-	"%REVIEWED_ENTRY_STATE_APPROVAL_REVOKED\x10\x022\x9a\x0e\n" +
+	"%REVIEWED_ENTRY_STATE_APPROVAL_REVOKED\x10\x02*f\n" +
+	"\rReviewOutcome\x12\x1e\n" +
+	"\x1aREVIEW_OUTCOME_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16REVIEW_OUTCOME_APPROVE\x10\x01\x12\x19\n" +
+	"\x15REVIEW_OUTCOME_REJECT\x10\x022\x90\x12\n" +
 	"\x0eContentService\x12p\n" +
 	"\x0fCreateTaskDraft\x12-.humanworth.content.v1.CreateTaskDraftRequest\x1a..humanworth.content.v1.CreateTaskDraftResponse\x12|\n" +
 	"\x13GetMyTaskSubmission\x121.humanworth.content.v1.GetMyTaskSubmissionRequest\x1a2.humanworth.content.v1.GetMyTaskSubmissionResponse\x12v\n" +
 	"\x11ListMySubmissions\x12/.humanworth.content.v1.ListMySubmissionsRequest\x1a0.humanworth.content.v1.ListMySubmissionsResponse\x12s\n" +
-	"\x10ReplaceTaskDraft\x12..humanworth.content.v1.ReplaceTaskDraftRequest\x1a/.humanworth.content.v1.ReplaceTaskDraftResponse\x12s\n" +
+	"\x10ReplaceTaskDraft\x12..humanworth.content.v1.ReplaceTaskDraftRequest\x1a/.humanworth.content.v1.ReplaceTaskDraftResponse\x12v\n" +
+	"\x11RequestTaskReview\x12/.humanworth.content.v1.RequestTaskReviewRequest\x1a0.humanworth.content.v1.RequestTaskReviewResponse\x12v\n" +
+	"\x11GetReviewSnapshot\x12/.humanworth.content.v1.GetReviewSnapshotRequest\x1a0.humanworth.content.v1.GetReviewSnapshotResponse\x12|\n" +
+	"\x13ApplyReviewDecision\x121.humanworth.content.v1.ApplyReviewDecisionRequest\x1a2.humanworth.content.v1.ApplyReviewDecisionResponse\x12\x85\x01\n" +
+	"\x16CheckReviewAssetAccess\x124.humanworth.content.v1.CheckReviewAssetAccessRequest\x1a5.humanworth.content.v1.CheckReviewAssetAccessResponse\x12s\n" +
 	"\x10CheckAssetAccess\x12..humanworth.content.v1.CheckAssetAccessRequest\x1a/.humanworth.content.v1.CheckAssetAccessResponse\x12s\n" +
 	"\x10ApplyAssetReview\x12..humanworth.content.v1.ApplyAssetReviewRequest\x1a/.humanworth.content.v1.ApplyAssetReviewResponse\x12\x94\x01\n" +
 	"\x1bGetChallengeTaskDescription\x129.humanworth.content.v1.GetChallengeTaskDescriptionRequest\x1a:.humanworth.content.v1.GetChallengeTaskDescriptionResponse\x12y\n" +
@@ -3016,129 +3670,153 @@ func file_humanworth_content_v1_content_proto_rawDescGZIP() []byte {
 	return file_humanworth_content_v1_content_proto_rawDescData
 }
 
-var file_humanworth_content_v1_content_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_humanworth_content_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_humanworth_content_v1_content_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_humanworth_content_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_humanworth_content_v1_content_proto_goTypes = []any{
 	(ReviewedTaskState)(0),                      // 0: humanworth.content.v1.ReviewedTaskState
 	(ReviewedEntryState)(0),                     // 1: humanworth.content.v1.ReviewedEntryState
-	(*ArtifactInput)(nil),                       // 2: humanworth.content.v1.ArtifactInput
-	(*PermissionsInput)(nil),                    // 3: humanworth.content.v1.PermissionsInput
-	(*AgentConfigurationInput)(nil),             // 4: humanworth.content.v1.AgentConfigurationInput
-	(*EntryInput)(nil),                          // 5: humanworth.content.v1.EntryInput
-	(*TaskDraftInput)(nil),                      // 6: humanworth.content.v1.TaskDraftInput
-	(*TaskSubmission)(nil),                      // 7: humanworth.content.v1.TaskSubmission
-	(*CreateTaskDraftRequest)(nil),              // 8: humanworth.content.v1.CreateTaskDraftRequest
-	(*CreateTaskDraftResponse)(nil),             // 9: humanworth.content.v1.CreateTaskDraftResponse
-	(*GetMyTaskSubmissionRequest)(nil),          // 10: humanworth.content.v1.GetMyTaskSubmissionRequest
-	(*GetMyTaskSubmissionResponse)(nil),         // 11: humanworth.content.v1.GetMyTaskSubmissionResponse
-	(*ListMySubmissionsRequest)(nil),            // 12: humanworth.content.v1.ListMySubmissionsRequest
-	(*ListMySubmissionsResponse)(nil),           // 13: humanworth.content.v1.ListMySubmissionsResponse
-	(*ReplaceTaskDraftRequest)(nil),             // 14: humanworth.content.v1.ReplaceTaskDraftRequest
-	(*ReplaceTaskDraftResponse)(nil),            // 15: humanworth.content.v1.ReplaceTaskDraftResponse
-	(*Artifact)(nil),                            // 16: humanworth.content.v1.Artifact
-	(*Work)(nil),                                // 17: humanworth.content.v1.Work
-	(*TaskAttachment)(nil),                      // 18: humanworth.content.v1.TaskAttachment
-	(*TaskDescription)(nil),                     // 19: humanworth.content.v1.TaskDescription
-	(*Comment)(nil),                             // 20: humanworth.content.v1.Comment
-	(*SnapshotRef)(nil),                         // 21: humanworth.content.v1.SnapshotRef
-	(*GetChallengeTaskDescriptionRequest)(nil),  // 22: humanworth.content.v1.GetChallengeTaskDescriptionRequest
-	(*GetChallengeTaskDescriptionResponse)(nil), // 23: humanworth.content.v1.GetChallengeTaskDescriptionResponse
-	(*ListChallengeWorksRequest)(nil),           // 24: humanworth.content.v1.ListChallengeWorksRequest
-	(*ListChallengeWorksResponse)(nil),          // 25: humanworth.content.v1.ListChallengeWorksResponse
-	(*ListChallengeCommentsRequest)(nil),        // 26: humanworth.content.v1.ListChallengeCommentsRequest
-	(*ListChallengeCommentsResponse)(nil),       // 27: humanworth.content.v1.ListChallengeCommentsResponse
-	(*MaterialRef)(nil),                         // 28: humanworth.content.v1.MaterialRef
-	(*CheckChallengeMaterialsRequest)(nil),      // 29: humanworth.content.v1.CheckChallengeMaterialsRequest
-	(*CheckChallengeMaterialsResponse)(nil),     // 30: humanworth.content.v1.CheckChallengeMaterialsResponse
-	(*OpenRunRegistrationRequest)(nil),          // 31: humanworth.content.v1.OpenRunRegistrationRequest
-	(*OpenRunRegistrationResponse)(nil),         // 32: humanworth.content.v1.OpenRunRegistrationResponse
-	(*CloseRunRegistrationRequest)(nil),         // 33: humanworth.content.v1.CloseRunRegistrationRequest
-	(*CloseRunRegistrationResponse)(nil),        // 34: humanworth.content.v1.CloseRunRegistrationResponse
-	(*RegistrationReceipt)(nil),                 // 35: humanworth.content.v1.RegistrationReceipt
-	(*RegisterChallengeCandidateRequest)(nil),   // 36: humanworth.content.v1.RegisterChallengeCandidateRequest
-	(*RegisterChallengeCandidateResponse)(nil),  // 37: humanworth.content.v1.RegisterChallengeCandidateResponse
-	(*GetChallengeRegistrationRequest)(nil),     // 38: humanworth.content.v1.GetChallengeRegistrationRequest
-	(*GetChallengeRegistrationResponse)(nil),    // 39: humanworth.content.v1.GetChallengeRegistrationResponse
-	(*EntryAssetReview)(nil),                    // 40: humanworth.content.v1.EntryAssetReview
-	(*ApplyAssetReviewRequest)(nil),             // 41: humanworth.content.v1.ApplyAssetReviewRequest
-	(*ReviewedEntry)(nil),                       // 42: humanworth.content.v1.ReviewedEntry
-	(*ApplyAssetReviewResponse)(nil),            // 43: humanworth.content.v1.ApplyAssetReviewResponse
-	(*CheckAssetAccessRequest)(nil),             // 44: humanworth.content.v1.CheckAssetAccessRequest
-	(*CheckAssetAccessResponse)(nil),            // 45: humanworth.content.v1.CheckAssetAccessResponse
-	(*structpb.Struct)(nil),                     // 46: google.protobuf.Struct
-	(*v1.Asset)(nil),                            // 47: humanworth.asset.v1.Asset
-	(*timestamppb.Timestamp)(nil),               // 48: google.protobuf.Timestamp
-	(*v1.PublicAssetReference)(nil),             // 49: humanworth.asset.v1.PublicAssetReference
+	(ReviewOutcome)(0),                          // 2: humanworth.content.v1.ReviewOutcome
+	(*ArtifactInput)(nil),                       // 3: humanworth.content.v1.ArtifactInput
+	(*PermissionsInput)(nil),                    // 4: humanworth.content.v1.PermissionsInput
+	(*AgentConfigurationInput)(nil),             // 5: humanworth.content.v1.AgentConfigurationInput
+	(*EntryInput)(nil),                          // 6: humanworth.content.v1.EntryInput
+	(*TaskDraftInput)(nil),                      // 7: humanworth.content.v1.TaskDraftInput
+	(*TaskSubmission)(nil),                      // 8: humanworth.content.v1.TaskSubmission
+	(*CreateTaskDraftRequest)(nil),              // 9: humanworth.content.v1.CreateTaskDraftRequest
+	(*CreateTaskDraftResponse)(nil),             // 10: humanworth.content.v1.CreateTaskDraftResponse
+	(*GetMyTaskSubmissionRequest)(nil),          // 11: humanworth.content.v1.GetMyTaskSubmissionRequest
+	(*GetMyTaskSubmissionResponse)(nil),         // 12: humanworth.content.v1.GetMyTaskSubmissionResponse
+	(*ListMySubmissionsRequest)(nil),            // 13: humanworth.content.v1.ListMySubmissionsRequest
+	(*ListMySubmissionsResponse)(nil),           // 14: humanworth.content.v1.ListMySubmissionsResponse
+	(*ReplaceTaskDraftRequest)(nil),             // 15: humanworth.content.v1.ReplaceTaskDraftRequest
+	(*ReplaceTaskDraftResponse)(nil),            // 16: humanworth.content.v1.ReplaceTaskDraftResponse
+	(*Artifact)(nil),                            // 17: humanworth.content.v1.Artifact
+	(*Work)(nil),                                // 18: humanworth.content.v1.Work
+	(*TaskAttachment)(nil),                      // 19: humanworth.content.v1.TaskAttachment
+	(*TaskDescription)(nil),                     // 20: humanworth.content.v1.TaskDescription
+	(*Comment)(nil),                             // 21: humanworth.content.v1.Comment
+	(*SnapshotRef)(nil),                         // 22: humanworth.content.v1.SnapshotRef
+	(*GetChallengeTaskDescriptionRequest)(nil),  // 23: humanworth.content.v1.GetChallengeTaskDescriptionRequest
+	(*GetChallengeTaskDescriptionResponse)(nil), // 24: humanworth.content.v1.GetChallengeTaskDescriptionResponse
+	(*ListChallengeWorksRequest)(nil),           // 25: humanworth.content.v1.ListChallengeWorksRequest
+	(*ListChallengeWorksResponse)(nil),          // 26: humanworth.content.v1.ListChallengeWorksResponse
+	(*ListChallengeCommentsRequest)(nil),        // 27: humanworth.content.v1.ListChallengeCommentsRequest
+	(*ListChallengeCommentsResponse)(nil),       // 28: humanworth.content.v1.ListChallengeCommentsResponse
+	(*MaterialRef)(nil),                         // 29: humanworth.content.v1.MaterialRef
+	(*CheckChallengeMaterialsRequest)(nil),      // 30: humanworth.content.v1.CheckChallengeMaterialsRequest
+	(*CheckChallengeMaterialsResponse)(nil),     // 31: humanworth.content.v1.CheckChallengeMaterialsResponse
+	(*OpenRunRegistrationRequest)(nil),          // 32: humanworth.content.v1.OpenRunRegistrationRequest
+	(*OpenRunRegistrationResponse)(nil),         // 33: humanworth.content.v1.OpenRunRegistrationResponse
+	(*CloseRunRegistrationRequest)(nil),         // 34: humanworth.content.v1.CloseRunRegistrationRequest
+	(*CloseRunRegistrationResponse)(nil),        // 35: humanworth.content.v1.CloseRunRegistrationResponse
+	(*RegistrationReceipt)(nil),                 // 36: humanworth.content.v1.RegistrationReceipt
+	(*RegisterChallengeCandidateRequest)(nil),   // 37: humanworth.content.v1.RegisterChallengeCandidateRequest
+	(*RegisterChallengeCandidateResponse)(nil),  // 38: humanworth.content.v1.RegisterChallengeCandidateResponse
+	(*GetChallengeRegistrationRequest)(nil),     // 39: humanworth.content.v1.GetChallengeRegistrationRequest
+	(*GetChallengeRegistrationResponse)(nil),    // 40: humanworth.content.v1.GetChallengeRegistrationResponse
+	(*EntryAssetReview)(nil),                    // 41: humanworth.content.v1.EntryAssetReview
+	(*ApplyAssetReviewRequest)(nil),             // 42: humanworth.content.v1.ApplyAssetReviewRequest
+	(*ReviewedEntry)(nil),                       // 43: humanworth.content.v1.ReviewedEntry
+	(*ApplyAssetReviewResponse)(nil),            // 44: humanworth.content.v1.ApplyAssetReviewResponse
+	(*CheckAssetAccessRequest)(nil),             // 45: humanworth.content.v1.CheckAssetAccessRequest
+	(*CheckAssetAccessResponse)(nil),            // 46: humanworth.content.v1.CheckAssetAccessResponse
+	(*ReviewSnapshot)(nil),                      // 47: humanworth.content.v1.ReviewSnapshot
+	(*RequestTaskReviewRequest)(nil),            // 48: humanworth.content.v1.RequestTaskReviewRequest
+	(*RequestTaskReviewResponse)(nil),           // 49: humanworth.content.v1.RequestTaskReviewResponse
+	(*GetReviewSnapshotRequest)(nil),            // 50: humanworth.content.v1.GetReviewSnapshotRequest
+	(*GetReviewSnapshotResponse)(nil),           // 51: humanworth.content.v1.GetReviewSnapshotResponse
+	(*ApplyReviewDecisionRequest)(nil),          // 52: humanworth.content.v1.ApplyReviewDecisionRequest
+	(*ApplyReviewDecisionResponse)(nil),         // 53: humanworth.content.v1.ApplyReviewDecisionResponse
+	(*CheckReviewAssetAccessRequest)(nil),       // 54: humanworth.content.v1.CheckReviewAssetAccessRequest
+	(*CheckReviewAssetAccessResponse)(nil),      // 55: humanworth.content.v1.CheckReviewAssetAccessResponse
+	(*structpb.Struct)(nil),                     // 56: google.protobuf.Struct
+	(*v1.Asset)(nil),                            // 57: humanworth.asset.v1.Asset
+	(*timestamppb.Timestamp)(nil),               // 58: google.protobuf.Timestamp
+	(*v1.PublicAssetReference)(nil),             // 59: humanworth.asset.v1.PublicAssetReference
 }
 var file_humanworth_content_v1_content_proto_depIdxs = []int32{
-	46, // 0: humanworth.content.v1.AgentConfigurationInput.parameters:type_name -> google.protobuf.Struct
-	2,  // 1: humanworth.content.v1.EntryInput.artifacts:type_name -> humanworth.content.v1.ArtifactInput
-	3,  // 2: humanworth.content.v1.EntryInput.permissions:type_name -> humanworth.content.v1.PermissionsInput
-	4,  // 3: humanworth.content.v1.EntryInput.agent_configuration:type_name -> humanworth.content.v1.AgentConfigurationInput
-	5,  // 4: humanworth.content.v1.TaskDraftInput.entries:type_name -> humanworth.content.v1.EntryInput
-	6,  // 5: humanworth.content.v1.TaskSubmission.content:type_name -> humanworth.content.v1.TaskDraftInput
-	6,  // 6: humanworth.content.v1.CreateTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
-	7,  // 7: humanworth.content.v1.CreateTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
-	7,  // 8: humanworth.content.v1.GetMyTaskSubmissionResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
-	7,  // 9: humanworth.content.v1.ListMySubmissionsResponse.items:type_name -> humanworth.content.v1.TaskSubmission
-	6,  // 10: humanworth.content.v1.ReplaceTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
-	7,  // 11: humanworth.content.v1.ReplaceTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
-	47, // 12: humanworth.content.v1.Artifact.file:type_name -> humanworth.asset.v1.Asset
-	16, // 13: humanworth.content.v1.Work.artifacts:type_name -> humanworth.content.v1.Artifact
-	47, // 14: humanworth.content.v1.TaskAttachment.asset:type_name -> humanworth.asset.v1.Asset
-	18, // 15: humanworth.content.v1.TaskDescription.attachments:type_name -> humanworth.content.v1.TaskAttachment
-	48, // 16: humanworth.content.v1.SnapshotRef.comment_cutoff:type_name -> google.protobuf.Timestamp
-	21, // 17: humanworth.content.v1.GetChallengeTaskDescriptionRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
-	19, // 18: humanworth.content.v1.GetChallengeTaskDescriptionResponse.task:type_name -> humanworth.content.v1.TaskDescription
-	21, // 19: humanworth.content.v1.ListChallengeWorksRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
-	17, // 20: humanworth.content.v1.ListChallengeWorksResponse.works:type_name -> humanworth.content.v1.Work
-	21, // 21: humanworth.content.v1.ListChallengeCommentsRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
-	20, // 22: humanworth.content.v1.ListChallengeCommentsResponse.comments:type_name -> humanworth.content.v1.Comment
-	48, // 23: humanworth.content.v1.ListChallengeCommentsResponse.cutoff_at:type_name -> google.protobuf.Timestamp
-	21, // 24: humanworth.content.v1.CheckChallengeMaterialsRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
-	28, // 25: humanworth.content.v1.CheckChallengeMaterialsRequest.materials:type_name -> humanworth.content.v1.MaterialRef
-	17, // 26: humanworth.content.v1.RegisterChallengeCandidateRequest.work:type_name -> humanworth.content.v1.Work
-	35, // 27: humanworth.content.v1.RegisterChallengeCandidateResponse.receipt:type_name -> humanworth.content.v1.RegistrationReceipt
-	35, // 28: humanworth.content.v1.GetChallengeRegistrationResponse.receipt:type_name -> humanworth.content.v1.RegistrationReceipt
+	56, // 0: humanworth.content.v1.AgentConfigurationInput.parameters:type_name -> google.protobuf.Struct
+	3,  // 1: humanworth.content.v1.EntryInput.artifacts:type_name -> humanworth.content.v1.ArtifactInput
+	4,  // 2: humanworth.content.v1.EntryInput.permissions:type_name -> humanworth.content.v1.PermissionsInput
+	5,  // 3: humanworth.content.v1.EntryInput.agent_configuration:type_name -> humanworth.content.v1.AgentConfigurationInput
+	6,  // 4: humanworth.content.v1.TaskDraftInput.entries:type_name -> humanworth.content.v1.EntryInput
+	7,  // 5: humanworth.content.v1.TaskSubmission.content:type_name -> humanworth.content.v1.TaskDraftInput
+	7,  // 6: humanworth.content.v1.CreateTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
+	8,  // 7: humanworth.content.v1.CreateTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
+	8,  // 8: humanworth.content.v1.GetMyTaskSubmissionResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
+	8,  // 9: humanworth.content.v1.ListMySubmissionsResponse.items:type_name -> humanworth.content.v1.TaskSubmission
+	7,  // 10: humanworth.content.v1.ReplaceTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
+	8,  // 11: humanworth.content.v1.ReplaceTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
+	57, // 12: humanworth.content.v1.Artifact.file:type_name -> humanworth.asset.v1.Asset
+	17, // 13: humanworth.content.v1.Work.artifacts:type_name -> humanworth.content.v1.Artifact
+	57, // 14: humanworth.content.v1.TaskAttachment.asset:type_name -> humanworth.asset.v1.Asset
+	19, // 15: humanworth.content.v1.TaskDescription.attachments:type_name -> humanworth.content.v1.TaskAttachment
+	58, // 16: humanworth.content.v1.SnapshotRef.comment_cutoff:type_name -> google.protobuf.Timestamp
+	22, // 17: humanworth.content.v1.GetChallengeTaskDescriptionRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
+	20, // 18: humanworth.content.v1.GetChallengeTaskDescriptionResponse.task:type_name -> humanworth.content.v1.TaskDescription
+	22, // 19: humanworth.content.v1.ListChallengeWorksRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
+	18, // 20: humanworth.content.v1.ListChallengeWorksResponse.works:type_name -> humanworth.content.v1.Work
+	22, // 21: humanworth.content.v1.ListChallengeCommentsRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
+	21, // 22: humanworth.content.v1.ListChallengeCommentsResponse.comments:type_name -> humanworth.content.v1.Comment
+	58, // 23: humanworth.content.v1.ListChallengeCommentsResponse.cutoff_at:type_name -> google.protobuf.Timestamp
+	22, // 24: humanworth.content.v1.CheckChallengeMaterialsRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
+	29, // 25: humanworth.content.v1.CheckChallengeMaterialsRequest.materials:type_name -> humanworth.content.v1.MaterialRef
+	18, // 26: humanworth.content.v1.RegisterChallengeCandidateRequest.work:type_name -> humanworth.content.v1.Work
+	36, // 27: humanworth.content.v1.RegisterChallengeCandidateResponse.receipt:type_name -> humanworth.content.v1.RegistrationReceipt
+	36, // 28: humanworth.content.v1.GetChallengeRegistrationResponse.receipt:type_name -> humanworth.content.v1.RegistrationReceipt
 	1,  // 29: humanworth.content.v1.EntryAssetReview.state:type_name -> humanworth.content.v1.ReviewedEntryState
 	0,  // 30: humanworth.content.v1.ApplyAssetReviewRequest.task_state:type_name -> humanworth.content.v1.ReviewedTaskState
-	40, // 31: humanworth.content.v1.ApplyAssetReviewRequest.entry_review:type_name -> humanworth.content.v1.EntryAssetReview
+	41, // 31: humanworth.content.v1.ApplyAssetReviewRequest.entry_review:type_name -> humanworth.content.v1.EntryAssetReview
 	1,  // 32: humanworth.content.v1.ReviewedEntry.state:type_name -> humanworth.content.v1.ReviewedEntryState
-	42, // 33: humanworth.content.v1.ApplyAssetReviewResponse.entries:type_name -> humanworth.content.v1.ReviewedEntry
-	49, // 34: humanworth.content.v1.CheckAssetAccessRequest.reference:type_name -> humanworth.asset.v1.PublicAssetReference
-	8,  // 35: humanworth.content.v1.ContentService.CreateTaskDraft:input_type -> humanworth.content.v1.CreateTaskDraftRequest
-	10, // 36: humanworth.content.v1.ContentService.GetMyTaskSubmission:input_type -> humanworth.content.v1.GetMyTaskSubmissionRequest
-	12, // 37: humanworth.content.v1.ContentService.ListMySubmissions:input_type -> humanworth.content.v1.ListMySubmissionsRequest
-	14, // 38: humanworth.content.v1.ContentService.ReplaceTaskDraft:input_type -> humanworth.content.v1.ReplaceTaskDraftRequest
-	44, // 39: humanworth.content.v1.ContentService.CheckAssetAccess:input_type -> humanworth.content.v1.CheckAssetAccessRequest
-	41, // 40: humanworth.content.v1.ContentService.ApplyAssetReview:input_type -> humanworth.content.v1.ApplyAssetReviewRequest
-	22, // 41: humanworth.content.v1.ContentService.GetChallengeTaskDescription:input_type -> humanworth.content.v1.GetChallengeTaskDescriptionRequest
-	24, // 42: humanworth.content.v1.ContentService.ListChallengeWorks:input_type -> humanworth.content.v1.ListChallengeWorksRequest
-	26, // 43: humanworth.content.v1.ContentService.ListChallengeComments:input_type -> humanworth.content.v1.ListChallengeCommentsRequest
-	29, // 44: humanworth.content.v1.ContentService.CheckChallengeMaterials:input_type -> humanworth.content.v1.CheckChallengeMaterialsRequest
-	31, // 45: humanworth.content.v1.ContentService.OpenRunRegistration:input_type -> humanworth.content.v1.OpenRunRegistrationRequest
-	33, // 46: humanworth.content.v1.ContentService.CloseRunRegistration:input_type -> humanworth.content.v1.CloseRunRegistrationRequest
-	36, // 47: humanworth.content.v1.ContentService.RegisterChallengeCandidate:input_type -> humanworth.content.v1.RegisterChallengeCandidateRequest
-	38, // 48: humanworth.content.v1.ContentService.GetChallengeRegistration:input_type -> humanworth.content.v1.GetChallengeRegistrationRequest
-	9,  // 49: humanworth.content.v1.ContentService.CreateTaskDraft:output_type -> humanworth.content.v1.CreateTaskDraftResponse
-	11, // 50: humanworth.content.v1.ContentService.GetMyTaskSubmission:output_type -> humanworth.content.v1.GetMyTaskSubmissionResponse
-	13, // 51: humanworth.content.v1.ContentService.ListMySubmissions:output_type -> humanworth.content.v1.ListMySubmissionsResponse
-	15, // 52: humanworth.content.v1.ContentService.ReplaceTaskDraft:output_type -> humanworth.content.v1.ReplaceTaskDraftResponse
-	45, // 53: humanworth.content.v1.ContentService.CheckAssetAccess:output_type -> humanworth.content.v1.CheckAssetAccessResponse
-	43, // 54: humanworth.content.v1.ContentService.ApplyAssetReview:output_type -> humanworth.content.v1.ApplyAssetReviewResponse
-	23, // 55: humanworth.content.v1.ContentService.GetChallengeTaskDescription:output_type -> humanworth.content.v1.GetChallengeTaskDescriptionResponse
-	25, // 56: humanworth.content.v1.ContentService.ListChallengeWorks:output_type -> humanworth.content.v1.ListChallengeWorksResponse
-	27, // 57: humanworth.content.v1.ContentService.ListChallengeComments:output_type -> humanworth.content.v1.ListChallengeCommentsResponse
-	30, // 58: humanworth.content.v1.ContentService.CheckChallengeMaterials:output_type -> humanworth.content.v1.CheckChallengeMaterialsResponse
-	32, // 59: humanworth.content.v1.ContentService.OpenRunRegistration:output_type -> humanworth.content.v1.OpenRunRegistrationResponse
-	34, // 60: humanworth.content.v1.ContentService.CloseRunRegistration:output_type -> humanworth.content.v1.CloseRunRegistrationResponse
-	37, // 61: humanworth.content.v1.ContentService.RegisterChallengeCandidate:output_type -> humanworth.content.v1.RegisterChallengeCandidateResponse
-	39, // 62: humanworth.content.v1.ContentService.GetChallengeRegistration:output_type -> humanworth.content.v1.GetChallengeRegistrationResponse
-	49, // [49:63] is the sub-list for method output_type
-	35, // [35:49] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	43, // 33: humanworth.content.v1.ApplyAssetReviewResponse.entries:type_name -> humanworth.content.v1.ReviewedEntry
+	59, // 34: humanworth.content.v1.CheckAssetAccessRequest.reference:type_name -> humanworth.asset.v1.PublicAssetReference
+	8,  // 35: humanworth.content.v1.ReviewSnapshot.submission:type_name -> humanworth.content.v1.TaskSubmission
+	58, // 36: humanworth.content.v1.ReviewSnapshot.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 37: humanworth.content.v1.RequestTaskReviewResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
+	47, // 38: humanworth.content.v1.GetReviewSnapshotResponse.snapshot:type_name -> humanworth.content.v1.ReviewSnapshot
+	2,  // 39: humanworth.content.v1.ApplyReviewDecisionRequest.outcome:type_name -> humanworth.content.v1.ReviewOutcome
+	43, // 40: humanworth.content.v1.ApplyReviewDecisionResponse.entries:type_name -> humanworth.content.v1.ReviewedEntry
+	9,  // 41: humanworth.content.v1.ContentService.CreateTaskDraft:input_type -> humanworth.content.v1.CreateTaskDraftRequest
+	11, // 42: humanworth.content.v1.ContentService.GetMyTaskSubmission:input_type -> humanworth.content.v1.GetMyTaskSubmissionRequest
+	13, // 43: humanworth.content.v1.ContentService.ListMySubmissions:input_type -> humanworth.content.v1.ListMySubmissionsRequest
+	15, // 44: humanworth.content.v1.ContentService.ReplaceTaskDraft:input_type -> humanworth.content.v1.ReplaceTaskDraftRequest
+	48, // 45: humanworth.content.v1.ContentService.RequestTaskReview:input_type -> humanworth.content.v1.RequestTaskReviewRequest
+	50, // 46: humanworth.content.v1.ContentService.GetReviewSnapshot:input_type -> humanworth.content.v1.GetReviewSnapshotRequest
+	52, // 47: humanworth.content.v1.ContentService.ApplyReviewDecision:input_type -> humanworth.content.v1.ApplyReviewDecisionRequest
+	54, // 48: humanworth.content.v1.ContentService.CheckReviewAssetAccess:input_type -> humanworth.content.v1.CheckReviewAssetAccessRequest
+	45, // 49: humanworth.content.v1.ContentService.CheckAssetAccess:input_type -> humanworth.content.v1.CheckAssetAccessRequest
+	42, // 50: humanworth.content.v1.ContentService.ApplyAssetReview:input_type -> humanworth.content.v1.ApplyAssetReviewRequest
+	23, // 51: humanworth.content.v1.ContentService.GetChallengeTaskDescription:input_type -> humanworth.content.v1.GetChallengeTaskDescriptionRequest
+	25, // 52: humanworth.content.v1.ContentService.ListChallengeWorks:input_type -> humanworth.content.v1.ListChallengeWorksRequest
+	27, // 53: humanworth.content.v1.ContentService.ListChallengeComments:input_type -> humanworth.content.v1.ListChallengeCommentsRequest
+	30, // 54: humanworth.content.v1.ContentService.CheckChallengeMaterials:input_type -> humanworth.content.v1.CheckChallengeMaterialsRequest
+	32, // 55: humanworth.content.v1.ContentService.OpenRunRegistration:input_type -> humanworth.content.v1.OpenRunRegistrationRequest
+	34, // 56: humanworth.content.v1.ContentService.CloseRunRegistration:input_type -> humanworth.content.v1.CloseRunRegistrationRequest
+	37, // 57: humanworth.content.v1.ContentService.RegisterChallengeCandidate:input_type -> humanworth.content.v1.RegisterChallengeCandidateRequest
+	39, // 58: humanworth.content.v1.ContentService.GetChallengeRegistration:input_type -> humanworth.content.v1.GetChallengeRegistrationRequest
+	10, // 59: humanworth.content.v1.ContentService.CreateTaskDraft:output_type -> humanworth.content.v1.CreateTaskDraftResponse
+	12, // 60: humanworth.content.v1.ContentService.GetMyTaskSubmission:output_type -> humanworth.content.v1.GetMyTaskSubmissionResponse
+	14, // 61: humanworth.content.v1.ContentService.ListMySubmissions:output_type -> humanworth.content.v1.ListMySubmissionsResponse
+	16, // 62: humanworth.content.v1.ContentService.ReplaceTaskDraft:output_type -> humanworth.content.v1.ReplaceTaskDraftResponse
+	49, // 63: humanworth.content.v1.ContentService.RequestTaskReview:output_type -> humanworth.content.v1.RequestTaskReviewResponse
+	51, // 64: humanworth.content.v1.ContentService.GetReviewSnapshot:output_type -> humanworth.content.v1.GetReviewSnapshotResponse
+	53, // 65: humanworth.content.v1.ContentService.ApplyReviewDecision:output_type -> humanworth.content.v1.ApplyReviewDecisionResponse
+	55, // 66: humanworth.content.v1.ContentService.CheckReviewAssetAccess:output_type -> humanworth.content.v1.CheckReviewAssetAccessResponse
+	46, // 67: humanworth.content.v1.ContentService.CheckAssetAccess:output_type -> humanworth.content.v1.CheckAssetAccessResponse
+	44, // 68: humanworth.content.v1.ContentService.ApplyAssetReview:output_type -> humanworth.content.v1.ApplyAssetReviewResponse
+	24, // 69: humanworth.content.v1.ContentService.GetChallengeTaskDescription:output_type -> humanworth.content.v1.GetChallengeTaskDescriptionResponse
+	26, // 70: humanworth.content.v1.ContentService.ListChallengeWorks:output_type -> humanworth.content.v1.ListChallengeWorksResponse
+	28, // 71: humanworth.content.v1.ContentService.ListChallengeComments:output_type -> humanworth.content.v1.ListChallengeCommentsResponse
+	31, // 72: humanworth.content.v1.ContentService.CheckChallengeMaterials:output_type -> humanworth.content.v1.CheckChallengeMaterialsResponse
+	33, // 73: humanworth.content.v1.ContentService.OpenRunRegistration:output_type -> humanworth.content.v1.OpenRunRegistrationResponse
+	35, // 74: humanworth.content.v1.ContentService.CloseRunRegistration:output_type -> humanworth.content.v1.CloseRunRegistrationResponse
+	38, // 75: humanworth.content.v1.ContentService.RegisterChallengeCandidate:output_type -> humanworth.content.v1.RegisterChallengeCandidateResponse
+	40, // 76: humanworth.content.v1.ContentService.GetChallengeRegistration:output_type -> humanworth.content.v1.GetChallengeRegistrationResponse
+	59, // [59:77] is the sub-list for method output_type
+	41, // [41:59] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_humanworth_content_v1_content_proto_init() }
@@ -3151,6 +3829,7 @@ func file_humanworth_content_v1_content_proto_init() {
 	file_humanworth_content_v1_content_proto_msgTypes[2].OneofWrappers = []any{}
 	file_humanworth_content_v1_content_proto_msgTypes[3].OneofWrappers = []any{}
 	file_humanworth_content_v1_content_proto_msgTypes[4].OneofWrappers = []any{}
+	file_humanworth_content_v1_content_proto_msgTypes[5].OneofWrappers = []any{}
 	file_humanworth_content_v1_content_proto_msgTypes[10].OneofWrappers = []any{}
 	file_humanworth_content_v1_content_proto_msgTypes[14].OneofWrappers = []any{
 		(*Artifact_Text)(nil),
@@ -3161,13 +3840,14 @@ func file_humanworth_content_v1_content_proto_init() {
 		(*ApplyAssetReviewRequest_TaskState)(nil),
 		(*ApplyAssetReviewRequest_EntryReview)(nil),
 	}
+	file_humanworth_content_v1_content_proto_msgTypes[49].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_humanworth_content_v1_content_proto_rawDesc), len(file_humanworth_content_v1_content_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   44,
+			NumEnums:      3,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

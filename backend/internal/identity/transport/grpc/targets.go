@@ -5,6 +5,7 @@ import (
 	challengepb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
+	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/identity/application"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/identity/domain"
 )
@@ -12,6 +13,12 @@ import (
 // Targets binds wire method names to semantic operations. The domain owns policy.
 func Targets() []application.Target {
 	return []application.Target{
+		{Operation: domain.RequestTaskReview, Audience: "content", Method: contentpb.ContentService_RequestTaskReview_FullMethodName},
+		{Operation: domain.ListReviews, Audience: "moderation", Method: moderationpb.ModerationService_ListReviews_FullMethodName},
+		{Operation: domain.GetReview, Audience: "moderation", Method: moderationpb.ModerationService_GetReview_FullMethodName},
+		{Operation: domain.DecideReview, Audience: "moderation", Method: moderationpb.ModerationService_DecideReview_FullMethodName},
+		{Operation: domain.DownloadReviewAsset, Audience: "asset", Method: assetpb.AssetService_DownloadReviewAsset_FullMethodName},
+		{Operation: domain.CheckReviewAssetAccess, Audience: "content", Method: contentpb.ContentService_CheckReviewAssetAccess_FullMethodName},
 		{Operation: domain.CreateDraft, Audience: "content", Method: contentpb.ContentService_CreateTaskDraft_FullMethodName},
 		{Operation: domain.ReadOwnSubmission, Audience: "content", Method: contentpb.ContentService_GetMyTaskSubmission_FullMethodName},
 		{Operation: domain.ListOwnSubmissions, Audience: "content", Method: contentpb.ContentService_ListMySubmissions_FullMethodName},

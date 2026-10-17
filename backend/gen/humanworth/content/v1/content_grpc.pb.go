@@ -23,6 +23,10 @@ const (
 	ContentService_GetMyTaskSubmission_FullMethodName         = "/humanworth.content.v1.ContentService/GetMyTaskSubmission"
 	ContentService_ListMySubmissions_FullMethodName           = "/humanworth.content.v1.ContentService/ListMySubmissions"
 	ContentService_ReplaceTaskDraft_FullMethodName            = "/humanworth.content.v1.ContentService/ReplaceTaskDraft"
+	ContentService_RequestTaskReview_FullMethodName           = "/humanworth.content.v1.ContentService/RequestTaskReview"
+	ContentService_GetReviewSnapshot_FullMethodName           = "/humanworth.content.v1.ContentService/GetReviewSnapshot"
+	ContentService_ApplyReviewDecision_FullMethodName         = "/humanworth.content.v1.ContentService/ApplyReviewDecision"
+	ContentService_CheckReviewAssetAccess_FullMethodName      = "/humanworth.content.v1.ContentService/CheckReviewAssetAccess"
 	ContentService_CheckAssetAccess_FullMethodName            = "/humanworth.content.v1.ContentService/CheckAssetAccess"
 	ContentService_ApplyAssetReview_FullMethodName            = "/humanworth.content.v1.ContentService/ApplyAssetReview"
 	ContentService_GetChallengeTaskDescription_FullMethodName = "/humanworth.content.v1.ContentService/GetChallengeTaskDescription"
@@ -45,6 +49,14 @@ type ContentServiceClient interface {
 	GetMyTaskSubmission(ctx context.Context, in *GetMyTaskSubmissionRequest, opts ...grpc.CallOption) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(ctx context.Context, in *ListMySubmissionsRequest, opts ...grpc.CallOption) (*ListMySubmissionsResponse, error)
 	ReplaceTaskDraft(ctx context.Context, in *ReplaceTaskDraftRequest, opts ...grpc.CallOption) (*ReplaceTaskDraftResponse, error)
+	// Gateway web session, CSRF; natural task/revision idempotency; 5s.
+	RequestTaskReview(ctx context.Context, in *RequestTaskReviewRequest, opts ...grpc.CallOption) (*RequestTaskReviewResponse, error)
+	// Moderation mTLS only; no user assertion; immutable submitted snapshot.
+	GetReviewSnapshot(ctx context.Context, in *GetReviewSnapshotRequest, opts ...grpc.CallOption) (*GetReviewSnapshotResponse, error)
+	// Moderation mTLS only; exact decision retry returns persisted receipt; 5s.
+	ApplyReviewDecision(ctx context.Context, in *ApplyReviewDecisionRequest, opts ...grpc.CallOption) (*ApplyReviewDecisionResponse, error)
+	// Asset mTLS only, administrator assertion bound to this method; no callback.
+	CheckReviewAssetAccess(ctx context.Context, in *CheckReviewAssetAccessRequest, opts ...grpc.CallOption) (*CheckReviewAssetAccessResponse, error)
 	// Public file access is checked only by Asset; no callback to Asset here.
 	CheckAssetAccess(ctx context.Context, in *CheckAssetAccessRequest, opts ...grpc.CallOption) (*CheckAssetAccessResponse, error)
 	// Trusted Moderation decision application, NOT an admin/browser approval API.
@@ -102,6 +114,46 @@ func (c *contentServiceClient) ReplaceTaskDraft(ctx context.Context, in *Replace
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReplaceTaskDraftResponse)
 	err := c.cc.Invoke(ctx, ContentService_ReplaceTaskDraft_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) RequestTaskReview(ctx context.Context, in *RequestTaskReviewRequest, opts ...grpc.CallOption) (*RequestTaskReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestTaskReviewResponse)
+	err := c.cc.Invoke(ctx, ContentService_RequestTaskReview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) GetReviewSnapshot(ctx context.Context, in *GetReviewSnapshotRequest, opts ...grpc.CallOption) (*GetReviewSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReviewSnapshotResponse)
+	err := c.cc.Invoke(ctx, ContentService_GetReviewSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) ApplyReviewDecision(ctx context.Context, in *ApplyReviewDecisionRequest, opts ...grpc.CallOption) (*ApplyReviewDecisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyReviewDecisionResponse)
+	err := c.cc.Invoke(ctx, ContentService_ApplyReviewDecision_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) CheckReviewAssetAccess(ctx context.Context, in *CheckReviewAssetAccessRequest, opts ...grpc.CallOption) (*CheckReviewAssetAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckReviewAssetAccessResponse)
+	err := c.cc.Invoke(ctx, ContentService_CheckReviewAssetAccess_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +270,14 @@ type ContentServiceServer interface {
 	GetMyTaskSubmission(context.Context, *GetMyTaskSubmissionRequest) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(context.Context, *ListMySubmissionsRequest) (*ListMySubmissionsResponse, error)
 	ReplaceTaskDraft(context.Context, *ReplaceTaskDraftRequest) (*ReplaceTaskDraftResponse, error)
+	// Gateway web session, CSRF; natural task/revision idempotency; 5s.
+	RequestTaskReview(context.Context, *RequestTaskReviewRequest) (*RequestTaskReviewResponse, error)
+	// Moderation mTLS only; no user assertion; immutable submitted snapshot.
+	GetReviewSnapshot(context.Context, *GetReviewSnapshotRequest) (*GetReviewSnapshotResponse, error)
+	// Moderation mTLS only; exact decision retry returns persisted receipt; 5s.
+	ApplyReviewDecision(context.Context, *ApplyReviewDecisionRequest) (*ApplyReviewDecisionResponse, error)
+	// Asset mTLS only, administrator assertion bound to this method; no callback.
+	CheckReviewAssetAccess(context.Context, *CheckReviewAssetAccessRequest) (*CheckReviewAssetAccessResponse, error)
 	// Public file access is checked only by Asset; no callback to Asset here.
 	CheckAssetAccess(context.Context, *CheckAssetAccessRequest) (*CheckAssetAccessResponse, error)
 	// Trusted Moderation decision application, NOT an admin/browser approval API.
@@ -252,6 +312,18 @@ func (UnimplementedContentServiceServer) ListMySubmissions(context.Context, *Lis
 }
 func (UnimplementedContentServiceServer) ReplaceTaskDraft(context.Context, *ReplaceTaskDraftRequest) (*ReplaceTaskDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReplaceTaskDraft not implemented")
+}
+func (UnimplementedContentServiceServer) RequestTaskReview(context.Context, *RequestTaskReviewRequest) (*RequestTaskReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestTaskReview not implemented")
+}
+func (UnimplementedContentServiceServer) GetReviewSnapshot(context.Context, *GetReviewSnapshotRequest) (*GetReviewSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReviewSnapshot not implemented")
+}
+func (UnimplementedContentServiceServer) ApplyReviewDecision(context.Context, *ApplyReviewDecisionRequest) (*ApplyReviewDecisionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApplyReviewDecision not implemented")
+}
+func (UnimplementedContentServiceServer) CheckReviewAssetAccess(context.Context, *CheckReviewAssetAccessRequest) (*CheckReviewAssetAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckReviewAssetAccess not implemented")
 }
 func (UnimplementedContentServiceServer) CheckAssetAccess(context.Context, *CheckAssetAccessRequest) (*CheckAssetAccessResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckAssetAccess not implemented")
@@ -372,6 +444,78 @@ func _ContentService_ReplaceTaskDraft_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ContentServiceServer).ReplaceTaskDraft(ctx, req.(*ReplaceTaskDraftRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_RequestTaskReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestTaskReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).RequestTaskReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_RequestTaskReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).RequestTaskReview(ctx, req.(*RequestTaskReviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_GetReviewSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReviewSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).GetReviewSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_GetReviewSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).GetReviewSnapshot(ctx, req.(*GetReviewSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_ApplyReviewDecision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyReviewDecisionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ApplyReviewDecision(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ApplyReviewDecision_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ApplyReviewDecision(ctx, req.(*ApplyReviewDecisionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_CheckReviewAssetAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckReviewAssetAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).CheckReviewAssetAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_CheckReviewAssetAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).CheckReviewAssetAccess(ctx, req.(*CheckReviewAssetAccessRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -578,6 +722,22 @@ var ContentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReplaceTaskDraft",
 			Handler:    _ContentService_ReplaceTaskDraft_Handler,
+		},
+		{
+			MethodName: "RequestTaskReview",
+			Handler:    _ContentService_RequestTaskReview_Handler,
+		},
+		{
+			MethodName: "GetReviewSnapshot",
+			Handler:    _ContentService_GetReviewSnapshot_Handler,
+		},
+		{
+			MethodName: "ApplyReviewDecision",
+			Handler:    _ContentService_ApplyReviewDecision_Handler,
+		},
+		{
+			MethodName: "CheckReviewAssetAccess",
+			Handler:    _ContentService_CheckReviewAssetAccess_Handler,
 		},
 		{
 			MethodName: "CheckAssetAccess",

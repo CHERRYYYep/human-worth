@@ -3,6 +3,12 @@ package domain
 type Operation string
 
 const (
+	RequestTaskReview        Operation = "request_task_review"
+	ListReviews              Operation = "list_reviews"
+	GetReview                Operation = "get_review"
+	DecideReview             Operation = "decide_review"
+	DownloadReviewAsset      Operation = "download_review_asset"
+	CheckReviewAssetAccess   Operation = "check_review_asset_access"
 	CreateDraft              Operation = "create_draft"
 	ReadOwnSubmission        Operation = "read_own_submission"
 	ListOwnSubmissions       Operation = "list_own_submissions"
@@ -46,10 +52,18 @@ type Policy struct {
 // 仍有永久关闭投票资格的副作用，故标为 Write，实际资格事务应由 Voting 自己完成。
 func PolicyFor(op Operation) (Policy, bool) {
 	switch op {
-	case CreateDraft, ReplaceDraft:
+	case CreateDraft, ReplaceDraft, RequestTaskReview:
 		return Policy{Audience: "content", Write: true}, true
 	case ReadOwnSubmission, ListOwnSubmissions:
 		return Policy{Audience: "content"}, true
+	case ListReviews, GetReview:
+		return Policy{Audience: "moderation", Admin: true}, true
+	case DecideReview:
+		return Policy{Audience: "moderation", Write: true, Admin: true}, true
+	case DownloadReviewAsset:
+		return Policy{Audience: "asset", Admin: true}, true
+	case CheckReviewAssetAccess:
+		return Policy{Audience: "content", Admin: true}, true
 	case CurrentSession, ListMCPTokens:
 		return Policy{Audience: "identity"}, true
 	case Logout, CreateMCPToken, RevokeMCPToken:

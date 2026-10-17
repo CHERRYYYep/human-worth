@@ -34,6 +34,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type assetIntegration struct {
@@ -766,8 +767,7 @@ func randomBytes(t *testing.T, n int) []byte {
 	return b
 }
 func protoCloneCreate(in *pb.CreateUploadSessionRequest) *pb.CreateUploadSessionRequest {
-	out := *in
-	return &out
+	return proto.Clone(in).(*pb.CreateUploadSessionRequest)
 }
 
 type fakeIdentityClient struct {

@@ -53,7 +53,7 @@ class ModuleDeployTest(unittest.TestCase):
         catalog = services.load_services(ROOT)
         catalog['asset'] = dict(database=True)
         manifest = app.database_manifest(catalog)
-        for name in ['identity', 'content', 'asset']:
+        for name in ['identity', 'content', 'asset', 'moderation']:
             self.assertIn('name: '+name+'_owner', manifest)
             self.assertIn('name: '+name+'_runtime', manifest)
         self.assertNotIn('name: gateway_owner', manifest)
@@ -210,7 +210,7 @@ class ModuleDeployTest(unittest.TestCase):
 
         with patch.object(check_network, 'run', side_effect=run), patch.object(check_network, 'apply', side_effect=apply), patch.object(check_network, 'kube', return_value=subprocess.CompletedProcess([], 0, stdout='Succeeded')):
             check_network.main()
-        self.assertEqual(callers, ['identity', 'content', 'asset', 'gateway', 'untrusted'])
+        self.assertEqual(callers, ['identity', 'content', 'asset', 'moderation', 'gateway', 'untrusted'])
 
     def test_asset_store_bucket_owner_is_confirmed(self):
         config={'endpoint':'http://asset-store.human-worth.svc.cluster.local:8333',

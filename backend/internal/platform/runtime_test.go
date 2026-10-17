@@ -63,3 +63,19 @@ func TestPublicAssetTimeouts(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewMethodTimeouts(t *testing.T) {
+	for _, method := range []string{"/humanworth.content.v1.ContentService/RequestTaskReview", "/humanworth.content.v1.ContentService/ApplyReviewDecision", "/humanworth.moderation.v1.ModerationService/CreateReviewCase", "/humanworth.moderation.v1.ModerationService/ListReviews"} {
+		if methodTimeout(method) != 5*time.Second {
+			t.Fatal("review delivery deadline mismatch", method)
+		}
+	}
+	for _, method := range []string{"/humanworth.moderation.v1.ModerationService/DecideReview", "/humanworth.moderation.v1.ModerationService/GetReview", "/humanworth.content.v1.ContentService/GetReviewSnapshot", "/humanworth.content.v1.ContentService/CheckReviewAssetAccess"} {
+		if methodTimeout(method) != 2*time.Second {
+			t.Fatal("review control-plane deadline widened", method)
+		}
+	}
+	if methodTimeout("/humanworth.asset.v1.AssetService/DownloadReviewAsset") != 15*time.Minute {
+		t.Fatal("pending file stream deadline mismatch")
+	}
+}

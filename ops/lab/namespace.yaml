@@ -15,9 +15,10 @@ spec:
   hard:
     requests.cpu: "2"
     requests.memory: 2Gi
-    # Allow Content's two replicas, one rolling replica and migration Jobs.
-    limits.cpu: "6"
-    limits.memory: 4Gi
+    # Agent Self-Claimed: five application modules, rolling replicas and the
+    # two isolated gateway probes used by real cross-Pod Asset verification.
+    limits.cpu: "8"
+    limits.memory: 5Gi
     requests.storage: 8Gi
     pods: "24"
 ---

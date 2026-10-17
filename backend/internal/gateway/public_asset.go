@@ -27,7 +27,10 @@ func (h *Handler) downloadPublicAsset(w http.ResponseWriter, r *http.Request) {
 		assetError(w, err)
 		return
 	}
-	first, err := stream.Recv()
+	h.serveAssetStream(w, r, stream.Recv)
+}
+func (h *Handler) serveAssetStream(w http.ResponseWriter, r *http.Request, recv func() (*pb.DownloadPublicAssetResponse, error)) {
+	first, err := recv()
 	if err != nil {
 		assetError(w, err)
 		return
@@ -51,7 +54,7 @@ func (h *Handler) downloadPublicAsset(w http.ResponseWriter, r *http.Request) {
 		panic(http.ErrAbortHandler)
 	}
 	for {
-		frame, e := stream.Recv()
+		frame, e := recv()
 		if errors.Is(e, io.EOF) {
 			if offset != meta.Bytes {
 				fail(status.Error(codes.Unavailable, "asset_unavailable"))

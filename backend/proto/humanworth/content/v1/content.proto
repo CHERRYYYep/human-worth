@@ -14,6 +14,14 @@ service ContentService {
   rpc GetMyTaskSubmission(GetMyTaskSubmissionRequest) returns (GetMyTaskSubmissionResponse);
   rpc ListMySubmissions(ListMySubmissionsRequest) returns (ListMySubmissionsResponse);
   rpc ReplaceTaskDraft(ReplaceTaskDraftRequest) returns (ReplaceTaskDraftResponse);
+  // Gateway web session, CSRF; natural task/revision idempotency; 5s.
+  rpc RequestTaskReview(RequestTaskReviewRequest) returns (RequestTaskReviewResponse);
+  // Moderation mTLS only; no user assertion; immutable submitted snapshot.
+  rpc GetReviewSnapshot(GetReviewSnapshotRequest) returns (GetReviewSnapshotResponse);
+  // Moderation mTLS only; exact decision retry returns persisted receipt; 5s.
+  rpc ApplyReviewDecision(ApplyReviewDecisionRequest) returns (ApplyReviewDecisionResponse);
+  // Asset mTLS only, administrator assertion bound to this method; no callback.
+  rpc CheckReviewAssetAccess(CheckReviewAssetAccessRequest) returns (CheckReviewAssetAccessResponse);
 
   // Public file access is checked only by Asset; no callback to Asset here.
   rpc CheckAssetAccess(CheckAssetAccessRequest) returns (CheckAssetAccessResponse);
@@ -71,9 +79,11 @@ message TaskSubmission {
   // Always derived from VerifyActor; not accepted in any input.
   string author_id = 2;
   int64 revision = 3;
-  // Always draft in this phase. No public/private flag or client-controlled state.
+  // Authoritative publication state; not a client-controlled visibility flag.
   string state = 4;
   TaskDraftInput content = 5;
+  optional string review_id = 6;
+  optional string rejection_reason = 7;
 }
 message CreateTaskDraftRequest {
   string actor_assertion = 1;
@@ -238,11 +248,11 @@ message EntryAssetReview {
   string entry_id = 1;
   ReviewedEntryState state = 2;
 }
-// decision_id is globally unique and immutable. Same request replays its receipt;
-// different content conflicts. expected_revision serializes all task/entry
-// decisions. The first approval (expected_revision=0) freezes submission_revision
-// and approves the complete human+agent initial bundle. Later decisions cannot
-// replace that snapshot. mTLS moderation only; 2s, safe exact-request retry.
+// Legacy 3C compatibility only. Exact historical requests replay their receipts.
+// First approval of an unsubmitted draft is now FailedPrecondition; formal
+// submissions can only be tightened (taken down/revoked), not approved here.
+// Existing legacy snapshots retain expected_revision serialization. mTLS
+// moderation only; 2s, safe exact-request retry. Use ApplyReviewDecision for new cases.
 message ApplyAssetReviewRequest {
   string decision_id = 1;
   string task_id = 2;
@@ -271,3 +281,46 @@ message CheckAssetAccessResponse {
   bool allowed = 1;
   int64 revision = 2;
 }
+
+// Content owns this immutable initial-bundle submission, including stable entry IDs.
+message ReviewSnapshot {
+  string review_id = 1;
+  TaskSubmission submission = 2;
+  repeated string entry_ids = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+message RequestTaskReviewRequest {
+  string actor_assertion = 1;
+  string task_id = 2;
+  int64 expected_revision = 3;
+  string asset_actor_assertion = 4;
+}
+message RequestTaskReviewResponse { TaskSubmission submission = 1; }
+message GetReviewSnapshotRequest { string review_id = 1; }
+message GetReviewSnapshotResponse { ReviewSnapshot snapshot = 1; }
+enum ReviewOutcome {
+  REVIEW_OUTCOME_UNSPECIFIED = 0;
+  REVIEW_OUTCOME_APPROVE = 1;
+  REVIEW_OUTCOME_REJECT = 2;
+}
+message ApplyReviewDecisionRequest {
+  string decision_id = 1;
+  string review_id = 2;
+  string task_id = 3;
+  int64 submission_revision = 4;
+  ReviewOutcome outcome = 5;
+  optional string reason = 6;
+}
+message ApplyReviewDecisionResponse {
+  string decision_id = 1;
+  string review_id = 2;
+  string state = 3;
+  int64 revision = 4;
+  repeated ReviewedEntry entries = 5;
+}
+message CheckReviewAssetAccessRequest {
+  string actor_assertion = 1;
+  string review_id = 2;
+  string asset_id = 3;
+}
+message CheckReviewAssetAccessResponse { bool allowed = 1; }

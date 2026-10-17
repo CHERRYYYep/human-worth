@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package humanworth.moderation.v1;
+
+import "google/protobuf/timestamp.proto";
+import "humanworth/content/v1/content.proto";
+
+option go_package = "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1;moderationv1";
+
+// Only initial task bundles in phase 4; no reports/audit platform.
+service ModerationService {
+  // content mTLS only; review ID + task/revision idempotent, payload mismatch
+  // AlreadyExists. 5s; safe identical retry. No transaction waits for RPC.
+  rpc CreateReviewCase(CreateReviewCaseRequest) returns (CreateReviewCaseResponse);
+  // gateway mTLS + admin web assertion; 5s, byte-budgeted full snapshots.
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  // gateway mTLS + admin web assertion; 2s, safe read.
+  rpc GetReview(GetReviewRequest) returns (GetReviewResponse);
+  // gateway mTLS + admin web/CSRF assertion; 2s durable intent. Identical
+  // outcome/reason retries find original decision; conflicting decision Aborted.
+  // Only an acknowledged Content receipt makes status approved/rejected.
+  rpc DecideReview(DecideReviewRequest) returns (DecideReviewResponse);
+}
+enum DeliveryState {
+  DELIVERY_STATE_UNSPECIFIED = 0;
+  DELIVERY_STATE_UNDECIDED = 1;
+  DELIVERY_STATE_PENDING = 2;
+  DELIVERY_STATE_APPLIED = 3;
+  DELIVERY_STATE_BLOCKED = 4;
+}
+message Review {
+  string id = 1;
+  humanworth.content.v1.ReviewSnapshot snapshot = 2;
+  // pending/approved/rejected, mapped to existing HTTP values.
+  string status = 3;
+  optional string reason = 4;
+  optional string reviewer_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp decided_at = 7;
+  humanworth.content.v1.ReviewOutcome decision = 8;
+  DeliveryState delivery_state = 9;
+  humanworth.content.v1.ApplyReviewDecisionResponse receipt = 10;
+  optional string decision_id = 11;
+}
+message CreateReviewCaseRequest { humanworth.content.v1.ReviewSnapshot snapshot = 1; }
+message CreateReviewCaseResponse { Review review = 1; }
+message ListReviewsRequest {
+  string actor_assertion = 1;
+  string status = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+message ListReviewsResponse {
+  repeated Review items = 1;
+  string next_cursor = 2;
+}
+message GetReviewRequest {
+  string actor_assertion = 1;
+  string review_id = 2;
+}
+message GetReviewResponse { Review review = 1; }
+message DecideReviewRequest {
+  string actor_assertion = 1;
+  string review_id = 2;
+  humanworth.content.v1.ReviewOutcome decision = 3;
+  optional string reason = 4;
+}
+message DecideReviewResponse { Review review = 1; }

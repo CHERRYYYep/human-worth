@@ -89,6 +89,10 @@ func (l *kindLab) user() kindUser {
 }
 
 func (l *kindLab) httpClient(port string) *http.Client {
+	return l.httpClientAddress("127.0.0.1:" + port)
+}
+
+func (l *kindLab) httpClientAddress(address string) *http.Client {
 	l.t.Helper()
 	ca, err := os.ReadFile(filepath.Join(l.state, "ca.crt"))
 	if err != nil {
@@ -99,7 +103,7 @@ func (l *kindLab) httpClient(port string) *http.Client {
 		l.t.Fatal("invalid test CA")
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS13}, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "tcp", "127.0.0.1:"+port)
+		return (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	}}
 	l.t.Cleanup(transport.CloseIdleConnections)
 	return &http.Client{Transport: transport, Timeout: 45 * time.Second}

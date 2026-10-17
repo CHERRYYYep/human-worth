@@ -92,10 +92,10 @@ func (r *Runtime) Unary(ctx context.Context, request any, info *grpc.UnaryServer
 func methodTimeout(method string) time.Duration {
 	timeout := 2 * time.Second
 	switch method {
-	case "/humanworth.content.v1.ContentService/ListMySubmissions":
+	case "/humanworth.content.v1.ContentService/ListMySubmissions", "/humanworth.content.v1.ContentService/RequestTaskReview", "/humanworth.content.v1.ContentService/ApplyReviewDecision", "/humanworth.moderation.v1.ModerationService/CreateReviewCase", "/humanworth.moderation.v1.ModerationService/ListReviews":
 		timeout = 5 * time.Second
 	case "/humanworth.asset.v1.AssetService/UploadAsset", "/humanworth.asset.v1.AssetService/DownloadAsset",
-		"/humanworth.asset.v1.AssetService/DownloadPublicAsset":
+		"/humanworth.asset.v1.AssetService/DownloadPublicAsset", "/humanworth.asset.v1.AssetService/DownloadReviewAsset":
 		timeout = 15 * time.Minute
 	case "/humanworth.asset.v1.AssetService/CompleteUpload":
 		timeout = 30 * time.Second

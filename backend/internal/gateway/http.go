@@ -12,6 +12,7 @@ import (
 	challengepb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
+	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
@@ -42,6 +43,7 @@ const FlowCookie = "__Host-human-worth-oauth"
 var web embed.FS
 
 type Options struct {
+	Moderation           moderationpb.ModerationServiceClient
 	Challenge            challengepb.ChallengeServiceClient
 	DeploymentStatusFile string
 	Content              contentpb.ContentServiceClient
@@ -118,6 +120,11 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 		method, path, operation string
 		handler                 http.HandlerFunc
 	}{
+		{"POST", "/api/me/tasks/{taskId}/review-requests", "requestTaskReview", h.requestTaskReview},
+		{"GET", "/api/admin/reviews", "listReviews", h.listReviews},
+		{"GET", "/api/admin/reviews/{reviewId}", "getReview", h.getReview},
+		{"POST", "/api/admin/reviews/{reviewId}/decision", "decideReview", h.decideReview},
+		{"GET", "/api/admin/reviews/{reviewId}/assets/{assetId}/content", "downloadReviewAsset", h.downloadReviewAsset},
 		{"POST", "/api/tasks", "createTaskDraft", h.createDraft},
 		{"GET", "/api/me/submissions", "listMySubmissions", h.listSubmissions},
 		{"POST", "/api/me/assets/upload-sessions", "createAssetUploadSession", h.createAssetUploadSession},
@@ -218,7 +225,7 @@ func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc
 		w.Header().Set("X-Request-ID", requestID)
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-request-id", requestID)
 		timeout := 2 * time.Second
-		if name == "listMySubmissions" {
+		if name == "listMySubmissions" || name == "requestTaskReview" || name == "listReviews" {
 			timeout = 5 * time.Second
 		}
 		bodyLimit := int64(16384)
@@ -233,7 +240,7 @@ func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc
 		if name == "uploadAsset" {
 			timeout = 15 * time.Minute
 		}
-		if name == "downloadAsset" || name == "downloadPublicAsset" {
+		if name == "downloadAsset" || name == "downloadPublicAsset" || name == "downloadReviewAsset" {
 			timeout = 15 * time.Minute
 		}
 		if name == "completeAsset" {
@@ -275,6 +282,9 @@ func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
 	switch s.Code() {
 	case codes.InvalidArgument:
 		code = 400
+		if reason == "initial_bundle_required" {
+			code = 422
+		}
 		if reason == "unsupported_media_type" {
 			code = 415
 		}
@@ -286,6 +296,9 @@ func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
 		code = 404
 	case codes.AlreadyExists, codes.Aborted, codes.FailedPrecondition:
 		code = 409
+		if reason == "initial_bundle_required" {
+			code = 422
+		}
 	case codes.ResourceExhausted:
 		if reason == "too_many_requests" {
 			code = 429
