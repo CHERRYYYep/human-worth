@@ -92,7 +92,7 @@ func run() error {
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, moderation.Authorization), grpc.StreamInterceptor(moderation.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(4<<20), grpc.MaxConcurrentStreams(64))
 	app := &moderation.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn), Content: contentpb.NewContentServiceClient(contentConn)}
 	pb.RegisterModerationServiceServer(server, app)
-	go app.RunDelivery(ctx)
+	go app.RunDelivery(ctx, runtime.Log)
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
