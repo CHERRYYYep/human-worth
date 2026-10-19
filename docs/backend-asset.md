@@ -130,7 +130,32 @@ assets/<asset_id>/content
 4. 如果服务在对象成功、数据库提交前超时，重复 `CompleteUpload` 检查 staging/final 对象并继续提交同一资产；不能重新生成另一个资产。
 5. 取消或过期先把数据库标为终态，再幂等删除 staging 对象。删除失败由后续清理重试，不恢复为 ready。
 
-定时清理任务只处理已过期且仍未完成的上传会话。首阶段不提供删除 `ready` 资产的 API，因而不会把 Content 的绑定关系偷偷当作 Asset 本地事实。
+定时清理任务处理已取消、已标记过期或已到期且仍未完成的上传会话，重试 staging/final 删除；不清理 `ready` 资产。首阶段不提供删除 `ready` 资产的 API，因而不会把 Content 的绑定关系偷偷当作 Asset 本地事实。
+
+### 上传持锁取舍与后续优化（2026-10-19）
+
+**Human Design：暂时保留现有上传写入方式与持锁范围，接受其等待和资源占用成本，将缩短持锁时间记录为后续优化方向。** 本轮不实施上传协议重构；后续讨论批准的事务清理、错误分类与拒绝终态修复见下节，存储行为差异仍单独处理。
+
+当前浏览器上传每个分块按 `BEGIN → SELECT … FOR UPDATE → Storage.WriteAt → 更新进度 → COMMIT` 执行；完成上传也在事务内进行对象检查、摘要计算与提升。锁保护的是根据已确认进度写入对象并确认新进度的完整过程，不能仅在最后更新数据库时才做并发检查。数据库回滚不会撤销已经成功的对象写入。
+
+成本主要是同一上传的冲突操作需要等待对象存储 I/O，以及事务在等待期间持续占用数据库连接。不同文件的会话通常不会争用相同的行锁，但大量并行上传仍会共同占用连接池和存储资源。目前没有容量测试证明这些成本已成为实际瓶颈，也没有测得固定的上传延迟增量。S3 前缀重写造成的额外传输属于相关但独立的优化问题，不能把全部上传耗时归因于数据库锁。
+
+**Agent Self-Claimed 后续优化建议（未实施）**：当实际观测到锁等待、连接池等待、上传尾延迟或吞吐不满足需求时，再评估缩短持锁时间。应先记录上述指标及存储请求耗时，区分数据库竞争与对象存储传输成本，不仅凭事务包含外部 I/O 就启动重构。
+
+若要将对象写入移出事务，必须同时设计写入与恢复协议，例如短事务记录操作及预期版本、锁外写入互不覆盖的不可变分块或候选对象、短事务核对版本及摘要后确认。仅在共享 staging key 写完后检查数据库冲突，无法防止未被接受的请求覆盖已确认内容。具体存储方案尚未选定，不能仅依靠租约过期阻止旧执行者继续覆盖对象。
+
+未来方案须验证同一会话并发写入、对象写成功但数据库未提交、请求超时与响应丢失、旧执行者迟到、双副本重启恢复、完成/取消竞争和孤立对象清理；最终大小与摘要确认前不得标记 `ready`。满足这些条件后，才能替换当前持锁协议。
+
+### 上传事务与失败契约（2026-10-19，本地修复）
+
+**Human Design**：批准 P3 的事务清理、错误判断顺序、存储故障分类和拒绝终态持久化修复，保留现有持锁协议。**Agent Self-Claimed**：以下 helper、2 秒清理预算与故障注入测试为本次实现选择；不扩展成全模块架构迁移。
+
+- 浏览器每个分块通过 `withinUploadTx` 执行一次回调并确认提交；不自动重试，事务在等待下一帧之前结束。`server.go` 的上传事务共用 `rollbackUploadTx`，使用脱离请求取消、最多 2 秒的 context 清理；清理失败记日志，pgx 丢弃无法回滚的连接。取消或 panic 仍触发清理，不吞掉原错误或 panic。
+- `CompleteUpload`、`AbortUpload` 先判断查询是否失败，再检查 owner；无权主体仍收到原有 NotFound。对象检查只有缺失或大小不符才判 `upload_incomplete`；存储不可用、取消和 deadline 分别保留技术错误分类，不继续把未知存储状态当成缺失。
+- 到期、摘要不符和媒体拒绝需要先检查所有状态更新、确认提交，再返回业务拒绝。任何更新/提交失败或提交响应丢失均返回技术失败，不同步删除对象，也不声称事务肯定回滚。摘要/媒体拒绝确认提交后才尝试删除 staging；删除失败记日志并保留终态，由既有 `CleanupExpired` 重试。到期仍走异步清理。
+- 对象已写入/提升而数据库未确认时，调用方通过 `GetUploadSession`、同一会话续传或 `CompleteUpload` 查证恢复；不能盲目重传或新建资产。回滚不撤销 S3 写入，现有 staging/final 恢复路径保留。协议、权限、表结构和 S3 前缀重写方式未变。
+
+验收使用专用 PostgreSQL、受限 runtime 角色与真实 mTLS RPC。`upload_integration_test.go` 覆盖查询故障、staging/final Stat 故障、终态 UPDATE/COMMIT 失败、数据库确实提交但响应丢失、删除失败后的持久清理，以及另一实例的续传/完成/下载恢复；`upload_tx_integration_test.go` 验证取消、panic、业务失败后连接和行锁释放，及开放上传流等待下一帧时已无分块事务。完整命令与结果见第 17 节。
 
 ## 4. 状态图与不变量
 
@@ -529,3 +554,24 @@ sg docker -c 'umask 022; DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" py
 正式审核由 [Moderation](backend-moderation.md) 与 Content 拥有。Asset 不增加审核状态/案件表，也不访问其他schema。新增 `DownloadReviewAsset`（仅gateway mTLS＋专用管理员网站断言），HTTP为 `GET /api/admin/reviews/{reviewId}/assets/{assetId}/content`；Content专用断言由Content复核，确切pending快照绑定且ready才允许。打开存储后再次复核管理员会话与Content，不缓存、不发长期URL、不能通过owner/admin头绕过；终审后待审入口404，过审文件仍使用原公开入口。两种受控流复用长度/offset/首帧校验；普通本人上传/下载及Challenge协议不变。
 
 旧ApplyAssetReview新草稿首次批准关闭，历史回执/展示收紧保留；新批准必须正式送审并由真实Moderation流程产生执行回执。旧3C验收记录为历史，不自动证明这一增量已验证或已部署；新测试结果见Moderation设计文档的实际验收节。
+
+## 17. 2026-10-19 P3 上传事务修复验收（Agent Self-Claimed）
+
+验证对象为 `dev@e2466a3` 上的本地事务修复，分支 `backend/fix-asset-upload-transactions`。使用一次性 PostgreSQL 18、随机数据库与受限 runtime 角色，以及 SeaweedFS 4.13 的随机 bucket；未连接产品数据库。故障测试仅包装指定的 Storage 操作，数据库事务、触发器故障和 mTLS RPC 均为真实调用；完整集成另覆盖共享 S3 和 HTTP → Identity → Asset/Content。
+
+命令均在 `backend/` 执行，`ASSET_TEST_DATABASE_URL_FILE`、`IDENTITY_TEST_DATABASE_URL_FILE`、`CHALLENGE_TEST_DATABASE_URL_FILE` 指向私有临时 DSN 文件，`ASSET_S3_TEST_CONFIG_FILE` 指向临时存储配置。日志不记录凭据。
+
+| 验证 | 命令与结果 |
+| --- | --- |
+| 旧缺陷可检出 | 归档原基线、仅复制 `upload_integration_test.go`，运行 `go test -race -tags=integration ./internal/asset -run '^TestBrowserUploadFailures$' -count=1 -timeout=120s -v`，退出 **1**；22 个失败子用例检出查询误分类、Stat 故障掩盖和拒绝 UPDATE/COMMIT 失败后误清理等缺陷 |
+| 修复后专项 | `go test -race -json -tags=integration ./internal/asset -run '^(TestBrowserUploadFailures\|TestBrowserUploadChunkAndCompletionRecovery\|TestUploadTransactionCleanup\|TestBrowserChunkTransactionBoundaries)$' -count=1 -timeout=120s`，退出 **0**；45 个测试/子测试 PASS，0 FAIL、0 SKIP |
+| 完整后端集成 | `go test -race -json -tags=integration -p=1 ./... -count=1 -timeout=120s`，退出 **0**；296 个测试/子测试 PASS，0 FAIL、0 SKIP；另有 27 个无测试包（不计作跳过测试） |
+| 后端回归与静态检查 | `go test -race ./... -count=1`、`go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...` 均退出 **0**；最终测试 helper 调整后 Asset integration vet 与专项再通过 |
+| 根 CI 与文档 | 根目录 `npm run ci` 退出 **0**，5 个 Node 测试、27 个 Python 测试通过；文档更新后 `python3 scripts/check_docs.py` 再次退出 **0** |
+| 格式与差异 | 修改 Go 文件的 `gofmt -l` 无输出，`git diff --check` 退出 **0** |
+
+提交响应丢失用例通过包装真实数据库连接，在服务端提交后丢弃响应；独立连接确认状态确实已提交。此时接口返回技术失败、不同步删除对象，后续从持久终态清理或从原会话恢复；测试同时断言事务回调/分块写入没有自动重跑。取消、panic 与业务失败后，另一连接能立即取得相同行锁，连接池不留占用；开放流等待下一帧时，另一实例能够完成上传。
+
+最初完整集成曾因临时 SeaweedFS `volume.max=4` 无法给新 bucket 分配存储而失败；调整为 `volume.max=64`、16 MiB volume、2 GiB tmpfs 后，首次启动尚未就绪时又遇到 bucket/首个对象写入失败。待存储就绪后按上表串行包回归通过，未为绕过失败修改生产 S3 adapter 或既有用例。原失败日志与最终结果均保留在 `/tmp/hw-asset-p3-20261019-tp6_krib/`；该路径为本机临时证据，可能被系统清理。
+
+本次不改 Proto、schema、部署配置或前端；保留现有 S3 前缀重写和 FileStorage/S3 重试尾部差异，未做吞吐/容量验收。真实 kind rollout、远端 CI、自动 Deploy Action 与公网部署未重跑，不以本地集成结果代替。P3 的全面分层与其余架构问题也不在本次完成范围。

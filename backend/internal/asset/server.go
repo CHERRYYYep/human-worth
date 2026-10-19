@@ -308,7 +308,7 @@ func (s *Server) CreateUploadSession(ctx context.Context, r *pb.CreateUploadSess
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackUploadTx(ctx, tx)
 	var id, assetID, state string
 	var existingHash []byte
 	var expires time.Time
@@ -402,55 +402,10 @@ func (s *Server) uploadBrowser(stream pb.AssetService_UploadAssetServer, first *
 				return status.Error(codes.FailedPrecondition, "chunk_checksum_mismatch")
 			}
 		}
-		tx, txErr := s.DB.Begin(stream.Context())
-		if txErr != nil {
-			return unavailable(txErr)
+		next, err = s.writeBrowserChunk(stream.Context(), owner, first.GetUploadSessionId(), next, message.GetChunk())
+		if err != nil {
+			return err
 		}
-		var assetID, state, key, sessionOwner string
-		var expected, received int64
-		var expires time.Time
-		txErr = tx.QueryRow(stream.Context(), `SELECT s.asset_id,s.owner_id,s.state,s.expires_at,a.staging_key,a.expected_bytes,s.received_bytes FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id WHERE s.id=$1 FOR UPDATE`, first.GetUploadSessionId()).Scan(&assetID, &sessionOwner, &state, &expires, &key, &expected, &received)
-		if errors.Is(txErr, pgx.ErrNoRows) {
-			tx.Rollback(stream.Context())
-			return status.Error(codes.NotFound, "upload_session_not_found")
-		}
-		if txErr != nil {
-			tx.Rollback(stream.Context())
-			return unavailable(txErr)
-		}
-		if sessionOwner != owner {
-			tx.Rollback(stream.Context())
-			return status.Error(codes.NotFound, "upload_session_not_found")
-		}
-		if state != "active" || time.Now().After(expires) {
-			tx.Rollback(stream.Context())
-			return status.Error(codes.FailedPrecondition, "upload_session_not_active")
-		}
-		if received != next {
-			tx.Rollback(stream.Context())
-			return status.Error(codes.Aborted, "upload_offset_conflict")
-		}
-		if received+int64(len(message.GetChunk())) > expected {
-			tx.Rollback(stream.Context())
-			return invalid("upload_too_large")
-		}
-		if txErr = s.Storage.WriteAt(stream.Context(), key, received, message.GetChunk()); txErr != nil {
-			tx.Rollback(stream.Context())
-			return unavailable(txErr)
-		}
-		_, txErr = tx.Exec(stream.Context(), `UPDATE asset.assets SET received_bytes=$2,updated_at=clock_timestamp() WHERE id=$1`, assetID, received+int64(len(message.GetChunk())))
-		if txErr == nil {
-			_, txErr = tx.Exec(stream.Context(), `UPDATE asset.upload_sessions SET received_bytes=$2,updated_at=clock_timestamp() WHERE id=$1`, first.GetUploadSessionId(), received+int64(len(message.GetChunk())))
-		}
-		if txErr == nil {
-			txErr = tx.Commit(stream.Context())
-		} else {
-			tx.Rollback(stream.Context())
-		}
-		if txErr != nil {
-			return unavailable(txErr)
-		}
-		next = received + int64(len(message.GetChunk()))
 	}
 }
 
@@ -586,7 +541,7 @@ func (s *Server) uploadChallenge(stream pb.AssetService_UploadAssetServer, first
 	if err != nil {
 		return unavailable(err)
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackUploadTx(ctx, tx)
 	var row assetRow
 	row, err = scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE run_id=$1 AND attempt_id=$2 AND upload_id=$3 FOR UPDATE`, access.GetRunId(), access.GetAttemptId(), first.GetUploadId()))
 	if err == nil {
@@ -710,86 +665,95 @@ func (s *Server) CompleteUpload(ctx context.Context, r *pb.CompleteUploadRequest
 	if r.GetAssetId() != "" && !assetPattern.MatchString(r.GetAssetId()) {
 		return nil, status.Error(codes.NotFound, "asset_not_found")
 	}
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return nil, unavailable(err)
-	}
-	defer tx.Rollback(ctx)
-	var sessionOwner, state, staging, final, declared string
-	var assetID, assetState string
-	var expected, received int64
-	var expectedHash []byte
-	var expires time.Time
-	err = tx.QueryRow(ctx, `SELECT s.owner_id,s.state,s.expires_at,s.asset_id,a.state,a.staging_key,a.final_key,a.declared_media_type,a.expected_bytes,a.received_bytes,a.expected_sha256 FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id WHERE s.id=$1 FOR UPDATE`, r.UploadSessionId).Scan(&sessionOwner, &state, &expires, &assetID, &assetState, &staging, &final, &declared, &expected, &received, &expectedHash)
-	if errors.Is(err, pgx.ErrNoRows) || sessionOwner != owner {
-		return nil, status.Error(codes.NotFound, "upload_session_not_found")
-	}
-	if err != nil {
-		return nil, unavailable(err)
-	}
-	if r.GetAssetId() != "" && r.GetAssetId() != assetID {
-		return nil, status.Error(codes.NotFound, "asset_not_found")
-	}
-	if state == "completed" && assetState == "ready" {
-		row, scanErr := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
-		if scanErr != nil {
-			return nil, unavailable(scanErr)
+	var row assetRow
+	var rejection error
+	var cleanupKey string
+	err = withinUploadTx(ctx, s.DB, func(tx pgx.Tx) error {
+		var sessionOwner, state, staging, final, declared string
+		var assetID, assetState string
+		var expected, received int64
+		var expectedHash []byte
+		var expires time.Time
+		err := tx.QueryRow(ctx, `SELECT s.owner_id,s.state,s.expires_at,s.asset_id,a.state,a.staging_key,a.final_key,a.declared_media_type,a.expected_bytes,a.received_bytes,a.expected_sha256 FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id WHERE s.id=$1 FOR UPDATE`, r.UploadSessionId).Scan(&sessionOwner, &state, &expires, &assetID, &assetState, &staging, &final, &declared, &expected, &received, &expectedHash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return status.Error(codes.NotFound, "upload_session_not_found")
 		}
-		return &pb.CompleteUploadResponse{Asset: assetMetadata(row)}, tx.Commit(ctx)
-	}
-	if state != "active" {
-		return nil, status.Error(codes.FailedPrecondition, "upload_session_not_active")
-	}
-	if time.Now().After(expires) {
-		_, _ = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='expired',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
-		_ = tx.Commit(ctx)
-		return nil, status.Error(codes.FailedPrecondition, "upload_session_expired")
-	}
-	if received != expected {
-		return nil, status.Error(codes.FailedPrecondition, "upload_incomplete")
-	}
-	key := staging
-	if size, statErr := s.Storage.Stat(ctx, staging); statErr != nil || size != expected {
-		if finalSize, finalErr := s.Storage.Stat(ctx, final); finalErr == nil && finalSize == expected {
-			key = final
+		if err != nil {
+			return unavailable(err)
+		}
+		if sessionOwner != owner {
+			return status.Error(codes.NotFound, "upload_session_not_found")
+		}
+		if r.GetAssetId() != "" && r.GetAssetId() != assetID {
+			return status.Error(codes.NotFound, "asset_not_found")
+		}
+		if state == "completed" && assetState == "ready" {
+			row, err = scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
+			if err != nil {
+				return unavailable(err)
+			}
+			return nil
+		}
+		if state != "active" {
+			return status.Error(codes.FailedPrecondition, "upload_session_not_active")
+		}
+		if time.Now().After(expires) {
+			if _, err = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='expired',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId); err != nil {
+				return unavailable(err)
+			}
+			rejection = status.Error(codes.FailedPrecondition, "upload_session_expired")
+			return nil // Commit the terminal state before returning the rejection.
+		}
+		if received != expected {
+			return status.Error(codes.FailedPrecondition, "upload_incomplete")
+		}
+		key, err := s.completionObject(ctx, staging, final, expected)
+		if err != nil {
+			return err
+		}
+		actual, size, detected, err := s.objectDigest(ctx, key)
+		if err != nil {
+			return unavailable(err)
+		}
+		if size != expected || !bytesEqual(actual, expectedHash) {
+			rejection = status.Error(codes.FailedPrecondition, "sha256_mismatch")
 		} else {
-			return nil, status.Error(codes.FailedPrecondition, "upload_incomplete")
+			rejection = validateDetectedMediaType(declared, detected)
 		}
-	}
-	actual, size, detected, err := s.objectDigest(ctx, key)
+		if rejection != nil {
+			if _, err = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',detected_media_type=$2,updated_at=clock_timestamp() WHERE id=$1`, assetID, detected); err != nil {
+				return unavailable(err)
+			}
+			if _, err = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='aborted',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId); err != nil {
+				return unavailable(err)
+			}
+			cleanupKey = staging
+			return nil
+		}
+		if err = s.Storage.Move(ctx, staging, final); err != nil {
+			return unavailable(err)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE asset.assets SET state='ready',detected_media_type=$2,actual_sha256=$3,completed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, assetID, detected, actual); err != nil {
+			return unavailable(err)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='completed',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId); err != nil {
+			return unavailable(err)
+		}
+		row, err = scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
+		if err != nil {
+			return unavailable(err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, unavailable(err)
-	}
-	if size != expected || !bytesEqual(actual, expectedHash) {
-		_, _ = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',updated_at=clock_timestamp() WHERE id=$1`, assetID)
-		_, _ = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='aborted',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
-		_ = tx.Commit(ctx)
-		_ = s.Storage.Delete(ctx, staging)
-		return nil, status.Error(codes.FailedPrecondition, "sha256_mismatch")
-	}
-	if err = validateDetectedMediaType(declared, detected); err != nil {
-		_, _ = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',detected_media_type=$2,updated_at=clock_timestamp() WHERE id=$1`, assetID, detected)
-		_, _ = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='aborted',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
-		_ = tx.Commit(ctx)
-		_ = s.Storage.Delete(ctx, staging)
+		// A failed or uncertain commit must not trigger object deletion.
 		return nil, err
 	}
-	if err = s.Storage.Move(ctx, staging, final); err != nil {
-		return nil, unavailable(err)
-	}
-	_, err = tx.Exec(ctx, `UPDATE asset.assets SET state='ready',detected_media_type=$2,actual_sha256=$3,completed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, assetID, detected, actual)
-	if err == nil {
-		_, err = tx.Exec(ctx, `UPDATE asset.upload_sessions SET state='completed',updated_at=clock_timestamp() WHERE id=$1`, r.UploadSessionId)
-	}
-	if err != nil {
-		return nil, unavailable(err)
-	}
-	row, err := scanAsset(tx.QueryRow(ctx, assetSelect+` FROM asset.assets a WHERE id=$1`, assetID))
-	if err != nil {
-		return nil, unavailable(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, unavailable(err)
+	if rejection != nil {
+		if cleanupKey != "" {
+			s.cleanupRejectedUpload(ctx, r.UploadSessionId, cleanupKey)
+		}
+		return nil, rejection
 	}
 	return &pb.CompleteUploadResponse{Asset: assetMetadata(row)}, nil
 }
@@ -816,16 +780,19 @@ func (s *Server) AbortUpload(ctx context.Context, r *pb.AbortUploadRequest) (*pb
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackUploadTx(ctx, tx)
 	var assetID, sessionOwner, state, key string
 	var received, expected int64
 	var expires time.Time
 	err = tx.QueryRow(ctx, `SELECT s.asset_id,s.owner_id,s.state,s.expires_at,a.staging_key,a.received_bytes,a.expected_bytes FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id WHERE s.id=$1 FOR UPDATE`, r.UploadSessionId).Scan(&assetID, &sessionOwner, &state, &expires, &key, &received, &expected)
-	if errors.Is(err, pgx.ErrNoRows) || sessionOwner != owner {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.NotFound, "upload_session_not_found")
 	}
 	if err != nil {
 		return nil, unavailable(err)
+	}
+	if sessionOwner != owner {
+		return nil, status.Error(codes.NotFound, "upload_session_not_found")
 	}
 	if state == "completed" {
 		return nil, status.Error(codes.FailedPrecondition, "upload_already_completed")
