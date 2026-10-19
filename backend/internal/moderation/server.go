@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -374,26 +375,37 @@ func (s *Server) ListReviews(ctx context.Context, r *pb.ListReviewsRequest) (*pb
 	return out, nil
 }
 func (s *Server) DeliverDecision(ctx context.Context) (bool, error) {
+	result, err := s.deliverDecision(ctx)
+	return result.HadWork, err
+}
+
+func (s *Server) deliverDecision(ctx context.Context) (platform.OutboxResult, error) {
+	result := platform.OutboxResult{Outcome: "idle", Stage: "claim"}
 	if s.Content == nil {
-		return false, nil
+		return result, nil
 	}
 	token, err := randomID("lease")
 	if err != nil {
-		return false, err
+		result.Cause = err
+		return result, err
 	}
 	var id string
 	err = s.DB.QueryRow(ctx, `UPDATE moderation.decision_outbox o SET lease_token=$1,available_at=clock_timestamp()+interval '15 seconds',attempts=attempts+1 FROM (SELECT id FROM moderation.decision_outbox WHERE delivered_at IS NULL AND NOT blocked AND available_at<=clock_timestamp() ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) q WHERE o.id=q.id RETURNING o.id`, token).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return result, nil
 	}
 	if err != nil {
-		return false, unavailable(err)
+		result.Cause = err
+		return result, unavailable(err)
 	}
+	result.HadWork, result.ItemID, result.Stage = true, id, "load_review"
 	r, err := readReview(s.DB.QueryRow(ctx, reviewSelect+` WHERE id=$1`, id))
 	if err != nil {
-		return true, err
+		result.Cause = err
+		return result, err
 	}
 	request := &contentpb.ApplyReviewDecisionRequest{DecisionId: r.GetDecisionId(), ReviewId: r.Id, TaskId: r.Snapshot.Submission.Id, SubmissionRevision: r.Snapshot.Submission.Revision, Outcome: r.Decision, Reason: r.Reason}
+	result.Stage = "call_content"
 	call, cancel := context.WithTimeout(ctx, 5*time.Second)
 	receipt, err := s.Content.ApplyReviewDecision(call, request)
 	cancel()
@@ -402,35 +414,47 @@ func (s *Server) DeliverDecision(ctx context.Context) (bool, error) {
 		switch status.Code(err) {
 		case codes.Aborted, codes.AlreadyExists, codes.InvalidArgument, codes.FailedPrecondition:
 			blocked = true
+			result.Reason = status.Convert(err).Message()
 		default:
-			return true, err
+			result.Cause = err
+			return result, err
 		}
 	}
 	if !blocked && (receipt.GetDecisionId() != request.DecisionId || receipt.GetReviewId() != r.Id || receipt.GetRevision() != request.SubmissionRevision || ((r.Decision == contentpb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && receipt.GetState() != "published") || (r.Decision == contentpb.ReviewOutcome_REVIEW_OUTCOME_REJECT && receipt.GetState() != "rejected"))) {
-		return true, status.Error(codes.Unavailable, "invalid_review_receipt")
+		err = status.Error(codes.Unavailable, "invalid_review_receipt")
+		result.Cause = err
+		result.Stage = "validate_receipt"
+		return result, err
 	}
+	result.Stage = "confirm_lease"
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
-		return true, unavailable(e)
+		result.Cause = e
+		return result, unavailable(e)
 	}
 	defer tx.Rollback(ctx)
 	var held *string
 	e = tx.QueryRow(ctx, `SELECT lease_token FROM moderation.decision_outbox WHERE id=$1 FOR UPDATE`, id).Scan(&held)
 	if e != nil {
-		return true, unavailable(e)
+		result.Cause = e
+		return result, unavailable(e)
 	}
 	if held == nil || *held != token {
-		return true, nil
+		result.Outcome = "lease_lost"
+		return result, nil
 	}
 	if blocked {
+		result.Stage = "persist_blocked"
 		_, e = tx.Exec(ctx, `UPDATE moderation.reviews SET delivery_state='blocked' WHERE id=$1`, id)
 		if e == nil {
 			_, e = tx.Exec(ctx, `UPDATE moderation.decision_outbox SET blocked=true,lease_token=NULL WHERE id=$1`, id)
 		}
 	} else {
+		result.Stage = "persist_applied"
 		raw, marshalErr := protojson.Marshal(receipt)
 		if marshalErr != nil {
-			return true, status.Error(codes.Internal, "internal_error")
+			result.Cause = marshalErr
+			return result, status.Error(codes.Internal, "internal_error")
 		}
 		final := "approved"
 		if r.Decision == contentpb.ReviewOutcome_REVIEW_OUTCOME_REJECT {
@@ -442,24 +466,24 @@ func (s *Server) DeliverDecision(ctx context.Context) (bool, error) {
 		}
 	}
 	if e != nil {
-		return true, unavailable(e)
+		result.Cause = e
+		return result, unavailable(e)
 	}
 	if e = tx.Commit(ctx); e != nil {
-		return true, unavailable(e)
+		result.Cause = e
+		return result, unavailable(e)
 	}
-	return true, err
+	if blocked {
+		result.Outcome = "blocked"
+		result.Stage = "downstream_business_conflict"
+		result.Cause = err
+		return result, nil
+	}
+	result.Outcome = "delivered"
+	return result, nil
 }
-func (s *Server) RunDelivery(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			call, cancel := context.WithTimeout(ctx, 7*time.Second)
-			s.DeliverDecision(call)
-			cancel()
-		}
-	}
+func (s *Server) RunDelivery(ctx context.Context, logger *slog.Logger) {
+	platform.RunOutbox(ctx, logger, "moderation_to_content", func(call context.Context) (platform.OutboxResult, error) {
+		return s.deliverDecision(call)
+	})
 }

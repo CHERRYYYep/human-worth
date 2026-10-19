@@ -104,7 +104,7 @@ func run() error {
 			return e
 		}
 		defer c.Close()
-		go app.RunReviewDelivery(ctx, moderationpb.NewModerationServiceClient(c))
+		go app.RunReviewDelivery(ctx, moderationpb.NewModerationServiceClient(c), runtime.Log)
 	}
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)

@@ -34,6 +34,15 @@ Moderation 独立迁移：`reviews` 以 review ID 及 `(task_id, submission_revi
 
 双方用单条 `UPDATE ... FROM (SELECT ... FOR UPDATE SKIP LOCKED)` 领取，持久化随机 lease token 和到期时间；提交领取后再 RPC。只持当前 token 的 worker 可以确认投递，超时或崩溃由到期租约恢复。RPC 关闭自动重试；后台用同一消息/决定 ID 至少一次重试。响应丢失由接收方唯一约束/回执找回，不重建案件或重复应用。
 
+### Outbox worker 调度与失败记录（2026-10-19）
+
+Content → Moderation 与 Moderation → Content 使用同一 `platform.RunOutbox` 管理 1 秒轮询、每轮最多 7 秒、服务取消和结构化日志；每轮仍只调用一次模块投递操作，各副本仍由数据库租约协调，**不连续扫积压、不并行消费、不增加新的退避策略**。下游 RPC 的 5 秒预算、领取/确认 SQL、消息幂等、回执校验与 `blocked` 判定继续由所属服务处理；共享 runner 不决定哪些错误可重试。
+
+- 没有待办、租约已被其他执行者接管、正常服务关闭均不记错误日志。
+- 可重试技术失败记 `WARN`，包括链路、阶段、结果分类、gRPC code、格式受限的稳定错误 reason，以及已知的待办 ID。数据库 cause 以 SQLSTATE/约束名记录，避免把 SQL 详情或行数据写入日志；不符合稳定 reason 格式的异常消息统一记为 `unspecified`。
+- 业务不可恢复冲突只有在 `blocked` 状态和 outbox 变更确认提交后才记 `ERROR`；未能提交 blocked 的故障仍按可重试技术失败记 `WARN`。不记录审核正文、完整快照、凭据或原始下游响应体。
+- 执行结果仍以现有 outbox、租约与审核状态为准；本轮不新增数据库字段。若以后需要查询最近失败，应评估为 outbox 增加 `last_attempt_at`、`last_error_stage`、受控分类码等字段，明确保留/覆盖策略和清理周期，并经迁移、runtime 最小权限和双副本恢复验收后实施。不得保存作品正文或不受控的完整异常详情。
+
 建案请求只接受 mTLS content，载荷来自已持久化快照。管理员决定先锁案件，保存唯一决定及 outbox，不在事务里调用 Content。相同 decision/reason 重试返回同一案件，不重写原 reviewer；不同决定/理由 409。Content 核对 review ID、task ID、submission revision、当前 pending 状态，并在同事务应用状态/展示和回执。旧决定精确重放只返回旧回执，不重新打开资源。不可恢复的版本冲突标记 blocked；不能谎称已生效。
 
 批准理由可选，提供时原样保存于 Moderation 并随 outbox 传给 Content，参与决定幂等比较及执行回执摘要；缺省/空理由仍兼容。驳回理由仍必填且不能全为空白。两种理由均要求有效 UTF-8、无 NUL、最多 4000 **UTF-8 字节**（不是 4000 个字符），不截断。Content 草稿的 `rejectionReason` 仍只用于驳回，不以批准理由冒充驳回状态。新增 `002_approval_reason.sql` 替换理由 CHECK，保留 001 及校验和；先迁移再滚动服务，旧案件/理由不改写。002 后就绪才放行。以上为 **Agent Self-Claimed** 兼容实现。
@@ -137,3 +146,15 @@ Moderation 独立迁移：`reviews` 以 review ID 及 `(task_id, submission_revi
 最终 kind namespace `human-worth-verify-c778d351` 已删除。Moderation 专项62.59秒：停掉两个真实 Moderation Pod，等待15秒探针窗口，确认两个 Gateway ready endpoints，再用每请求新TCP的 HTTPS NodePort/Service 链路检查会话/草稿/完整文件上传/登录发起/持久送审成功、审核列表503；恢复后自动投递，带中文批准理由完成审核、回读与幂等重试，过审文件读取成功。Content停机子测试仍是诊断port-forward，不扩大声明。首次kind因缺合成OAuth配置退出1，记录保留于 `kind-attempt1.log`；补齐隔离前置条件后完整重跑退出0，未掩盖失败。
 
 本地必要验证为 **PASS，可提交复审**。没有使用临时GOCACHE（`/home/cherry/.cache/go-build`）；临时测试数据库/S3容器、凭据、namespace均已清理，未改产品数据。未commit/push/创建PR、未部署公网，未进行真人Google登录或新增公网验收，生产S3 HA/远端GitHub CI仍不在本轮证据内。
+
+## 11. 2026-10-19 共享 outbox runner 与失败日志（Agent Self-Claimed）
+
+Content 与 Moderation 的后台循环现统一调用 `internal/platform.RunOutbox`；各自投递实现返回操作阶段、已知审核 ID、结果分类及内部错误类型信息。`DeliverReview` / `DeliverDecision` 保留供既有调用方使用的布尔结果包装，模块 SQL、租约、RPC 和回执逻辑仍各自维护。Content 在确认 UPDATE 后检查影响行数；陈旧租约记录为 `lease_lost`，不误记为已投递。
+
+runner 保持 1 秒轮询、7 秒单轮 deadline、每 tick 调用一次；无待办、租约丢失和服务取消不产出错误日志。技术错误以 `WARN outbox_delivery_failed` 记录，含链路、阶段、结果、gRPC code、稳定错误信息和可用的审核 ID。PostgreSQL cause 只输出 SQLSTATE/约束名，避免 SQL 行详情。Moderation 仅在 `delivery_state=blocked` 与 outbox `blocked` 的事务提交成功后，输出 `ERROR outbox_delivery_blocked`；blocked 持久化/提交失败仍是 `WARN` 技术错误。无迁移或新字段。
+
+失败观察暂用结构化日志。后续若需查询型运维界面，可评估为 outbox 增加最近尝试时间、失败阶段与受控错误分类等列；届时需定义覆盖/保留语义、清理周期与最小列权限，并测试双副本恢复。当前不保存正文或完整异常详情。
+
+本地验证：`go test -race ./... -count=1`、`go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...` 均退出 0；`go test -race -tags=integration ./internal/identity -run '^TestModerationHTTPOutbox$' -count=1 -timeout=180s -v` 使用一次性 PostgreSQL 18 退出 0。新增真实数据库场景在下游返回可阻塞业务冲突时，等 outbox 和 review 均提交 blocked 后由 runner 写出结构化 `ERROR`，并核对日志审核 ID、阶段及持久状态。`internal/platform` 单元测试覆盖技术失败 `WARN`、blocked `ERROR`、空队列/服务关闭静默及数据库错误详情脱敏。根目录 `npm run ci` 退出 0（5 个 Node、27 个 Python 测试），文档链接与 `git diff --check` 通过。测试 PostgreSQL 与私有 DSN 已清理。
+
+以上是本地代码、真实 PostgreSQL/mTLS 服务集成与项目检查；没有运行 kind、远端 GitHub CI、自动 Deploy Action 或公网部署。本次无 Proto/schema/前端改动，也未引入积压加速、并行消费或退避策略。

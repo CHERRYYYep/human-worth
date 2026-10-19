@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
@@ -56,6 +57,19 @@ func (c *lostCaseResponse) CreateReviewCase(ctx context.Context, r *moderationpb
 type lostDecisionResponse struct {
 	contentpb.ContentServiceClient
 	once sync.Once
+}
+
+type blockedDecisionResponse struct{ contentpb.ContentServiceClient }
+
+func (blockedDecisionResponse) ApplyReviewDecision(context.Context, *contentpb.ApplyReviewDecisionRequest, ...grpc.CallOption) (*contentpb.ApplyReviewDecisionResponse, error) {
+	return nil, status.Error(codes.FailedPrecondition, "submission_revision_conflict")
+}
+
+type channelLogWriter struct{ records chan string }
+
+func (w channelLogWriter) Write(p []byte) (int, error) {
+	w.records <- string(p)
+	return len(p), nil
 }
 
 func (c *lostDecisionResponse) ApplyReviewDecision(ctx context.Context, r *contentpb.ApplyReviewDecisionRequest, opts ...grpc.CallOption) (*contentpb.ApplyReviewDecisionResponse, error) {
@@ -423,6 +437,57 @@ func TestModerationHTTPOutbox(t *testing.T) {
 		must(t, l.db.QueryRow(t.Context(), `SELECT count(*) FROM content.review_requests WHERE task_id=$1`, task.ID).Scan(&n))
 		if n != 2 {
 			t.Fatal("history not preserved")
+		}
+	})
+	t.Run("blocked_delivery_logs_error_after_persisting_state", func(t *testing.T) {
+		blockedHeaders := make(map[string]string, len(ah)+1)
+		for key, value := range ah {
+			blockedHeaders[key] = value
+		}
+		blockedHeaders["Idempotency-Key"] = "blocked-review-flow-0001"
+		rr := request(alice, "POST", "/api/tasks", draft(upload.Asset.ID), blockedHeaders)
+		httpStatus(t, rr, 201)
+		var blockedTask draftResult
+		readJSON(t, rr, &blockedTask)
+		rr = request(alice, "POST", "/api/me/tasks/"+blockedTask.ID+"/review-requests", `{"expectedRevision":1}`, blockedHeaders)
+		httpStatus(t, rr, 200)
+		readJSON(t, rr, &blockedTask)
+		if _, err := cs.DeliverReview(t.Context(), sender); err != nil {
+			t.Fatal("deliver review:", err)
+		}
+		rr = request(admin, "POST", "/api/admin/reviews/"+*blockedTask.ReviewID+"/decision", `{"decision":"approve"}`, mh)
+		httpStatus(t, rr, 202)
+
+		records := make(chan string, 1)
+		logger := slog.New(slog.NewJSONHandler(channelLogWriter{records: records}, nil))
+		ms.Content = blockedDecisionResponse{ContentServiceClient: moderatorContent}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { ms.RunDelivery(ctx, logger); close(done) }()
+		var record string
+		select {
+		case record = <-records:
+		case <-time.After(5 * time.Second):
+			cancel()
+			<-done
+			t.Fatal("blocked result was not logged")
+		}
+		cancel()
+		<-done
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(record), &fields); err != nil {
+			t.Fatal("invalid structured log:", err)
+		}
+		if fields["level"] != "ERROR" || fields["msg"] != "outbox_delivery_blocked" || fields["outcome"] != "blocked" || fields["delivery"] != "moderation_to_content" || fields["item_id"] != *blockedTask.ReviewID || fields["stage"] != "downstream_business_conflict" {
+			t.Fatalf("wrong blocked log: %v", fields)
+		}
+		var deliveryState string
+		var blocked bool
+		if err := l.db.QueryRow(t.Context(), `SELECT r.delivery_state,o.blocked FROM moderation.reviews r JOIN moderation.decision_outbox o ON o.id=r.id WHERE r.id=$1`, *blockedTask.ReviewID).Scan(&deliveryState, &blocked); err != nil {
+			t.Fatal(err)
+		}
+		if deliveryState != "blocked" || !blocked {
+			t.Fatalf("ERROR was logged before blocked state persisted: %s/%t", deliveryState, blocked)
 		}
 	})
 	t.Run("runtime_boundaries_and_revocation", func(t *testing.T) {
