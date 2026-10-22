@@ -75,7 +75,7 @@ func (s *Service) ActivateAttempt(ctx context.Context, q *dto.ActivateAttemptReq
 		if r.GrantHash != "" {
 			return domain.Conflict("attempt_already_activated")
 		}
-		out.Grant = domain.NewID("grant_")
+		out.Grant = newID("grant_")
 		r.GrantHash = domain.Hash([]byte(out.Grant))
 		r.ExecutionInstanceId = q.ExecutionInstanceId
 		out.ExpiresAt = r.Assignment.Deadline
@@ -205,7 +205,7 @@ func (s *Service) ClaimWork(ctx context.Context, q *dto.ClaimWorkRequest) (*dto.
 					return err
 				}
 				if err = s.checkInputs(ctx, r.State, r.Assignment); err != nil {
-					if domain.ErrorCode(err) == domain.Unavailable || domain.ErrorCode(err) == domain.DeadlineExceeded {
+					if domain.ErrorCode(err) == domain.Unavailable || domain.ErrorCode(err) == domain.DeadlineExceeded || domain.ErrorCode(err) == domain.Canceled {
 						return err
 					}
 					if domain.Reason(err) == "ranker_fit_invalidated" || domain.Reason(err) == "input_policy_changed" {
@@ -214,7 +214,7 @@ func (s *Service) ClaimWork(ctx context.Context, q *dto.ClaimWorkRequest) (*dto.
 					domain.Finish(r.State, "failed", "input_or_fit_invalidated")
 				} else {
 					r.Epoch++
-					attemptID := domain.NewID("attempt_")
+					attemptID := newID("attempt_")
 					a := r.Assignment
 					a.Attempt = &domain.AttemptRef{RunId: runID, WorkItemId: a.WorkItemId, AttemptId: attemptID, LeaseEpoch: r.Epoch, WorkerInstanceId: q.WorkerInstanceId}
 					expires := r.Now.Add(s.engine.Config.Lease)
@@ -279,7 +279,7 @@ func (s *Service) ReserveModelCall(ctx context.Context, q *dto.ReserveModelCallR
 		if count >= int(r.Assignment.ModelCallLimit) || r.ReservedCalls >= r.Run.Configuration.Budget.Amount {
 			return domain.Reject(domain.ResourceExhausted, "model_budget_exhausted")
 		}
-		out.ReservationId = domain.NewID("call_")
+		out.ReservationId = newID("call_")
 		out.State = "reserved"
 		out.DispatchPermit = true
 		if err = tx.AddModelCall(ctx, r, q, out.ReservationId); err != nil {
@@ -358,7 +358,7 @@ func (s *Service) CompleteWork(ctx context.Context, q *dto.CompleteWorkRequest) 
 				if f := part.GetFile(); f != nil {
 					response, err := s.asset.GetAsset(ctx, &dto.GetAssetRequest{AssetId: f.Id, Access: &domain.Access{TaskId: r.Run.TaskId, RunId: r.Run.Id, AttemptId: q.Attempt.AttemptId, Purpose: "output"}})
 					if err != nil {
-						return domain.UnavailableError()
+						return domain.DependencyError(err)
 					}
 					if response.Asset == nil || *response.Asset != *f || f.RunId != r.Run.Id || f.AttemptId != q.Attempt.AttemptId {
 						return domain.Denied("artifact_not_owned")
@@ -367,7 +367,7 @@ func (s *Service) CompleteWork(ctx context.Context, q *dto.CompleteWorkRequest) 
 			}
 		}
 		result := domain.Result{Prompt: q.GetPrompt(), Rankings: q.GetRankings(), Generated: q.GetGenerated(), Judgment: q.GetJudgment()}
-		if err = s.engine.ApplyResult(r.State, result, q.Attempt.AttemptId, s.fitBinding(r.State), r.Now); err != nil {
+		if err = s.engine.ApplyResult(r.State, result, q.Attempt.AttemptId, s.fitBinding(r.State), newID("work_"), r.Now); err != nil {
 			return err
 		}
 		return tx.AddResult(ctx, q.Attempt, owner, q.ResultDigest)

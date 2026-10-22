@@ -331,7 +331,7 @@ func TestBrowserUploadFailures(t *testing.T) {
 					t.Fatal("unconfirmed rejection or failed deletion lost staging", statErr)
 				}
 				if failure == "delete" || failure == "commit_response_lost" {
-					if err := CleanupExpired(t.Context(), f.db, f.storage); err != nil {
+					if err := cleanupExpiredForTest(t.Context(), f.db, f.storage); err != nil {
 						t.Fatal("durable cleanup retry:", err)
 					}
 					if _, err := f.storage.Stat(t.Context(), staging); !errors.Is(err, os.ErrNotExist) {

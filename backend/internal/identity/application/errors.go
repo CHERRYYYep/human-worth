@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/identity/domain"
 )
@@ -8,22 +9,38 @@ import (
 type ErrorKind string
 
 const (
-	Invalid         ErrorKind = "invalid"
-	Unauthenticated ErrorKind = "unauthenticated"
-	Forbidden       ErrorKind = "forbidden"
-	NotFound        ErrorKind = "not_found"
-	AlreadyExists   ErrorKind = "already_exists"
-	Aborted         ErrorKind = "aborted"
-	Unavailable     ErrorKind = "unavailable"
+	Invalid          ErrorKind = "invalid"
+	Unauthenticated  ErrorKind = "unauthenticated"
+	Forbidden        ErrorKind = "forbidden"
+	NotFound         ErrorKind = "not_found"
+	AlreadyExists    ErrorKind = "already_exists"
+	Aborted          ErrorKind = "aborted"
+	Unavailable      ErrorKind = "unavailable"
+	Canceled         ErrorKind = "canceled"
+	DeadlineExceeded ErrorKind = "deadline_exceeded"
 )
 
 type Error struct {
 	Kind   ErrorKind
 	Reason string
+	cause  error
 }
 
 func (e *Error) Error() string                   { return e.Reason }
+func (e *Error) Unwrap() error                   { return e.cause }
 func Reject(kind ErrorKind, reason string) error { return &Error{Kind: kind, Reason: reason} }
+
+// DependencyFailure keeps internal causes without exposing dependency messages.
+func DependencyFailure(err error, reason string) *Error {
+	kind := Unavailable
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		kind, reason = DeadlineExceeded, "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		kind, reason = Canceled, "request_cancelled"
+	}
+	return &Error{Kind: kind, Reason: reason, cause: err}
+}
 
 // ErrNotFound is internal to persistence ports; each use case chooses what can be disclosed.
 var ErrNotFound = errors.New("record not found")
@@ -44,7 +61,7 @@ func Failure(err error) *Error {
 	case errors.Is(err, domain.ErrRevisionConflict):
 		kind = Aborted
 	default:
-		return &Error{Kind: Unavailable, Reason: "identity_unavailable"}
+		return DependencyFailure(err, "identity_unavailable")
 	}
-	return &Error{Kind: kind, Reason: err.Error()}
+	return &Error{Kind: kind, Reason: err.Error(), cause: err}
 }

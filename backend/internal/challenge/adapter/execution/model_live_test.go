@@ -5,6 +5,7 @@ package execution
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"os"
 	"strings"
@@ -71,7 +72,7 @@ func TestLiveExecutorCompletion(t *testing.T) {
 	a, provider, relay, rpc := testExecutionRelay(t, upstream)
 	a.GetExecute().Initial.Description = "这是协议测试。只调用 run_command 一次，command 准确为 cat /work/input/probe.txt；把工具返回的完整文本作为唯一 text 作品，不加前后缀，不另建文件。然后按规定 JSON 格式交付。"
 	a.GetExecute().Initial.WorkRequirements = "一件 text 类型作品，正文与工具结果完全相同。"
-	value := "completion-executor-" + domain.NewID("")
+	value := "completion-executor-" + rand.Text()
 	commands := 0
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()

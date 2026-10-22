@@ -17,6 +17,7 @@ import (
 	"time"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
+	assetapp "github.com/KDZZZZZZ/human-worth/backend/internal/asset/application"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"google.golang.org/grpc/codes"
@@ -59,6 +60,19 @@ func newS3Integration(t *testing.T) (*S3Storage, *S3Storage) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		pending := s3.NewListMultipartUploadsPaginator(a.client, &s3.ListMultipartUploadsInput{Bucket: aws.String(a.bucket)})
+		for pending.HasMorePages() {
+			page, e := pending.NextPage(ctx)
+			if e != nil {
+				t.Error(e)
+				return
+			}
+			for _, u := range page.Uploads {
+				if e = a.Delete(ctx, aws.ToString(u.Key)); e != nil {
+					t.Error(e)
+				}
+			}
+		}
 		pages := s3.NewListObjectsV2Paginator(a.client, &s3.ListObjectsV2Input{Bucket: aws.String(a.bucket)})
 		for pages.HasMorePages() {
 			page, e := pages.NextPage(ctx)
@@ -96,6 +110,7 @@ func objectBytes(t *testing.T, store Storage, key string) []byte {
 }
 func TestS3StorageIntegration(t *testing.T) {
 	a, b := newS3Integration(t)
+	storageWriteContract(t, a)
 	key, final := "assets/ast_test/staging/upload", "assets/ast_test/content"
 	data := bytes.Repeat([]byte("real shared object storage\n"), 12000)
 	offset := 0
@@ -181,21 +196,25 @@ func TestAssetS3SharedPostgresIntegration(t *testing.T) {
 		}
 		return staging, final
 	}
-	data := []byte("shared database and private S3 bytes")
+	data := bytes.Repeat([]byte("s"), maxChunkBytes+37)
 	created := create("s3-shared-upload-0001", data)
-	if _, err := browserUpload(t, ca, created.UploadSession.Id, "alice", data[:7]); err != nil {
+	if _, err := browserUpload(t, ca, created.UploadSession.Id, "alice", data[:maxChunkBytes]); err != nil {
 		t.Fatal(err)
 	}
 	progress, err := cb.GetUploadSession(t.Context(), &pb.GetUploadSessionRequest{ActorAssertion: "alice", UploadSessionId: created.UploadSession.Id})
-	if err != nil || progress.GetUploadSession().GetReceivedBytes() != 7 {
+	if err != nil || progress.GetUploadSession().GetReceivedBytes() != maxChunkBytes {
 		t.Fatal("replica B progress", err)
 	}
 	staging, final := keys(created.Asset.Id)
 	// Object PUT ahead of DB: another replica resumes from the DB offset.
-	if err = a.WriteAt(t.Context(), staging, 7, []byte("uncommitted bytes")); err != nil {
+	var multipartID string
+	if err = f.db.QueryRow(t.Context(), `SELECT storage_upload_id FROM asset.assets WHERE id=$1`, created.Asset.Id).Scan(&multipartID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = browserUploadAt(t, cb, created.UploadSession.Id, "alice", 7, data[7:]); err != nil {
+	if _, err = a.WritePart(t.Context(), staging, multipartID, 2, []byte("uncommitted bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = browserUploadAt(t, cb, created.UploadSession.Id, "alice", maxChunkBytes, data[maxChunkBytes:]); err != nil {
 		t.Fatal(err)
 	}
 	completed, err := cb.CompleteUpload(t.Context(), &pb.CompleteUploadRequest{ActorAssertion: "alice", UploadSessionId: created.UploadSession.Id})
@@ -236,10 +255,11 @@ func TestAssetS3SharedPostgresIntegration(t *testing.T) {
 	}
 	// Copy+delete succeeded, DB still active/staging: a different server recovers.
 	recovering := create("s3-recover-upload-01", data)
-	if _, err = browserUpload(t, ca, recovering.UploadSession.Id, "alice", data); err != nil {
+	if _, err = browserUpload(t, ca, recovering.UploadSession.Id, "alice", data[:maxChunkBytes], data[maxChunkBytes:]); err != nil {
 		t.Fatal(err)
 	}
 	stage2, final2 := keys(recovering.Asset.Id)
+	completeTestStaging(t, f, a, recovering.Asset.Id, stage2, int64(len(data)))
 	if err = a.Move(t.Context(), stage2, final2); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +269,7 @@ func TestAssetS3SharedPostgresIntegration(t *testing.T) {
 	// Abandoned staging/final (including copy-without-delete) can be cleaned;
 	// an already-ready final must survive all expiration passes.
 	expired := create("s3-expired-upload-01", data)
-	if _, err = browserUpload(t, ca, expired.UploadSession.Id, "alice", data[:7]); err != nil {
+	if _, err = browserUpload(t, ca, expired.UploadSession.Id, "alice", data[:maxChunkBytes]); err != nil {
 		t.Fatal(err)
 	}
 	stage3, final3 := keys(expired.Asset.Id)
@@ -259,10 +279,10 @@ func TestAssetS3SharedPostgresIntegration(t *testing.T) {
 	if _, err = f.db.Exec(t.Context(), "UPDATE asset.upload_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1 OR id=$2", expired.UploadSession.Id, created.UploadSession.Id); err != nil {
 		t.Fatal(err)
 	}
-	if err = CleanupExpired(t.Context(), f.runtimeDB, b); err != nil {
+	if err = cleanupExpiredForTest(t.Context(), f.runtimeDB, b); err != nil {
 		t.Fatal(err)
 	}
-	if err = CleanupExpired(t.Context(), f.runtimeDB, a); err != nil {
+	if err = cleanupExpiredForTest(t.Context(), f.runtimeDB, a); err != nil {
 		t.Fatal("cleanup repeat", err)
 	}
 	for _, key := range []string{stage3, final3} {
@@ -308,7 +328,7 @@ func TestAssetS3SharedPostgresIntegration(t *testing.T) {
 	if _, err = cb.AbortUpload(t.Context(), &pb.AbortUploadRequest{ActorAssertion: "alice", UploadSessionId: concurrent.UploadSession.Id}); err != nil {
 		t.Fatal(err)
 	}
-	if err = CleanupExpired(t.Context(), f.runtimeDB, b); err != nil {
+	if err = cleanupExpiredForTest(t.Context(), f.runtimeDB, b); err != nil {
 		t.Fatal(err)
 	}
 	// New server instance, same remote bucket and DB.
@@ -317,4 +337,24 @@ func TestAssetS3SharedPostgresIntegration(t *testing.T) {
 	if _, err = restarted.GetAssetMetadata(t.Context(), &pb.GetAssetMetadataRequest{ActorAssertion: "alice", AssetId: created.Asset.Id}); err != nil {
 		t.Fatal("restart metadata", err)
 	}
+}
+
+func completeTestStaging(t *testing.T, f *assetIntegration, storage Storage, id, key string, size int64) {
+	t.Helper()
+	var uploadID string
+	var parts []assetapp.Part
+	if err := f.runtimeDB.QueryRow(t.Context(), `SELECT storage_upload_id,storage_parts FROM asset.assets WHERE id=$1`, id).Scan(&uploadID, &parts); err != nil {
+		t.Fatal(err)
+	}
+	if uploadID == "" {
+		return
+	}
+	multipart, ok := storage.(assetapp.ChallengeMultipartStorage)
+	if !ok {
+		t.Fatal("storage does not support multipart completion")
+	}
+	if err := multipart.CompleteMultipart(t.Context(), key, uploadID, parts); err != nil {
+		t.Fatal(err)
+	}
+	_ = size
 }

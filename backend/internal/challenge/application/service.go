@@ -46,7 +46,7 @@ func storage(err error) error {
 	if domain.ErrorCode(err) != domain.Unknown {
 		return err
 	}
-	return domain.UnavailableError()
+	return domain.DependencyError(err)
 }
 func (s *Service) admin(ctx context.Context, assertion, operation string) (string, error) {
 	return s.administrator.Verify(ctx, assertion, operation)
@@ -77,7 +77,7 @@ func (s *Service) start(ctx context.Context, actor, task, parent, operation, key
 	if previous, err := s.reader.LookupRun(ctx, lookup); !errors.Is(err, ErrNotFound) {
 		return previous, storage(err)
 	}
-	st := &domain.State{Run: &domain.Run{Id: domain.NewID("run_"), TaskId: task, ParentRunId: parent, AdministratorId: actor, Status: "queued", Stage: "preparing_materials", Configuration: domain.CloneRunConfiguration(cfg), RankerFit: &domain.RankerFit{Status: "pending"}}, Pending: "open", RankerPrompt: cfg.Ranker.Prompt}
+	st := &domain.State{Run: &domain.Run{Id: newID("run_"), TaskId: task, ParentRunId: parent, AdministratorId: actor, Status: "queued", Stage: "preparing_materials", Configuration: domain.CloneRunConfiguration(cfg), RankerFit: &domain.RankerFit{Status: "pending"}}, Pending: "open", RankerPrompt: cfg.Ranker.Prompt}
 	if st.RankerPrompt == "" {
 		st.RankerPrompt = "按照原始任务要求比较所有作品，给出完整排名和可核验的作品依据。"
 	}
@@ -231,7 +231,7 @@ func (s *Service) RegisterCandidate(ctx context.Context, q *dto.RegisterCandidat
 		return &dto.RegisterCandidateResponse{Receipt: previous.Receipt}, nil
 	}
 	if err != nil && domain.ErrorCode(err) != domain.NotFound {
-		return nil, domain.UnavailableError()
+		return nil, domain.DependencyError(err)
 	}
 	err = s.mutate(ctx, q.RunId, func(tx Tx, r *Record) error {
 		if r.Run.Status != "active" || r.Run.Stage != "registering" || r.Feedback.GetWork().GetId() != q.CandidateId {

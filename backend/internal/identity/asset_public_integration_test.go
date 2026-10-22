@@ -57,7 +57,7 @@ func TestReviewedAssetHTTPAccess(t *testing.T) {
 	access := contentpb.NewContentServiceClient(contentConn("asset"))
 	gwContent := contentpb.NewContentServiceClient(contentConn("gateway"))
 	store := asset.FileStorage{Root: t.TempDir()}
-	as := &asset.Server{DB: adb, Identity: l.client(t, 0, "asset", l.pki), Storage: store, Content: access}
+	as := layeredAssetServer(adb, store, l.client(t, 0, "asset", l.pki), access)
 	assetConn := func(caller string) *grpc.ClientConn {
 		return serviceTestGRPC(t, l, "asset", caller, asset.Authorization, func(g *grpc.Server) { assetpb.RegisterAssetServiceServer(g, as) })
 	}

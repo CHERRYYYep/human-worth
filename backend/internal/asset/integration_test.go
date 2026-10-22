@@ -3,6 +3,7 @@
 package asset
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -27,6 +28,8 @@ import (
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
+	assetapp "github.com/KDZZZZZZ/human-worth/backend/internal/asset/application"
+	assetpostgres "github.com/KDZZZZZZ/human-worth/backend/internal/asset/repository/postgres"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,6 +48,34 @@ type assetIntegration struct {
 	storage   FileStorage
 	pki       *assetTestPKI
 	identity  *fakeIdentityClient
+}
+
+func browserUploadUseCase(db *pgxpool.Pool, storage Storage) assetapp.BrowserUploadUseCase {
+	useCase := assetapp.BrowserUploadUseCase{Repository: assetpostgres.UploadRepository{DB: db}, Storage: storage, ChunkBytes: maxChunkBytes, MaxAssetBytes: maxAssetBytes}
+	if multipart, ok := storage.(assetapp.MultipartStorage); ok {
+		useCase.Multipart = multipart
+	}
+	return useCase
+}
+
+func uploadSessionUseCase(db *pgxpool.Pool) assetapp.SessionUseCase {
+	return assetapp.SessionUseCase{Repository: assetpostgres.UploadRepository{DB: db}}
+}
+
+func completeUploadUseCase(db *pgxpool.Pool, storage Storage) assetapp.CompleteUploadUseCase {
+	return assetapp.CompleteUploadUseCase{Repository: assetpostgres.UploadRepository{DB: db}, Storage: storage}
+}
+
+func abortUploadUseCase(db *pgxpool.Pool, storage Storage) assetapp.AbortUploadUseCase {
+	return assetapp.AbortUploadUseCase{Repository: assetpostgres.UploadRepository{DB: db}, Storage: storage}
+}
+
+func challengeUploadUseCase(db *pgxpool.Pool, storage Storage) assetapp.ChallengeUploadUseCase {
+	useCase := assetapp.ChallengeUploadUseCase{Repository: assetpostgres.UploadRepository{DB: db}, Storage: storage, ChunkBytes: maxChunkBytes, MaxAssetBytes: maxAssetBytes}
+	if multipart, ok := storage.(assetapp.ChallengeMultipartStorage); ok {
+		useCase.Multipart = multipart
+	}
+	return useCase
 }
 
 func TestAssetPostgresIntegration(t *testing.T) {
@@ -130,7 +161,7 @@ func newAssetIntegration(t *testing.T, dsn string) *assetIntegration {
 	if _, err = ownerDB.Exec(ctx, "CREATE SCHEMA should_be_denied"); err == nil {
 		t.Fatal("migration role unexpectedly has database-wide CREATE")
 	}
-	if _, err = db.Exec(ctx, "GRANT USAGE ON SCHEMA asset TO "+roleRuntime+"; GRANT SELECT ON asset.schema_migrations,asset.assets,asset.upload_sessions TO "+roleRuntime+"; GRANT INSERT ON asset.assets,asset.upload_sessions TO "+roleRuntime+"; GRANT UPDATE(state,detected_media_type,received_bytes,actual_sha256,completed_at,updated_at) ON asset.assets TO "+roleRuntime+"; GRANT UPDATE(state,received_bytes,updated_at,storage_cleaned_at) ON asset.upload_sessions TO "+roleRuntime); err != nil {
+	if _, err = db.Exec(ctx, "GRANT USAGE ON SCHEMA asset TO "+roleRuntime+"; GRANT SELECT ON asset.schema_migrations,asset.assets,asset.upload_sessions TO "+roleRuntime+"; GRANT INSERT ON asset.assets,asset.upload_sessions TO "+roleRuntime+"; GRANT UPDATE(state,detected_media_type,received_bytes,actual_sha256,completed_at,updated_at,storage_upload_id,storage_parts,storage_cleaned_at) ON asset.assets TO "+roleRuntime+"; GRANT UPDATE(state,received_bytes,updated_at,storage_cleaned_at) ON asset.upload_sessions TO "+roleRuntime); err != nil {
 		t.Fatalf("grant runtime permissions: %v", err)
 	}
 	runtimeCfg := cfg.Copy()
@@ -162,8 +193,8 @@ func (f *assetIntegration) startStorage(caller string, storage Storage) (pb.Asse
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)), grpc.UnaryInterceptor(Authorization), grpc.StreamInterceptor(AuthorizationStream))
-	pb.RegisterAssetServiceServer(grpcServer, &Server{DB: f.runtimeDB, Identity: f.identity, Storage: storage})
+	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)), grpc.UnaryInterceptor(Authorization), grpc.StreamInterceptor(AuthorizationStream), grpc.MaxRecvMsgSize(platform.AssetUploadMessageBytes))
+	pb.RegisterAssetServiceServer(grpcServer, &Server{DB: f.runtimeDB, Identity: f.identity, Storage: storage, BrowserUpload: browserUploadUseCase(f.runtimeDB, storage), UploadSessions: uploadSessionUseCase(f.runtimeDB), CompleteUseCase: completeUploadUseCase(f.runtimeDB, storage), AbortUseCase: abortUploadUseCase(f.runtimeDB, storage), ChallengeUpload: challengeUploadUseCase(f.runtimeDB, storage)})
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		f.t.Fatal(err)
@@ -174,7 +205,7 @@ func (f *assetIntegration) startStorage(caller string, storage Storage) (pb.Asse
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(512<<10), grpc.MaxCallSendMsgSize(512<<10)))
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(512<<10), grpc.MaxCallSendMsgSize(platform.AssetUploadMessageBytes)))
 	if err != nil {
 		grpcServer.Stop()
 		listener.Close()
@@ -191,7 +222,7 @@ func (f *assetIntegration) startStorage(caller string, storage Storage) (pb.Asse
 func (f *assetIntegration) testPrivateUploadPersistsAndRecovers(t *testing.T) {
 	client, stop := f.start("gateway")
 	defer stop()
-	data := []byte("hello asset integration")
+	data := bytes.Repeat([]byte("a"), maxChunkBytes+23)
 	digest := sha256.Sum256(data)
 	created, err := client.CreateUploadSession(t.Context(), &pb.CreateUploadSessionRequest{ActorAssertion: "alice", IdempotencyKey: "asset-integration-key-01", OriginalFilename: "hello.txt", DeclaredMediaType: "text/plain", ExpectedBytes: int64(len(data)), ExpectedSha256: hex.EncodeToString(digest[:])})
 	if err != nil {
@@ -203,8 +234,8 @@ func (f *assetIntegration) testPrivateUploadPersistsAndRecovers(t *testing.T) {
 	if created.Asset.OwnerId != "account_alice" {
 		t.Fatalf("request could not override assertion owner: %q", created.Asset.OwnerId)
 	}
-	first := data[:5]
-	second := data[5:]
+	first := data[:maxChunkBytes]
+	second := data[maxChunkBytes:]
 	response, err := browserUpload(t, client, created.UploadSession.Id, "alice", first)
 	if err != nil {
 		t.Fatal(err)
@@ -386,9 +417,9 @@ func (f *assetIntegration) testIdempotencyAndConcurrentOffsets(t *testing.T) {
 	if _, err = f.storage.Stat(t.Context(), rejectedKey); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rejected chunk created staging object: %v", err)
 	}
-	concurrentData := []byte("abcd")
+	concurrentData := []byte("ab")
 	concurrentHash := sha256.Sum256(concurrentData)
-	concurrent, err := client.CreateUploadSession(t.Context(), &pb.CreateUploadSessionRequest{ActorAssertion: "alice", IdempotencyKey: "concurrent-key-0001", OriginalFilename: "concurrent.txt", DeclaredMediaType: "text/plain", ExpectedBytes: 4, ExpectedSha256: hex.EncodeToString(concurrentHash[:])})
+	concurrent, err := client.CreateUploadSession(t.Context(), &pb.CreateUploadSessionRequest{ActorAssertion: "alice", IdempotencyKey: "concurrent-key-0001", OriginalFilename: "concurrent.txt", DeclaredMediaType: "text/plain", ExpectedBytes: 2, ExpectedSha256: hex.EncodeToString(concurrentHash[:])})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +501,7 @@ func (f *assetIntegration) testIdempotencyAndConcurrentOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = browserUpload(t, client, aborted.UploadSession.Id, "alice", []byte("ab")); err != nil {
+	if _, err = browserUpload(t, client, aborted.UploadSession.Id, "alice", abortedData); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = client.AbortUpload(t.Context(), &pb.AbortUploadRequest{ActorAssertion: "alice", UploadSessionId: aborted.UploadSession.Id}); err != nil {
@@ -499,7 +530,7 @@ func (f *assetIntegration) testIdempotencyAndConcurrentOffsets(t *testing.T) {
 	if _, err = browserUpload(t, client, expired.UploadSession.Id, "alice", expiredData); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("expired upload status=%s, want FailedPrecondition", status.Code(err))
 	}
-	if err = CleanupExpired(t.Context(), f.runtimeDB, f.storage); err != nil {
+	if err = cleanupExpiredForTest(t.Context(), f.runtimeDB, f.storage); err != nil {
 		t.Fatal(err)
 	}
 	var expiredState, expiredAssetState string
@@ -678,10 +709,18 @@ func browserUploadAt(t *testing.T, client pb.AssetServiceClient, sessionID, asse
 		return nil, err
 	}
 	if err = stream.Send(&pb.UploadAssetRequest{ActorAssertion: assertion, UploadSessionId: sessionID, UploadAttemptId: "browser-attempt-0001", Offset: offset}); err != nil {
+		if errors.Is(err, io.EOF) {
+			return stream.CloseAndRecv()
+		}
 		return nil, err
 	}
 	for _, chunk := range chunks {
 		if err = stream.Send(&pb.UploadAssetRequest{Offset: offset, Chunk: chunk, ChunkSha256: sha256Hex(chunk)}); err != nil {
+			// A server may reject the metadata before the client sends a chunk.
+			// Send then reports EOF; receive the terminal RPC status for assertions.
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return nil, err
 		}
 		offset += int64(len(chunk))

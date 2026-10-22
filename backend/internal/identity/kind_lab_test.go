@@ -109,7 +109,7 @@ func (l *kindLab) httpClientAddress(address string) *http.Client {
 	return &http.Client{Transport: transport, Timeout: 45 * time.Second}
 }
 
-func (l *kindLab) request(client *http.Client, user kindUser, method, path, body string, headers map[string]string, expected int) []byte {
+func (l *kindLab) request(client *http.Client, user kindUser, method, path, body string, headers map[string]string, expected ...int) []byte {
 	l.t.Helper()
 	req, err := http.NewRequestWithContext(l.t.Context(), method, "https://worth.oopsbox.cn"+path, strings.NewReader(body))
 	if err != nil {
@@ -133,15 +133,38 @@ func (l *kindLab) request(client *http.Client, user kindUser, method, path, body
 	if err != nil {
 		l.t.Fatal("deployment response read failed")
 	}
-	if response.StatusCode != expected {
+	matched := false
+	for _, code := range expected {
+		matched = matched || response.StatusCode == code
+	}
+	if !matched {
 		var code struct {
 			Code string `json:"code"`
 		}
 		// Deliberately do not log bodies, file bytes or credentials.
 		_ = json.Unmarshal(data, &code)
-		l.t.Fatalf("%s %s: got %d (%s), want %d", method, path, response.StatusCode, code.Code, expected)
+		l.t.Fatalf("%s %s: got %d (%s), want one of %v", method, path, response.StatusCode, code.Code, expected)
+	}
+	if len(expected) > 1 {
+		l.dependencyFailure(response.StatusCode, data)
 	}
 	return data
+}
+
+// A real dependency outage may refuse a connection or exhaust its deadline.
+// Assert the matching reason as well as the two allowed HTTP statuses.
+func (l *kindLab) dependencyFailure(code int, data []byte) {
+	l.t.Helper()
+	var failure struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(data, &failure); err != nil {
+		l.t.Fatal("invalid dependency failure response")
+	}
+	if (code == 504 && failure.Code == "deadline_exceeded") || (code == 503 && strings.HasSuffix(failure.Code, "_unavailable")) {
+		return
+	}
+	l.t.Fatalf("invalid dependency failure: HTTP %d %s", code, failure.Code)
 }
 
 // Port-forward only to loopback, using an OS-selected port. Process and logs

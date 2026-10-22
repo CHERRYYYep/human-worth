@@ -212,6 +212,15 @@ dfbfdb2577647883b6818002b0d5a7590e1df988b4a7f3dced440c48ead5f358  setting_oauth.
 
 以上官方文档于 2026-09-20 核对。数据聚合、文件暂拒绝、32件/12000字节限额与本地进程测试均是阶段实现选择，不修改 PRD 的可信场景。完整方案及后续边界见 [Content 草稿](backend-content.md)。本地验收 PostgreSQL 为临时编译的官方 18.0，源码 SHA-256 为 `0d5b903b1e5fe361bca7aa9507519933773eb34266b1357c4e7780fdee6d6078`；这不是生产数据库版本升级建议，仓库 CI 与 lab 镜像未改变。
 
+## 请求取消与超时（2026-10-20）
+
+| 一手参考 / 固定版本 | 采用与差异 | 验收 |
+| --- | --- | --- |
+| [grpc-go v1.84.0 status.go](https://github.com/grpc/grpc-go/blob/v1.84.0/status/status.go)，与 backend/go.mod 一致 | 复用 `status.FromContextError` 识别包装后的 context 错误，另识别依赖 gRPC 状态；统一输出稳定 reason，不直接暴露依赖 message | 同一组原始/包装错误与 RPC 状态案例；真实 HTTP → gRPC 的 504/503、客户端取消与资源释放 |
+| [go-oidc v3.21.0 verify.go](https://github.com/coreos/go-oidc/blob/v3.21.0/oidc/verify.go)、[jwks.go](https://github.com/coreos/go-oidc/blob/v3.21.0/oidc/jwks.go)，与 backend/go.mod 一致 | 验签外层使用 `%v` 导致 KeySet 错误类型丢失。为验签设置与既有 HTTP client 相同的 10 秒上限并继承父 deadline；失败时核对 context 与实际 deadline，避免 HTTP timeout 定时器先运行时误报不可用。保留共享 KeySet，不按错误文本猜测超时 | 真实 HTTP token/JWKS 替身验证慢响应超时；重复 race 测试覆盖定时器边界；不重放授权码 |
+
+错误分类方案 A 为人类选择；共享技术 helper、cause 包装及 JWKS 期限处理属于 Agent Self-Claimed 的实现决定。不改变业务 CancelRun、锁范围、自动重试策略或发布状态。
+
 ## CI 后的通用模块部署（2026-09-21）
 
 人类要求当前及后续模块在 CI 通过后自动部署。复用本机拉取控制器、统一模块清单和以下适配均为 Agent Self-Claimed：
@@ -251,3 +260,9 @@ P 完全不看评论与其他作品，R 又需为 P 提供依据，因此采用�
 取消协议沿用[本地事务与 outbox 参考](#backend-design)，明确为“冻结 Run → Content 封闭登记 → Run 终态”。本地 OpenAPI 0.7.0 草案补充管理员初始包、三角色配置、任务附件与文字作品输入，删除普通用户进度入口，并保留 `cancelling / finalizing` 和取消 202；登记采用 Content 待审作品＋审核请求 outbox，不声称跨服务原子创建审核案件。2026-09-20 已补齐最小 Proto、Challenge 核心与 worker，并用真实 PostgreSQL 和有状态 fake 验证模块流程；未做优化效果实验、部署真实沙箱或发布新版 Swagger。
 
 2026-09-20 修正：用户重申测试服务必须使用 Completion。P/R/E 现统一为非流式 `/v1/chat/completions`；E 默认复用已妥善保存的同一配置，通过短期 grant 中继调用，主密钥不进入执行环境。基础文本、P/R 材料工具往返及 E 的原生命令工具请求、测试观察回传、最终文本作品与两次预算结算均通过。此前单次 Responses 请求的 403 只说明那条请求失败，不作为 Gemini Completion 不可用的依据。真实 E Pod、沙箱、网络与资源控制仍待验收，协议测试不执行模型生成的命令。
+
+## Asset P6.1 multipart 参考（2026-10-20）
+
+采用固定 5 MiB 完整块是本项目在用户方案 B 下的 Agent Self-Claimed 实施选择，文件仍限 32 MiB。已读取 AWS 官方 [multipart limits](https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html)、[UploadPart](https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html)、[AbortMultipartUpload](https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html)：非末 part 最小 5 MiB，同编号重传覆盖旧 part，未完成上传必须显式完成或中止。manifest 以数据库已确认记录为准，不靠单副本内存重建；没有采用客户端直传预签名 URL。
+
+真实兼容目标为仓库固定的 SeaweedFS 4.13 镜像 `sha256:803e0f9f4a190319e39c2b226e15e75bf0ff78d00fe3e2806c38850ca81eb8a7`，并核对 [4.13 Copy 条件校验源码](https://github.com/seaweedfs/seaweedfs/blob/4.13/weed/s3api/s3api_object_handlers_copy.go) 与 [HEAD 实现](https://github.com/seaweedfs/seaweedfs/blob/4.13/weed/s3api/s3api_object_handlers.go)。单 part multipart 的条件复制不一致由真实测试触发，采用现有锁内摘要复核兼容；生命周期 abort-only 规则未保留，不能以 AWS 文档代替兼容服务能力验收。实现、取舍与失败恢复证据见 [Asset P6.1 本地验收](backend-asset.md#p61-本地验收2026-10-20)。

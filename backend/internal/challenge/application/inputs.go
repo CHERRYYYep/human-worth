@@ -86,7 +86,7 @@ func (s *Service) prepare(ctx context.Context, st *domain.State) error {
 	if err != nil {
 		return err
 	}
-	s.engine.SetTraining(st, batch, inputs)
+	s.engine.SetTraining(st, batch, inputs, newID("work_"))
 	return s.checkInputs(ctx, st, st.Assignment)
 }
 
@@ -142,7 +142,7 @@ func (s *Service) validationBatch(ctx context.Context, st *domain.State) error {
 	if err != nil {
 		return err
 	}
-	s.engine.SetValidation(st, b, inputs)
+	s.engine.SetValidation(st, b, inputs, newID("work_"))
 	return s.checkInputs(ctx, st, st.Assignment)
 }
 func (s *Service) fitBinding(st *domain.State) string {
@@ -172,7 +172,7 @@ func (s *Service) checkInputs(ctx context.Context, st *domain.State, a *domain.A
 		}
 		v, err := s.voting.CheckHumanPreferenceSnapshot(ctx, &dto.CheckHumanPreferenceSnapshotRequest{SnapshotId: batch.SnapshotId, PolicyVersion: batch.PolicyVersion})
 		if err != nil {
-			return domain.UnavailableError()
+			return domain.DependencyError(err)
 		}
 		if !v.Valid {
 			return domain.Conflict("ranker_fit_invalidated")
@@ -230,7 +230,7 @@ func (s *Service) checkInputs(ctx context.Context, st *domain.State, a *domain.A
 		}
 		v, err := s.content.CheckChallengeMaterials(ctx, req)
 		if err != nil {
-			return domain.UnavailableError()
+			return domain.DependencyError(err)
 		}
 		if !v.Allowed {
 			return domain.Conflict("material_unavailable")

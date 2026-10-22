@@ -178,7 +178,9 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 	t.Cleanup(restoreContent)
 	l.kube("", "scale", "deployment/content", "--replicas=0")
 	l.kube("", "wait", "--for=delete", "pod", "-l", "app=content", "--timeout=90s")
-	download(503)
+	for _, client := range clients {
+		l.request(client, kindUser{}, "GET", path(entry), "", nil, 503, 504)
+	}
 	l.request(clients[0], user, "GET", "/api/me/assets/"+upload.Asset.ID+"/content", "", nil, 200)
 	if l.sql(`SELECT count(*) FROM content.reviewed_tasks WHERE task_id='`+task.ID+`' AND state='published' AND revision=5`) != "1" {
 		t.Fatal("outage changed review authority")

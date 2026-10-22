@@ -7,25 +7,10 @@ import (
 	"strconv"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// challengeRoutes 只注册管理员 HTTP 入口，内部领取、文件与预算接口不对公网开放。
-func (h *Handler) challengeRoutes(mux *http.ServeMux) {
-	for _, route := range []struct {
-		pattern, name string
-		handler       http.HandlerFunc
-	}{
-		{"POST /api/admin/challenge-runs", "startChallengeRun", h.startChallenge},
-		{"GET /api/admin/challenge-runs", "listChallengeRuns", h.listChallenges},
-		{"GET /api/admin/challenge-runs/{runId}", "getChallengeRun", h.getChallenge},
-		{"POST /api/admin/challenge-runs/{runId}/cancel", "cancelChallengeRun", h.cancelChallenge},
-		{"POST /api/admin/challenge-runs/{runId}/restart", "restartChallengeRun", h.restartChallenge},
-		{"PUT /api/admin/challenge-runs/{runId}/candidates/{candidateId}/registration", "registerCandidate", h.registerChallenge},
-	} {
-		mux.HandleFunc(route.pattern, h.operation(route.name, route.handler))
-	}
-}
 func nullable(v string) any {
 	if v == "" {
 		return nil
@@ -79,7 +64,7 @@ func idem(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return r.Header.Get("Idempotency-Key"), true
 }
 func (h *Handler) startChallenge(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actorFor(w, r, "challenge", pb.ChallengeService_StartRun_FullMethodName)
+	actor, ok := h.actorFor(w, r, contract.StartRun)
 	if !ok {
 		return
 	}
@@ -106,7 +91,7 @@ func (h *Handler) startChallenge(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 202, challengeJSON(v.Run))
 }
 func (h *Handler) getChallenge(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actorFor(w, r, "challenge", pb.ChallengeService_GetRun_FullMethodName)
+	actor, ok := h.actorFor(w, r, contract.GetRun)
 	if !ok {
 		return
 	}
@@ -118,7 +103,7 @@ func (h *Handler) getChallenge(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, challengeJSON(v.Run))
 }
 func (h *Handler) listChallenges(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actorFor(w, r, "challenge", pb.ChallengeService_ListRuns_FullMethodName)
+	actor, ok := h.actorFor(w, r, contract.ListRuns)
 	if !ok {
 		return
 	}
@@ -150,7 +135,7 @@ func (h *Handler) listChallenges(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"items": items, "nextCursor": nullable(v.NextCursor)})
 }
 func (h *Handler) cancelChallenge(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actorFor(w, r, "challenge", pb.ChallengeService_CancelRun_FullMethodName)
+	actor, ok := h.actorFor(w, r, contract.CancelRun)
 	if !ok {
 		return
 	}
@@ -172,7 +157,7 @@ func (h *Handler) cancelChallenge(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, code, challengeJSON(v.Run))
 }
 func (h *Handler) restartChallenge(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actorFor(w, r, "challenge", pb.ChallengeService_RestartRun_FullMethodName)
+	actor, ok := h.actorFor(w, r, contract.RestartRun)
 	if !ok {
 		return
 	}
@@ -198,7 +183,7 @@ func (h *Handler) restartChallenge(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 202, challengeJSON(v.Run))
 }
 func (h *Handler) registerChallenge(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actorFor(w, r, "challenge", pb.ChallengeService_RegisterCandidate_FullMethodName)
+	actor, ok := h.actorFor(w, r, contract.RegisterCandidate)
 	if !ok {
 		return
 	}

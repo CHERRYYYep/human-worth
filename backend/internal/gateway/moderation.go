@@ -9,6 +9,7 @@ import (
 	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 )
 
 func noQuery(w http.ResponseWriter, r *http.Request) bool {
@@ -19,7 +20,7 @@ func noQuery(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 func (h *Handler) requestTaskReview(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.contentActor(w, r, contentpb.ContentService_RequestTaskReview_FullMethodName)
+	actor, ok := h.contentActor(w, r, contract.RequestTaskReview)
 	if !ok {
 		return
 	}
@@ -36,7 +37,7 @@ func (h *Handler) requestTaskReview(w http.ResponseWriter, r *http.Request) {
 	// fetches a detail per entry. The dedicated assertion carries the same session.
 	assertion := ""
 	if h.options.Asset != nil {
-		assertion, ok = h.assetActor(w, r, assetpb.AssetService_CheckAssetOwnership_FullMethodName)
+		assertion, ok = h.assetActor(w, r, contract.CheckAssetOwnership)
 		if !ok {
 			return
 		}
@@ -48,12 +49,12 @@ func (h *Handler) requestTaskReview(w http.ResponseWriter, r *http.Request) {
 	}
 	taskResponse(w, 200, out.Submission)
 }
-func (h *Handler) moderationActor(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
+func (h *Handler) moderationActor(w http.ResponseWriter, r *http.Request, operation contract.OperationID) (string, bool) {
 	if h.options.Moderation == nil {
 		problem(w, 503, "moderation_unavailable")
 		return "", false
 	}
-	return h.actorFor(w, r, "moderation", method)
+	return h.actorFor(w, r, operation)
 }
 func reviewJSON(r *pb.Review) (map[string]any, error) {
 	sub, err := taskJSON(r.GetSnapshot().GetSubmission())
@@ -95,7 +96,7 @@ func reviewResponse(w http.ResponseWriter, r *pb.Review) {
 	jsonResponse(w, code, value)
 }
 func (h *Handler) listReviews(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.moderationActor(w, r, pb.ModerationService_ListReviews_FullMethodName)
+	actor, ok := h.moderationActor(w, r, contract.ListReviews)
 	if !ok {
 		return
 	}
@@ -151,7 +152,7 @@ func (h *Handler) listReviews(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"items": items, "nextCursor": cursor})
 }
 func (h *Handler) getReview(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.moderationActor(w, r, pb.ModerationService_GetReview_FullMethodName)
+	actor, ok := h.moderationActor(w, r, contract.GetReview)
 	if !ok {
 		return
 	}
@@ -171,7 +172,7 @@ func (h *Handler) getReview(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, value)
 }
 func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.moderationActor(w, r, pb.ModerationService_DecideReview_FullMethodName)
+	actor, ok := h.moderationActor(w, r, contract.DecideReview)
 	if !ok {
 		return
 	}
@@ -203,14 +204,14 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 	reviewResponse(w, out.Review)
 }
 func (h *Handler) downloadReviewAsset(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, assetpb.AssetService_DownloadReviewAsset_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.DownloadReviewAsset)
 	if !ok {
 		return
 	}
 	if !noQuery(w, r) {
 		return
 	}
-	assertion, ok := h.contentActor(w, r, contentpb.ContentService_CheckReviewAssetAccess_FullMethodName)
+	assertion, ok := h.contentActor(w, r, contract.CheckReviewAssetAccess)
 	if !ok {
 		return
 	}

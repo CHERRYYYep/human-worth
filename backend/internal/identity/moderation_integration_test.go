@@ -108,7 +108,7 @@ func TestModerationHTTPOutbox(t *testing.T) {
 		return contentpb.NewContentServiceClient(serviceTestGRPC(t, l, "content", caller, content.Authorization, func(g *grpc.Server) { contentpb.RegisterContentServiceServer(g, cs) }))
 	}
 	moderatorContent := contentClient("moderation")
-	as := &asset.Server{DB: adb, Identity: l.client(t, 0, "asset", l.pki), Storage: asset.FileStorage{Root: t.TempDir()}, Content: contentClient("asset")}
+	as := layeredAssetServer(adb, asset.FileStorage{Root: t.TempDir()}, l.client(t, 0, "asset", l.pki), contentClient("asset"))
 	assetClient := func(caller string) assetpb.AssetServiceClient {
 		return assetpb.NewAssetServiceClient(serviceTestGRPC(t, l, "asset", caller, asset.Authorization, func(g *grpc.Server) { assetpb.RegisterAssetServiceServer(g, as) }))
 	}

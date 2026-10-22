@@ -74,8 +74,7 @@ func (s *Server) RequestTaskReview(ctx context.Context, r *pb.RequestTaskReviewR
 	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, storage(e)
 	}
-	var hash []byte
-	before, err := scan(s.DB.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author), &hash)
+	before, _, err := scanTaskSubmission(s.DB.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author))
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +95,7 @@ func (s *Server) RequestTaskReview(ctx context.Context, r *pb.RequestTaskReviewR
 		return nil, storage(err)
 	}
 	defer tx.Rollback(ctx)
-	current, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author), &hash)
+	current, _, err := scanTaskSubmission(tx.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author))
 	if err != nil {
 		return nil, err
 	}

@@ -4,7 +4,6 @@ package domain
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -37,10 +36,21 @@ const (
 type Failure struct {
 	Code   Code
 	Reason string
+	cause  error
 }
 
 func (e *Failure) Error() string            { return e.Reason }
+func (e *Failure) Unwrap() error            { return e.cause }
 func Reject(code Code, reason string) error { return &Failure{Code: code, Reason: reason} }
+
+// DependencyError preserves cancellation/deadlines; other dependency failures remain unavailable.
+func DependencyError(err error) error {
+	switch ErrorCode(err) {
+	case Canceled, DeadlineExceeded:
+		return err
+	}
+	return &Failure{Code: Unavailable, Reason: "challenge_unavailable", cause: err}
+}
 func ErrorCode(err error) Code {
 	var failure *Failure
 	if errors.As(err, &failure) {
@@ -76,16 +86,9 @@ func ValidID(v string) bool {
 	}
 	return true
 }
-func Bounded(v string, n int) bool { return strings.TrimSpace(v) != "" && len(v) <= n }
-func Terminal(s string) bool       { return s == "completed" || s == "failed" || s == "cancelled" }
-func Hash(b []byte) string         { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
-func NewID(prefix string) string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return prefix + hex.EncodeToString(b)
-}
+func Bounded(v string, n int) bool   { return strings.TrimSpace(v) != "" && len(v) <= n }
+func Terminal(s string) bool         { return s == "completed" || s == "failed" || s == "cancelled" }
+func Hash(b []byte) string           { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
 func TimePtr(t time.Time) *time.Time { return &t }
 
 // TimeValue retains the original protocol's absent-timestamp value at the boundary.

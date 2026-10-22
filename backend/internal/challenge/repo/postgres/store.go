@@ -48,7 +48,7 @@ func persistence(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return application.ErrNotFound
 	}
-	return domain.UnavailableError()
+	return domain.DependencyError(err)
 }
 func (s *Store) WithinTx(ctx context.Context, run func(application.Tx) error) error {
 	tx, err := s.db.Begin(ctx)

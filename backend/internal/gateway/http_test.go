@@ -18,10 +18,13 @@ func TestContentRange(t *testing.T) {
 		wantErr    bool
 	}{
 		{"valid first chunk", "bytes 0-2/3", 3, 0, 3, false},
-		{"valid max chunk", "bytes 0-262143/33554432", 262144, 0, 33554432, false},
+		{"valid max chunk", "bytes 0-5242879/33554432", 5242880, 0, 33554432, false},
+		{"valid last short chunk", "bytes 5242880-5242882/5242883", 3, 5242880, 5242883, false},
+		{"old small nonfinal chunk", "bytes 0-262143/33554432", 262144, 0, 0, true},
+		{"unaligned offset", "bytes 1-3/4", 3, 0, 0, true},
 		{"duplicate header", "bytes 0-2/3", 3, 0, 0, true},
 		{"wrong body length", "bytes 0-2/3", 2, 0, 0, true},
-		{"chunk too large", "bytes 0-262144/33554433", 262145, 0, 0, true},
+		{"chunk too large", "bytes 0-5242880/33554432", 5242881, 0, 0, true},
 		{"total too large", "bytes 0-2/33554433", 3, 0, 0, true},
 		{"invalid range", "bytes 3-2/3", 0, 0, 0, true},
 	} {

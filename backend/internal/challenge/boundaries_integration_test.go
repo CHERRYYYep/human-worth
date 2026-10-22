@@ -20,9 +20,40 @@ import (
 	"github.com/KDZZZZZZ/human-worth/backend/internal/challenge/agent"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func TestChallengeDependencyCancellationDoesNotTerminateRun(t *testing.T) {
+	for _, failure := range []codes.Code{codes.Canceled, codes.DeadlineExceeded, codes.Unavailable} {
+		t.Run(failure.String(), func(t *testing.T) {
+			l := newLab(t)
+			run := l.start(config())
+			must(t, l.services[0].Reconcile(t.Context()))
+			var before, after []byte
+			must(t, l.db.QueryRow(t.Context(), "SELECT state FROM challenge.runs WHERE id=$1", run.Id).Scan(&before))
+			l.deps.mu.Lock()
+			l.deps.materialFailure = status.Error(failure, "private dependency details")
+			l.deps.mu.Unlock()
+			request := &pb.ClaimWorkRequest{WorkerInstanceId: "worker_0", ClaimRequestId: "claim_context_failure", Capabilities: []pb.WorkKind{1, 2, 3, 4, 5, 6, 7}}
+			_, err := l.workers[0].ClaimWork(t.Context(), request)
+			code(t, err, failure)
+			must(t, l.db.QueryRow(t.Context(), "SELECT state FROM challenge.runs WHERE id=$1", run.Id).Scan(&after))
+			if !bytes.Equal(before, after) {
+				t.Fatal("technical failure changed persisted run state")
+			}
+			l.deps.mu.Lock()
+			l.deps.materialFailure = nil
+			l.deps.mu.Unlock()
+			response, err := l.workers[0].ClaimWork(t.Context(), request)
+			must(t, err)
+			if response.GetAssignment() == nil {
+				t.Fatal("failed claim was consumed or run terminated")
+			}
+		})
+	}
+}
 
 func TestChallengeStrictThresholdAndInvalidRankings(t *testing.T) {
 	for _, threshold := range []float64{2.0 / 3.0, .6} {

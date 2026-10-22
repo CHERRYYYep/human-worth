@@ -49,5 +49,5 @@ func persistence(err error) error {
 	if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "credentials_account_id_create_request_id_key" {
 		return application.Reject(application.AlreadyExists, "idempotency_conflict")
 	}
-	return application.Reject(application.Unavailable, "identity_unavailable")
+	return application.DependencyFailure(err, "identity_unavailable")
 }

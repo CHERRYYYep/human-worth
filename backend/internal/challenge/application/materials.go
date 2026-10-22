@@ -40,7 +40,7 @@ func (s *Service) ReadMaterial(q *dto.ReadMaterialRequest, stream MaterialStream
 	access.TaskId = material.TaskId
 	input, err := s.asset.ReadAsset(ctx, &dto.ReadAssetRequest{AssetId: material.Asset.Id, Access: access, Offset: q.Offset})
 	if err != nil {
-		return domain.UnavailableError()
+		return domain.DependencyError(err)
 	}
 	offset := q.Offset
 	for {
@@ -52,7 +52,7 @@ func (s *Service) ReadMaterial(q *dto.ReadMaterialRequest, stream MaterialStream
 			return nil
 		}
 		if err != nil {
-			return domain.UnavailableError()
+			return domain.DependencyError(err)
 		}
 		if len(chunk.Chunk) == 0 || len(chunk.Chunk) > 65536 || chunk.Offset != offset || chunk.Sha256 != material.Asset.Sha256 || int64(len(chunk.Chunk)) > material.Asset.Bytes-offset {
 			return domain.Conflict("invalid_material_chunk")
@@ -76,6 +76,10 @@ func (s *Service) UploadArtifact(stream UploadStream) error {
 	ctx := stream.Context()
 	first, err := stream.Recv()
 	if err != nil {
+		switch domain.ErrorCode(err) {
+		case domain.Canceled, domain.DeadlineExceeded:
+			return err
+		}
 		return domain.Invalid("upload_metadata_required")
 	}
 	if first.Attempt == nil || !domain.ValidID(first.UploadId) || !domain.Bounded(first.Filename, 255) || strings.ContainsAny(first.Filename, "/\\") || strings.HasPrefix(first.Filename, ".") || first.Filename == "report.md" || strings.HasSuffix(first.Filename, ".jsonl") || first.Bytes < 0 || first.Bytes > domain.MaxMaterialBytes || !domain.ValidDigest(first.Sha256) || !domain.Bounded(first.MediaType, 128) {
@@ -93,7 +97,7 @@ func (s *Service) UploadArtifact(stream UploadStream) error {
 	}
 	call, err := s.asset.UploadAsset(ctx)
 	if err != nil {
-		return domain.UnavailableError()
+		return domain.DependencyError(err)
 	}
 	digest := sha256.New()
 	var count int64
@@ -122,7 +126,7 @@ func (s *Service) UploadArtifact(stream UploadStream) error {
 			frame.Sha256 = first.Sha256
 		}
 		if err = call.Send(frame); err != nil {
-			return domain.UnavailableError()
+			return domain.DependencyError(err)
 		}
 		digest.Write(current.Chunk)
 		count += int64(len(current.Chunk))
@@ -146,13 +150,19 @@ func (s *Service) UploadArtifact(stream UploadStream) error {
 	}
 	response, err := call.CloseAndRecv()
 	if err != nil {
-		return domain.UnavailableError()
+		return domain.DependencyError(err)
 	}
 	a := response.Asset
 	if !domain.ValidAsset(a) || a.RunId != r.Run.Id || a.AttemptId != first.Attempt.AttemptId || a.Bytes != first.Bytes || a.Sha256 != first.Sha256 || a.Filename != first.Filename || a.MediaType != first.MediaType {
 		return domain.Conflict("invalid_uploaded_asset")
 	}
 	check, err := s.asset.GetAsset(ctx, &dto.GetAssetRequest{AssetId: a.Id, Access: materialAccess(r, first.Attempt)})
+	if err != nil {
+		switch domain.ErrorCode(err) {
+		case domain.Canceled, domain.DeadlineExceeded:
+			return err
+		}
+	}
 	if err != nil || check.GetAsset() == nil || *check.GetAsset() != *a {
 		return domain.Conflict("unconfirmed_upload")
 	}

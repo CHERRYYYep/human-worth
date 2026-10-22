@@ -3,6 +3,7 @@ package asset
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 )
 
@@ -103,11 +105,8 @@ func s3Error(err error) error {
 	return err
 }
 
-// ponytail: bounded prefix rewrite, not multipart. At 32 MiB, 256 KiB chunks
-// cause ~2 GiB of writes per full upload. Revisit with multipart when increasing
-// capacity. The caller must hold the database row lock across WriteAt+commit.
-// Rewriting from the authoritative offset also discards an uncommitted tail
-// left by a successful PUT followed by a failed database commit.
+// WriteAt preserves the truncating compatibility contract for existing objects.
+// Production uploads use WritePart without GET/re-PUT of confirmed prefixes.
 func (s *S3Storage) WriteAt(ctx context.Context, key string, offset int64, data []byte) error {
 	if offset < 0 || len(data) == 0 || len(data) > maxChunkBytes || offset > maxAssetBytes-int64(len(data)) {
 		return errors.New("invalid object write")
@@ -167,7 +166,30 @@ func (s *S3Storage) Move(ctx context.Context, from, to string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(to), CopySource: aws.String(url.PathEscape(s.bucket + "/" + from)), CopySourceIfMatch: source.ETag})
+	input := &s3.CopyObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(to), CopySource: aws.String(url.PathEscape(s.bucket + "/" + from)), CopySourceIfMatch: source.ETag}
+	_, err = s.client.CopyObject(ctx, input)
+	var api smithy.APIError
+	if errors.As(err, &api) && api.ErrorCode() == "PreconditionFailed" && strings.Contains(aws.ToString(source.ETag), "-") {
+		// SeaweedFS 4.13 computes Copy If-Match differently from HEAD for
+		// single-part multipart objects. Under the caller's DB lock, copy
+		// without this condition only after hashing source, and verify copied
+		// bytes before deleting it. The server also checks the expected SHA256.
+		before, digestErr := s.copyDigest(ctx, from)
+		if digestErr != nil {
+			return digestErr
+		}
+		input.CopySourceIfMatch = nil
+		_, err = s.client.CopyObject(ctx, input)
+		if err == nil {
+			after, digestErr := s.copyDigest(ctx, to)
+			if digestErr != nil {
+				return digestErr
+			}
+			if !bytes.Equal(before, after) {
+				return errors.New("object copy checksum mismatch")
+			}
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -180,7 +202,92 @@ func (s *S3Storage) Move(ctx context.Context, from, to string) error {
 	}
 	return s.Delete(ctx, from)
 }
+
+func (s *S3Storage) copyDigest(ctx context.Context, key string) ([]byte, error) {
+	reader, err := s.Open(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(reader, maxAssetBytes+1))
+	closeErr := reader.Close()
+	if err != nil {
+		return nil, err
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if n > maxAssetBytes {
+		return nil, errors.New("object too large")
+	}
+	return h.Sum(nil), nil
+}
 func (s *S3Storage) Delete(ctx context.Context, key string) error {
+	// Listing recovers initiation responses lost before ID persistence. Filter
+	// equality after prefix lookup so another asset is never aborted.
+	pages := s3.NewListMultipartUploadsPaginator(s.client, &s3.ListMultipartUploadsInput{Bucket: aws.String(s.bucket), Prefix: aws.String(key)})
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
+		if err != nil {
+			return err
+		}
+		for _, upload := range page.Uploads {
+			if aws.ToString(upload.Key) != key {
+				continue
+			}
+			_, err = s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: aws.String(s.bucket), Key: aws.String(key), UploadId: upload.UploadId})
+			if err != nil && !noSuchUpload(err) {
+				return err
+			}
+		}
+	}
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	return err
+}
+
+func noSuchUpload(err error) bool {
+	var api smithy.APIError
+	return errors.As(err, &api) && api.ErrorCode() == "NoSuchUpload"
+}
+func (s *S3Storage) StartMultipart(ctx context.Context, key string) (string, error) {
+	result, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	if err != nil {
+		return "", err
+	}
+	if aws.ToString(result.UploadId) == "" {
+		return "", errors.New("missing multipart upload ID")
+	}
+	return aws.ToString(result.UploadId), nil
+}
+func (s *S3Storage) WritePart(ctx context.Context, key, id string, number int32, data []byte) (string, error) {
+	if id == "" || number < 1 || number > int32((maxAssetBytes+maxChunkBytes-1)/maxChunkBytes) || len(data) == 0 || len(data) > maxChunkBytes {
+		return "", errors.New("invalid multipart part")
+	}
+	select {
+	case s.writeSlots <- struct{}{}:
+		defer func() { <-s.writeSlots }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	result, err := s.client.UploadPart(ctx, &s3.UploadPartInput{Bucket: aws.String(s.bucket), Key: aws.String(key), UploadId: aws.String(id), PartNumber: aws.Int32(number), Body: bytes.NewReader(data), ContentLength: aws.Int64(int64(len(data)))})
+	if err != nil {
+		return "", err
+	}
+	if aws.ToString(result.ETag) == "" {
+		return "", errors.New("missing multipart part ETag")
+	}
+	return aws.ToString(result.ETag), nil
+}
+func (s *S3Storage) CompleteMultipart(ctx context.Context, key, id string, parts []uploadPart) error {
+	manifest := make([]types.CompletedPart, len(parts))
+	for i, part := range parts {
+		manifest[i] = types.CompletedPart{PartNumber: aws.Int32(part.Number), ETag: aws.String(part.ETag)}
+	}
+	_, err := s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{Bucket: aws.String(s.bucket), Key: aws.String(key), UploadId: aws.String(id), MultipartUpload: &types.CompletedMultipartUpload{Parts: manifest}})
+	if noSuchUpload(err) {
+		// A previous Complete may have succeeded. Caller must still locate
+		// staging/final and verify full size, SHA-256 and detected media type.
+		return nil
+	}
 	return err
 }

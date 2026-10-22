@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -33,7 +35,7 @@ func uploadSessionJSON(value *pb.UploadSession) map[string]any {
 	return map[string]any{"id": value.Id, "assetId": value.AssetId, "receivedBytes": value.ReceivedBytes, "expectedBytes": value.ExpectedBytes, "state": strings.TrimPrefix(strings.ToLower(value.State.String()), "upload_session_state_"), "expiresAt": value.ExpiresAt.AsTime().UTC().Format("2006-01-02T15:04:05.999999999Z07:00")}
 }
 func (h *Handler) createAssetUploadSession(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_CreateUploadSession_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.CreateAssetUploadSession)
 	if !ok {
 		return
 	}
@@ -81,14 +83,24 @@ func contentRange(r *http.Request) (int64, int64, int64, error) {
 	if err != nil || end < start || total <= end {
 		return 0, 0, 0, errors.New("content range")
 	}
-	if start > 32<<20 || end > 32<<20 || total > 32<<20 || end-start+1 > 256<<10 || (r.ContentLength >= 0 && end-start+1 != r.ContentLength) {
+	if start > 32<<20 || end > 32<<20 || total > 32<<20 || end-start+1 > platform.AssetUploadChunkBytes || (r.ContentLength >= 0 && end-start+1 != r.ContentLength) {
 		return 0, 0, 0, errors.New("content range")
+	}
+	if start%platform.AssetUploadChunkBytes != 0 || (end-start+1 != platform.AssetUploadChunkBytes && end+1 != total) {
+		return 0, 0, 0, errors.New("content range chunk size")
 	}
 	return start, end, total, nil
 }
 func (h *Handler) uploadAsset(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_UploadAsset_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.UploadAsset)
 	if !ok {
+		return
+	}
+	select {
+	case h.uploads <- struct{}{}:
+		defer func() { <-h.uploads }()
+	default:
+		problem(w, 429, "upload_capacity_exhausted")
 		return
 	}
 	offset, end, total, err := contentRange(r)
@@ -112,32 +124,32 @@ func (h *Handler) uploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := r.PathValue("uploadSessionId")
 	if err = stream.Send(&pb.UploadAssetRequest{ActorAssertion: actor, UploadSessionId: sessionID, Offset: offset, UploadAttemptId: requestID(r)}); err != nil {
-		assetError(w, err)
+		assetError(w, uploadSendError(stream, err))
 		return
 	}
-	data, readErr := io.ReadAll(io.LimitReader(r.Body, (256<<10)+1))
+	data := make([]byte, int(end-offset+1))
+	_, readErr := io.ReadFull(r.Body, data)
 	if readErr != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(readErr, &tooLarge) {
 			problem(w, 413, "request_too_large")
 			return
 		}
-		assetError(w, readErr)
+		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+			problem(w, 400, "invalid_content_range")
+		} else {
+			assetError(w, readErr)
+		}
 		return
 	}
-	if len(data) > 256<<10 {
-		problem(w, 413, "request_too_large")
-		return
-	}
-	if int64(len(data)) != end-offset+1 {
+	var extra [1]byte
+	if n, err := r.Body.Read(extra[:]); n > 0 || err != io.EOF {
 		problem(w, 400, "invalid_content_range")
 		return
 	}
-	if len(data) > 0 {
-		if err = stream.Send(&pb.UploadAssetRequest{Offset: offset, Chunk: data, ChunkSha256: sha256Hex(data)}); err != nil {
-			assetError(w, err)
-			return
-		}
+	if err = stream.Send(&pb.UploadAssetRequest{Offset: offset, Chunk: data, ChunkSha256: sha256Hex(data)}); err != nil {
+		assetError(w, uploadSendError(stream, err))
+		return
 	}
 	response, err := stream.CloseAndRecv()
 	if err != nil {
@@ -146,6 +158,19 @@ func (h *Handler) uploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonResponse(w, 200, map[string]any{"uploadSessionId": response.UploadSessionId, "receivedBytes": response.ReceivedBytes, "nextOffset": response.NextOffset, "state": strings.TrimPrefix(strings.ToLower(response.State.String()), "upload_session_state_")})
 }
+
+func uploadSendError(stream pb.AssetService_UploadAssetClient, err error) error {
+	if errors.Is(err, io.EOF) {
+		// Send EOF only signals that the server stopped reading. Receive its
+		// final status so an early denial or deadline keeps its HTTP category.
+		if _, terminal := stream.CloseAndRecv(); terminal != nil {
+			return terminal
+		}
+		return io.ErrUnexpectedEOF
+	}
+	return err
+}
+
 func requestID(r *http.Request) string {
 	value := r.Header.Get("X-Request-ID")
 	if len(value) >= 16 {
@@ -155,7 +180,7 @@ func requestID(r *http.Request) string {
 }
 func sha256Hex(data []byte) string { sum := sha256.Sum256(data); return fmt.Sprintf("%x", sum[:]) }
 func (h *Handler) completeAsset(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_CompleteUpload_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.CompleteAssetUpload)
 	if !ok {
 		return
 	}
@@ -173,7 +198,7 @@ func (h *Handler) completeAsset(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, assetJSON(response.Asset))
 }
 func (h *Handler) abortAsset(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_AbortUpload_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.AbortAssetUpload)
 	if !ok {
 		return
 	}
@@ -186,7 +211,7 @@ func (h *Handler) abortAsset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (h *Handler) getAssetUploadSession(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_GetUploadSession_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.GetAssetUploadSession)
 	if !ok {
 		return
 	}
@@ -198,7 +223,7 @@ func (h *Handler) getAssetUploadSession(w http.ResponseWriter, r *http.Request) 
 	jsonResponse(w, 200, uploadSessionJSON(response.UploadSession))
 }
 func (h *Handler) getAssetMetadata(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_GetAssetMetadata_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.GetAssetMetadata)
 	if !ok {
 		return
 	}
@@ -210,7 +235,7 @@ func (h *Handler) getAssetMetadata(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, assetJSON(response.Asset))
 }
 func (h *Handler) listMyAssets(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_ListMyAssets_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.ListMyAssets)
 	if !ok {
 		return
 	}
@@ -244,7 +269,7 @@ func (h *Handler) listMyAssets(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"items": items, "nextCursor": cursor})
 }
 func (h *Handler) downloadAsset(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.assetActor(w, r, pb.AssetService_GetAssetMetadata_FullMethodName)
+	actor, ok := h.assetActor(w, r, contract.GetAssetMetadata)
 	if !ok {
 		return
 	}
@@ -257,7 +282,7 @@ func (h *Handler) downloadAsset(w http.ResponseWriter, r *http.Request) {
 		assetError(w, status.Error(codes.FailedPrecondition, "asset_not_ready"))
 		return
 	}
-	downloadActor, ok := h.assetActor(w, r, pb.AssetService_DownloadAsset_FullMethodName)
+	downloadActor, ok := h.assetActor(w, r, contract.DownloadAsset)
 	if !ok {
 		return
 	}

@@ -66,13 +66,7 @@ func AuthorizationStream(service any, stream grpc.ServerStream, _ *grpc.StreamSe
 	return status.Error(codes.PermissionDenied, "service_forbidden")
 }
 func unavailable(err error) error {
-	if errors.Is(err, context.Canceled) {
-		return status.Error(codes.Canceled, "request_cancelled")
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return status.Error(codes.DeadlineExceeded, "deadline_exceeded")
-	}
-	return status.Error(codes.Unavailable, "moderation_unavailable")
+	return platform.DependencyError(err, "moderation_unavailable")
 }
 func invalid(s string) error { return status.Error(codes.InvalidArgument, s) }
 func (s *Server) admin(ctx context.Context, assertion, method string) (string, error) {

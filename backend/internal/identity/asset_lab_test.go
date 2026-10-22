@@ -19,6 +19,11 @@ import (
 	"time"
 
 	"github.com/KDZZZZZZ/human-worth/backend/internal/asset"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type kindAsset struct {
@@ -33,6 +38,11 @@ type kindUpload struct {
 	}
 }
 type kindAssetRecord struct {
+	StorageID string `json:"storage_upload_id"`
+	Parts     []struct {
+		Number int32  `json:"number"`
+		ETag   string `json:"etag"`
+	} `json:"storage_parts"`
 	Owner         string `json:"owner_id"`
 	State         string `json:"state"`
 	SessionState  string `json:"session_state"`
@@ -58,7 +68,7 @@ func (l *kindLab) assetRecord(id string) kindAssetRecord {
 	kindDecode(l.t, []byte(l.sql(fmt.Sprintf(`SELECT row_to_json(r) FROM (
 SELECT a.owner_id,a.state,s.state AS session_state,a.staging_key,a.final_key,
 encode(a.actual_sha256,'hex') AS actual_sha256,s.received_bytes,
-a.received_bytes AS asset_received,a.expected_bytes,s.storage_cleaned_at IS NOT NULL AS cleaned
+a.received_bytes AS asset_received,a.expected_bytes,a.storage_upload_id,a.storage_parts,s.storage_cleaned_at IS NOT NULL AS cleaned
 FROM asset.assets a JOIN asset.upload_sessions s ON s.asset_id=a.id WHERE a.id='%s') r`, id))), &row)
 	if row.Owner == "" {
 		l.t.Fatal("missing persisted Asset record")
@@ -148,7 +158,18 @@ func TestKindAssetDeployment(t *testing.T) {
 		t.Fatal("verification bucket unavailable")
 	}
 
-	data := bytes.Repeat([]byte("private shared kind file\n"), 13000) // Two >256 KiB total chunks.
+	remote := s3.New(s3.Options{Region: cfg.Region, BaseEndpoint: aws.String(cfg.Endpoint), UsePathStyle: cfg.ForcePathStyle, RetryMaxAttempts: 1, Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, ""), HTTPClient: &http.Client{Timeout: 30 * time.Second}})
+	assertMultipart := func(row kindAssetRecord, expected int) {
+		t.Helper()
+		result, err := remote.ListParts(t.Context(), &s3.ListPartsInput{Bucket: aws.String(cfg.Bucket), Key: aws.String(row.Staging), UploadId: aws.String(row.StorageID)})
+		if err != nil || len(result.Parts) != 1 || len(row.Parts) != 1 || aws.ToInt64(result.Parts[0].Size) != int64(expected) || row.Parts[0].ETag != aws.ToString(result.Parts[0].ETag) {
+			t.Fatal("persisted multipart progress differs from shared S3", err)
+		}
+		if _, err = store.Stat(t.Context(), row.Staging); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("unfinished multipart became visible", err)
+		}
+	}
+	data := bytes.Repeat([]byte("a"), platform.AssetUploadChunkBytes+511) // One full 5 MiB part and a final remainder.
 	digest := fmt.Sprintf("%x", sha256.Sum256(data))
 	body := fmt.Sprintf(`{"filename":"private.txt","mediaType":"text/plain","expectedBytes":%d,"sha256":"%s"}`, len(data), digest)
 	create := func(client *http.Client, key string) kindUpload {
@@ -160,10 +181,10 @@ func TestKindAssetDeployment(t *testing.T) {
 		}
 		return result
 	}
-	upload := func(client *http.Client, user kindUser, created kindUpload, offset, end, expected int) {
+	upload := func(client *http.Client, user kindUser, created kindUpload, offset, end int, expected ...int) []byte {
 		t.Helper()
 		headers := map[string]string{"Content-Type": "application/octet-stream", "Content-Range": fmt.Sprintf("bytes %d-%d/%d", offset, end-1, len(data))}
-		l.request(client, user, "PUT", "/api/me/assets/upload-sessions/"+created.UploadSession.ID+"/content", string(data[offset:end]), headers, expected)
+		return l.request(client, user, "PUT", "/api/me/assets/upload-sessions/"+created.UploadSession.ID+"/content", string(data[offset:end]), headers, expected...)
 	}
 	complete := func(client *http.Client, user kindUser, created kindUpload, expected int) []byte {
 		t.Helper()
@@ -219,7 +240,7 @@ func TestKindAssetDeployment(t *testing.T) {
 	l.request(reader, alice, "POST", "/api/me/assets/upload-sessions", strings.Replace(body, "private.txt", "different.txt", 1), map[string]string{"Idempotency-Key": "kind-shared-upload-0001"}, 409)
 	l.request(writer, alice, "POST", "/api/me/assets/upload-sessions", strings.TrimSuffix(body, "}")+`,"owner_id":"`+bob.account+`"}`, map[string]string{"Idempotency-Key": "kind-forged-owner-0001"}, 400)
 
-	cut := 256 << 10
+	cut := platform.AssetUploadChunkBytes
 	upload(writer, alice, created, 0, cut, 200)
 	var progress struct {
 		ReceivedBytes, ExpectedBytes int64
@@ -230,7 +251,7 @@ func TestKindAssetDeployment(t *testing.T) {
 	if progress.ReceivedBytes != int64(cut) || progress.ExpectedBytes != int64(len(data)) || progress.State != "active" || row.Received != int64(cut) || row.AssetReceived != row.Received || row.Owner != alice.account || row.State != "staging" {
 		t.Fatal("Pod B did not recover Pod A's committed upload progress")
 	}
-	assertObject(row.Staging, data[:cut])
+	assertMultipart(row, cut)
 	l.request(reader, alice, "GET", "/api/me/assets/"+created.Asset.ID+"/content", "", nil, 409)
 	fileDraft := func(id string) string {
 		return `{"title":"private kind S3 draft","summary":"","description":"","entries":[{"side":"human","title":"private file","source":"mine","artifacts":[{"kind":"file","assetId":"` + id + `"}],"permissions":{"cloudUse":false}}]}`
@@ -251,7 +272,7 @@ func TestKindAssetDeployment(t *testing.T) {
 	complete(reader, bob, created, 404)
 	l.request(reader, bob, "DELETE", "/api/me/assets/upload-sessions/"+created.UploadSession.ID, "", nil, 404)
 	upload(reader, alice, created, 0, cut, 409) // Explicit offset conflict, no blind replay.
-	assertObject(row.Staging, data[:cut])
+	assertMultipart(row, cut)
 	upload(reader, alice, created, cut, len(data), 200)
 	var ready kindAsset
 	kindDecode(t, complete(reader, alice, created, 200), &ready)
@@ -293,17 +314,17 @@ func TestKindAssetDeployment(t *testing.T) {
 	t.Log("PASS: Content -> Asset ownership over real mTLS, private create/read/replace, revision conflict and foreign/public denial")
 
 	expired := create(writer, "kind-expired-upload-0001")
-	upload(writer, alice, expired, 0, 7, 200)
+	upload(writer, alice, expired, 0, cut, 200)
 	expiredRow := l.assetRecord(expired.Asset.ID)
-	assertObject(expiredRow.Staging, data[:7])
+	assertMultipart(expiredRow, cut)
 	aborted := create(reader, "kind-aborted-upload-0001")
-	upload(reader, alice, aborted, 0, 7, 200)
+	upload(reader, alice, aborted, 0, cut, 200)
 	abortedRow := l.assetRecord(aborted.Asset.ID)
 	l.request(writer, alice, "DELETE", "/api/me/assets/upload-sessions/"+aborted.UploadSession.ID, "", nil, 204)
 	// Accelerate expiry only in the disposable test DB. Also expire the ready
 	// session to prove cleanup never treats a completed final as abandoned.
 	l.sql(fmt.Sprintf("UPDATE asset.upload_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE id IN ('%s','%s');", expired.UploadSession.ID, created.UploadSession.ID))
-	upload(reader, alice, expired, 7, 8, 409)
+	upload(reader, alice, expired, cut, len(data), 409)
 	complete(reader, alice, expired, 409)
 	deadline := time.Now().Add(95 * time.Second)
 	for {
@@ -355,6 +376,13 @@ func TestKindAssetDeployment(t *testing.T) {
 	recoveryRow := l.assetRecord(recovering.Asset.ID)
 	// Fault injection: actual S3 copy+delete succeeds before a DB commit.
 	// Another real Pod must recover the final, not generate a new asset.
+	manifest := make([]types.CompletedPart, len(recoveryRow.Parts))
+	for i, p := range recoveryRow.Parts {
+		manifest[i] = types.CompletedPart{PartNumber: aws.Int32(p.Number), ETag: aws.String(p.ETag)}
+	}
+	if _, err = remote.CompleteMultipartUpload(t.Context(), &s3.CompleteMultipartUploadInput{Bucket: aws.String(cfg.Bucket), Key: aws.String(recoveryRow.Staging), UploadId: aws.String(recoveryRow.StorageID), MultipartUpload: &types.CompletedMultipartUpload{Parts: manifest}}); err != nil {
+		t.Fatal("prepare real multipart-before-DB recovery", err)
+	}
 	if err = store.Move(t.Context(), recoveryRow.Staging, recoveryRow.Final); err != nil {
 		t.Fatal("prepare real copy-before-DB recovery fault")
 	}
@@ -407,17 +435,19 @@ func TestKindAssetDeployment(t *testing.T) {
 	l.kube("", "scale", "statefulset/asset-store", "--replicas=0")
 	l.kube("", "wait", "--for=delete", "pod/asset-store-0", "--timeout=90s")
 	waitHealth(503)
-	upload(reader, alice, pending, 0, 7, 503)
+	// An absent Pod can cause an immediate connection failure or a network
+	// timeout. Both must fail closed, preserving the P6.2 error distinction.
+	upload(reader, alice, pending, 0, cut, 503, 504)
 	if row := l.assetRecord(pending.Asset.ID); row.Received != 0 || row.AssetReceived != 0 || row.State != "staging" || row.SessionState != "active" {
 		t.Fatal("unavailable storage incorrectly committed chunk progress")
 	}
-	l.request(reader, alice, "GET", "/api/me/assets/"+created.Asset.ID+"/content", "", nil, 503)
+	l.request(reader, alice, "GET", "/api/me/assets/"+created.Asset.ID+"/content", "", nil, 503, 504)
 	l.kube("", "scale", "statefulset/asset-store", "--replicas=1")
 	l.kube("", "rollout", "status", "statefulset/asset-store", "--timeout=120s")
 	waitHealth(204)
 	storeRestored = true
 	assertDownload(restarted, created)
-	upload(reader, alice, pending, 0, 7, 200)
+	upload(reader, alice, pending, 0, cut, 200)
 	l.request(reader, alice, "DELETE", "/api/me/assets/upload-sessions/"+pending.UploadSession.ID, "", nil, 204)
 	t.Log("PASS: real S3 outage fails readiness/upload/download closed, preserves DB offset, and recovers using the same PVC")
 
