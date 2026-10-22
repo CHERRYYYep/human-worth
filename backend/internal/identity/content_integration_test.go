@@ -698,7 +698,7 @@ DROP FUNCTION IF EXISTS content.test_delay_task_drafts();`
 	defer blocked.Rollback(context.Background())
 	_, err = blocked.Exec(ctx, "SELECT id FROM content.task_drafts WHERE id=$1 FOR UPDATE", draft.ID)
 	must(t, err)
-	check(request(0, "PUT", path, `{"expectedRevision":1,"content":`+initial+`}`, alice, aliceSession.CsrfToken, ""), 503)
+	check(request(0, "PUT", path, `{"expectedRevision":1,"content":`+initial+`}`, alice, aliceSession.CsrfToken, ""), 504)
 	must(t, blocked.Rollback(ctx))
 	var unchanged int64
 	must(t, lab.db.QueryRow(ctx, "SELECT revision FROM content.task_drafts WHERE id=$1", draft.ID).Scan(&unchanged))

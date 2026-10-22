@@ -13,6 +13,7 @@ import (
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
@@ -63,6 +64,7 @@ type Handler struct {
 	window   time.Time
 	starts   int
 	inflight chan struct{}
+	uploads  chan struct{}
 	latency  *prometheus.HistogramVec
 }
 
@@ -74,7 +76,7 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 	if options.Logger == nil {
 		options.Logger = slog.Default()
 	}
-	h := &Handler{client: client, options: options, host: parsed.Host, inflight: make(chan struct{}, 64)}
+	h := &Handler{client: client, options: options, host: parsed.Host, inflight: make(chan struct{}, 64), uploads: make(chan struct{}, 2)}
 	if options.Registry != nil {
 		h.latency = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "human_worth_http_duration_seconds", Help: "API request duration", Buckets: []float64{.01, .05, .1, .25, .5, 1, 2, 5, 15}}, []string{"operation", "status"})
 		options.Registry.MustRegister(h.latency)
@@ -116,48 +118,26 @@ func New(client pb.IdentityServiceClient, options Options) (http.Handler, error)
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		w.Write(content)
 	})
-	for _, route := range []struct {
-		method, path, operation string
-		handler                 http.HandlerFunc
-	}{
-		{"POST", "/api/me/tasks/{taskId}/review-requests", "requestTaskReview", h.requestTaskReview},
-		{"GET", "/api/admin/reviews", "listReviews", h.listReviews},
-		{"GET", "/api/admin/reviews/{reviewId}", "getReview", h.getReview},
-		{"POST", "/api/admin/reviews/{reviewId}/decision", "decideReview", h.decideReview},
-		{"GET", "/api/admin/reviews/{reviewId}/assets/{assetId}/content", "downloadReviewAsset", h.downloadReviewAsset},
-		{"POST", "/api/tasks", "createTaskDraft", h.createDraft},
-		{"GET", "/api/me/submissions", "listMySubmissions", h.listSubmissions},
-		{"POST", "/api/me/assets/upload-sessions", "createAssetUploadSession", h.createAssetUploadSession},
-		{"PUT", "/api/me/assets/upload-sessions/{uploadSessionId}/content", "uploadAsset", h.uploadAsset},
-		{"POST", "/api/me/assets/{assetId}/complete", "completeAsset", h.completeAsset},
-		{"DELETE", "/api/me/assets/upload-sessions/{uploadSessionId}", "abortAsset", h.abortAsset},
-		{"GET", "/api/me/upload-sessions/{uploadSessionId}", "getAssetUploadSession", h.getAssetUploadSession},
-		{"GET", "/api/me/assets", "listMyAssets", h.listMyAssets},
-		{"GET", "/api/me/assets/{assetId}", "getAssetMetadata", h.getAssetMetadata},
-		{"GET", "/api/me/assets/{assetId}/content", "downloadAsset", h.downloadAsset},
-		{"GET", "/api/tasks/{taskId}/entries/{entryId}/assets/{assetId}/content", "downloadPublicAsset", h.downloadPublicAsset},
-		{"GET", "/api/me/tasks/{taskId}", "getMyTaskSubmission", h.getDraft},
-		{"PUT", "/api/me/tasks/{taskId}", "replaceTaskDraft", h.replaceDraft},
-		{"GET", "/api/auth/google", "startGoogleLogin", h.start}, {"GET", "/api/auth/google/callback", "completeGoogleLogin", h.callback},
-		{"GET", "/api/me", "getCurrentSession", h.me}, {"POST", "/api/auth/logout", "logoutCurrentSession", h.logout},
-		{"POST", "/api/me/mcp-tokens", "createMcpToken", h.createToken}, {"GET", "/api/me/mcp-tokens", "listMyMcpTokens", h.listTokens},
-		{"DELETE", "/api/me/mcp-tokens/{credentialId}", "revokeMcpToken", h.revokeToken},
-	} {
-		mux.HandleFunc(route.method+" "+route.path, h.operation(route.operation, route.handler))
+	routeHandlers := h.httpHandlers()
+	handlerPresence := make(map[string]bool, len(routeHandlers))
+	for name := range routeHandlers {
+		handlerPresence[name] = true
 	}
-	if options.Challenge != nil {
-		h.challengeRoutes(mux)
+	if err := contract.ValidateHTTPHandlers(handlerPresence); err != nil {
+		return nil, err
+	}
+	for _, route := range contract.HTTPRoutes() {
+		if route.Feature == "challenge" && options.Challenge == nil {
+			continue
+		}
+		mux.HandleFunc(route.Method+" "+route.Path, h.operation(route, routeHandlers[route.Name]))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
-		maxRequestURI := 8192
-		if r.URL.Path == "/api/me/submissions" {
-			// A legal UTF-8 category can expand to three URL-encoded bytes per byte.
-			maxRequestURI = 40 << 10
-		}
+		maxRequestURI := contract.MaxRequestURIBytes(r.Method, r.URL.Path)
 		if len(r.RequestURI) > maxRequestURI {
 			problem(w, 414, "invalid_request")
 			return
@@ -194,7 +174,8 @@ func (h *Handler) secure(r *http.Request) bool {
 	}
 	return false
 }
-func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc {
+func (h *Handler) operation(route contract.HTTPRoute, next http.HandlerFunc) http.HandlerFunc {
+	name := route.Name
 	return func(w http.ResponseWriter, r *http.Request) {
 		began := time.Now()
 		ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
@@ -224,34 +205,16 @@ func (h *Handler) operation(name string, next http.HandlerFunc) http.HandlerFunc
 		requestID := base64.RawURLEncoding.EncodeToString(id)
 		w.Header().Set("X-Request-ID", requestID)
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-request-id", requestID)
-		timeout := 2 * time.Second
-		if name == "listMySubmissions" || name == "requestTaskReview" || name == "listReviews" {
-			timeout = 5 * time.Second
-		}
-		bodyLimit := int64(16384)
-		// Challenge 初始包和三个提示可以超过身份接口的 16 KiB 请求上限。
-		if name == "startChallengeRun" || name == "restartChallengeRun" {
-			bodyLimit = 1 << 20
-			timeout = 15 * time.Second
-		}
-		if name == "completeGoogleLogin" {
-			timeout = 15 * time.Second
-		}
-		if name == "uploadAsset" {
-			timeout = 15 * time.Minute
-		}
-		if name == "downloadAsset" || name == "downloadPublicAsset" || name == "downloadReviewAsset" {
-			timeout = 15 * time.Minute
-		}
-		if name == "completeAsset" {
-			timeout = 30 * time.Second
+		timeout := route.Timeout
+		if timeout == 0 {
+			timeout = contract.DefaultHTTPTimeout
 		}
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		r = r.WithContext(ctx)
-		maxBody := bodyLimit
-		if name == "uploadAsset" {
-			maxBody = 32<<20 + 1
+		maxBody := route.MaxBodyBytes
+		if maxBody == 0 {
+			maxBody = 16384
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		next(w, r)
@@ -276,10 +239,17 @@ func problem(w http.ResponseWriter, code int, reason string) {
 }
 func rpcError(w http.ResponseWriter, err error) { rpcErrorFor(w, err, "identity_unavailable") }
 func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
+	if contextErr := platform.ContextError(err); contextErr != nil {
+		err = contextErr
+	}
 	s := status.Convert(err)
 	code := 503
 	reason := s.Message()
 	switch s.Code() {
+	case codes.DeadlineExceeded:
+		code = http.StatusGatewayTimeout
+	case codes.Canceled:
+		reason = "request_cancelled"
 	case codes.InvalidArgument:
 		code = 400
 		if reason == "initial_bundle_required" {
@@ -413,10 +383,15 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, response.RedirectPath, 303)
 }
-func (h *Handler) actor(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
-	return h.actorFor(w, r, "identity", method)
+func (h *Handler) actor(w http.ResponseWriter, r *http.Request, operation contract.OperationID) (string, bool) {
+	return h.actorFor(w, r, operation)
 }
-func (h *Handler) actorFor(w http.ResponseWriter, r *http.Request, audience, method string) (string, bool) {
+func (h *Handler) actorFor(w http.ResponseWriter, r *http.Request, operation contract.OperationID) (string, bool) {
+	definition, ok := contract.LookupOperation(operation)
+	if !ok || !definition.HasPolicy {
+		problem(w, 500, "internal_error")
+		return "", false
+	}
 	session, err := cookie(r, SessionCookie)
 	if err != nil {
 		problem(w, 400, "invalid_request")
@@ -431,7 +406,7 @@ func (h *Handler) actorFor(w http.ResponseWriter, r *http.Request, audience, met
 		problem(w, 400, "invalid_request")
 		return "", false
 	}
-	request := &pb.ResolvePrincipalRequest{Audience: audience, FullMethod: method, Origin: r.Header.Get("Origin"), CsrfToken: r.Header.Get("X-CSRF-Token")}
+	request := &pb.ResolvePrincipalRequest{Audience: definition.Policy.Audience, FullMethod: definition.FullMethod, Origin: r.Header.Get("Origin"), CsrfToken: r.Header.Get("X-CSRF-Token")}
 	if len(headers) == 1 {
 		kind, value, ok := strings.Cut(headers[0], " ")
 		if !ok || kind != "Bearer" || value == "" || strings.ContainsAny(value, " \t\r\n") {
@@ -455,7 +430,7 @@ func jsonResponse(w http.ResponseWriter, code int, value any) {
 	json.NewEncoder(w).Encode(value)
 }
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actor(w, r, pb.IdentityService_GetCurrentSession_FullMethodName)
+	actor, ok := h.actor(w, r, contract.CurrentSession)
 	if !ok {
 		return
 	}
@@ -471,7 +446,7 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"account": map[string]string{"id": response.Account.Id, "displayName": response.Account.DisplayName}, "role": role, "csrfToken": response.CsrfToken})
 }
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actor(w, r, pb.IdentityService_LogoutCurrentSession_FullMethodName)
+	actor, ok := h.actor(w, r, contract.Logout)
 	if !ok {
 		return
 	}
@@ -507,7 +482,7 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	return true
 }
 func (h *Handler) createToken(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actor(w, r, pb.IdentityService_CreateMcpToken_FullMethodName)
+	actor, ok := h.actor(w, r, contract.CreateMCPToken)
 	if !ok {
 		return
 	}
@@ -539,7 +514,7 @@ func tokenJSON(token *pb.McpToken) map[string]any {
 	return map[string]any{"id": token.Id, "name": token.Name, "createRequestId": token.CreateRequestId, "state": state, "createdAt": token.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano), "expiresAt": token.ExpiresAt.AsTime().UTC().Format(time.RFC3339Nano), "revokedAt": revoked}
 }
 func (h *Handler) listTokens(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actor(w, r, pb.IdentityService_ListMyMcpTokens_FullMethodName)
+	actor, ok := h.actor(w, r, contract.ListMCPTokens)
 	if !ok {
 		return
 	}
@@ -572,7 +547,7 @@ func (h *Handler) listTokens(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"items": items, "nextCursor": cursor})
 }
 func (h *Handler) revokeToken(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actor(w, r, pb.IdentityService_RevokeMcpToken_FullMethodName)
+	actor, ok := h.actor(w, r, contract.RevokeMCPToken)
 	if !ok {
 		return
 	}

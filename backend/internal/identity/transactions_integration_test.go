@@ -206,9 +206,13 @@ func TestTransactionCleanupAndSharedScope(t *testing.T) {
 	must(t, err)
 	t.Cleanup(pool.Close)
 	store := postgres.New(pool)
-	for _, mode := range []string{"error", "panic", "cancel", "commit"} {
+	for _, mode := range []string{"error", "panic", "cancel", "deadline", "commit"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
+			if mode == "deadline" {
+				cancel()
+				ctx, cancel = context.WithTimeout(t.Context(), 200*time.Millisecond)
+			}
 			defer cancel()
 			id := newID("acc")
 			account, err := domain.NewAccount(id, "transaction test")
@@ -234,6 +238,8 @@ func TestTransactionCleanupAndSharedScope(t *testing.T) {
 						panic(failure)
 					case "cancel":
 						cancel()
+					case "deadline":
+						<-ctx.Done()
 					}
 					return nil
 				})
@@ -244,8 +250,11 @@ func TestTransactionCleanupAndSharedScope(t *testing.T) {
 			if mode == "error" && !errors.Is(err, failure) {
 				t.Fatal("callback error lost")
 			}
-			if mode == "cancel" && err == nil {
-				t.Fatal("cancelled commit accepted")
+			if mode == "cancel" {
+				grpcCode(t, identitygrpc.Error(err), codes.Canceled)
+			}
+			if mode == "deadline" {
+				grpcCode(t, identitygrpc.Error(err), codes.DeadlineExceeded)
 			}
 			if mode == "commit" {
 				must(t, err)

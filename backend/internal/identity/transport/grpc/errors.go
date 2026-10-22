@@ -30,6 +30,10 @@ func Error(err error) error {
 		code = codes.AlreadyExists
 	case application.Aborted:
 		code = codes.Aborted
+	case application.Canceled:
+		code = codes.Canceled
+	case application.DeadlineExceeded:
+		code = codes.DeadlineExceeded
 	}
 	return status.Error(code, failure.Reason)
 }

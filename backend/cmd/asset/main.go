@@ -14,6 +14,8 @@ import (
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/asset"
+	assetapp "github.com/KDZZZZZZ/human-worth/backend/internal/asset/application"
+	assetpostgres "github.com/KDZZZZZZ/human-worth/backend/internal/asset/repository/postgres"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -58,7 +60,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	identityConn, err := grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
+	identityConn, err := platform.GRPCClient(target, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
 	if err != nil {
 		return errors.New("identity client initialization failed")
 	}
@@ -72,7 +74,7 @@ func run() error {
 		if e != nil {
 			return e
 		}
-		conn, e := grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(65536), grpc.MaxCallSendMsgSize(65536)))
+		conn, e := platform.GRPCClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(65536), grpc.MaxCallSendMsgSize(65536)))
 		if e != nil {
 			return errors.New("content client initialization failed")
 		}
@@ -98,8 +100,26 @@ func run() error {
 		shutdown(c)
 	}()
 	runtime.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "human_worth_database_connections", Help: "Open connections in this replica's pool"}, func() float64 { return float64(db.Stat().TotalConns()) }))
-	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, asset.Authorization), grpc.ChainStreamInterceptor(runtime.Stream, asset.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(512<<10), grpc.MaxSendMsgSize(512<<10), grpc.MaxConcurrentStreams(64))
-	pb.RegisterAssetServiceServer(server, &asset.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(identityConn), Storage: storage, Content: contentClient})
+	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, asset.Authorization), grpc.ChainStreamInterceptor(runtime.Stream, asset.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(platform.AssetUploadMessageBytes), grpc.MaxSendMsgSize(512<<10), grpc.MaxConcurrentStreams(64))
+	browserUpload := assetapp.BrowserUploadUseCase{
+		Repository:    assetpostgres.UploadRepository{DB: db},
+		Storage:       storage,
+		ChunkBytes:    platform.AssetUploadChunkBytes,
+		MaxAssetBytes: 32 << 20,
+	}
+	if multipart, ok := storage.(assetapp.MultipartStorage); ok {
+		browserUpload.Multipart = multipart
+	}
+	uploadRepository := assetpostgres.UploadRepository{DB: db}
+	uploadSessions := assetapp.SessionUseCase{Repository: uploadRepository}
+	completeUpload := assetapp.CompleteUploadUseCase{Repository: uploadRepository, Storage: storage}
+	abortUpload := assetapp.AbortUploadUseCase{Repository: uploadRepository, Storage: storage}
+	cleanupUploads := assetapp.CleanupUseCase{Repository: uploadRepository, Storage: storage}
+	challengeUpload := assetapp.ChallengeUploadUseCase{Repository: uploadRepository, Storage: storage, ChunkBytes: platform.AssetUploadChunkBytes, MaxAssetBytes: 32 << 20}
+	if multipart, ok := storage.(assetapp.ChallengeMultipartStorage); ok {
+		challengeUpload.Multipart = multipart
+	}
+	pb.RegisterAssetServiceServer(server, &asset.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(identityConn), Storage: storage, Content: contentClient, BrowserUpload: browserUpload, UploadSessions: uploadSessions, CompleteUseCase: completeUpload, AbortUseCase: abortUpload, ChallengeUpload: challengeUpload})
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	ready := func(check context.Context) error {
@@ -155,7 +175,7 @@ func run() error {
 			case <-ticker.C:
 				check, cancel := context.WithTimeout(ctx, 30*time.Second)
 				if storage != nil {
-					if e := asset.CleanupExpired(check, db, storage); e != nil {
+					if e := cleanupUploads.Execute(check); e != nil {
 						runtime.Log.Warn("object cleanup incomplete")
 					}
 				}

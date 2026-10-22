@@ -840,7 +840,9 @@ func (x *CreateUploadSessionResponse) GetUploadSession() *UploadSession {
 // Browser upload frames use actor_assertion/upload_session_id/offset. Challenge
 // upload frames use access/upload_id/filename/media_type/bytes/sha256. Keeping
 // both forms in one stream preserves one AssetService while separating auth
-// and ownership rules in the server implementation.
+// and ownership rules in the server implementation. Browser chunks are 5 MiB,
+// except for the final remainder; offsets are multiples of 5 MiB. Challenge
+// frames may remain small and are coalesced within the stream by Asset.
 type UploadAssetRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Access          *Access                `protobuf:"bytes,1,opt,name=access,proto3" json:"access,omitempty"`

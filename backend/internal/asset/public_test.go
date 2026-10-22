@@ -44,7 +44,7 @@ func TestPublicAccessFailClosed(t *testing.T) {
 	if status.Code(err) != codes.Unavailable {
 		t.Fatal(err)
 	}
-	for _, remoteErr := range []error{nil, status.Error(codes.Unavailable, "private database path must not leak"), context.DeadlineExceeded} {
+	for _, remoteErr := range []error{nil, status.Error(codes.Unavailable, "private database path must not leak"), context.DeadlineExceeded, status.Error(codes.DeadlineExceeded, "private deadline detail"), status.Error(codes.Canceled, "private cancel detail")} {
 		called := false
 		s.Content = publicAccessClient{check: func(c context.Context, r *contentpb.CheckAssetAccessRequest) (*contentpb.CheckAssetAccessResponse, error) {
 			called = true
@@ -60,6 +60,11 @@ func TestPublicAccessFailClosed(t *testing.T) {
 		_, err = s.publicAsset(ctx, ref)
 		if !called || err == nil || status.Code(err) == codes.OK || status.Convert(err).Message() == "private database path must not leak" {
 			t.Fatal("failed-open or leaked dependency", err)
+		}
+		if status.Code(remoteErr) == codes.Canceled || status.Code(remoteErr) == codes.DeadlineExceeded {
+			if status.Code(err) != status.Code(remoteErr) || status.Convert(err).Message() == status.Convert(remoteErr).Message() {
+				t.Fatal("lost context status or leaked dependency detail", err)
+			}
 		}
 	}
 }

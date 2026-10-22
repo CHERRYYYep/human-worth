@@ -564,6 +564,41 @@ backend/internal/challenge/
 
 **兼容与检查**：SQL 迁移不变；私有 `StoredRun` 仍按旧 protobuf 格式存储，应用层和领域层使用纯 Go 类型；配置和结果的摘要继续使用旧的确定性 protobuf 编码。显式映射不经过通用 JSON 中转，保留 oneof、可空字段、大整数和时间纳秒。[旧数据及事务测试](../backend/internal/challenge/compatibility_integration_test.go)直接插入旧格式数据并验证读取、幂等重放与回滚；[协议兼容测试](../backend/internal/challenge/adapter/protobuf/compatibility_test.go)比较旧格式字节和摘要；[架构检查](../backend/internal/challenge/architecture_test.go)限制各层依赖，防止网络、SQL 或进程操作重新进入核心。模块集成测试入口仍为 `internal/challenge`，原有 HTTP、RPC 和 worker 行为回归继续覆盖分层后的实现。
 
+<a id="p7-determinism"></a>
+**P7：共享检查与显式领域输入（2026-10-21）**：人类确认本次范围为复用架构依赖检查、将 Challenge 工作项 ID 改为领域外部输入；跨服务测试目录暂不搬迁。具体函数签名、辅助包和测试组织属于 Agent Self-Claimed 实现选择。
+
+Identity 与 Challenge 的架构测试共用 [architecturetest](../backend/internal/architecturetest/dependencies.go) 遍历源码、解析导入、跳过测试文件，并禁止根包放置绕过分层的生产代码；各模块仍声明自己的依赖规则，保留 Challenge 的 `adapter/protobuf` 兼容例外。共享检查器按部署边界拒绝业务服务、gateway 与 challenge-worker 直接导入彼此的 `internal` 实现包；`internal/platform` 作为共享技术包不归属业务服务，仍由各模块自己的层级规则决定是否可用。新增独立部署组件时须同步更新共享检查器的组件清单。Challenge domain 额外拒绝 `crypto/rand`、`math/rand`、`math/rand/v2` 及直接网络、数据库和进程依赖。共享检查的测试覆盖允许与拒绝路径、两种跨服务方向、共享 `platform`、生成契约、同服务导入、带别名的导入、测试文件排除和源码解析失败。
+
+`domain.Engine` 的 `SetTraining`、`SetValidation`、`RankGeneratedWork`、`ExplainOwnWork` 由调用方传入工作项 ID；`ApplyResult` 显式接收下一工作项 ID 和既有的 `now`，未创建下一工作项的分支不使用该 ID。随机生成统一留在 [application/ids.go](../backend/internal/challenge/application/ids.go)，沿用生产环境的前缀与 16 字节随机值编码格式，Run、Attempt、grant 和调用预留 ID 的生成也不再借用领域函数。已持久化工作项不会因为重试被换成新 ID；租约恢复仍为同一工作项创建新 Attempt，结果回执与旧数据编码契约不变。
+
+[领域重放测试](../backend/internal/challenge/domain/engine_test.go) 使用固定状态、结果、ID 和时间，比较每次推进的完整状态，覆盖标准生成、独立验证、打包、执行、排序、解释、下一轮与拟合失败分支。这里的可重放指领域计算可复现，不代表外部模型或整条分布式流程可离线重放。import 检查也无法证明所有行为都没有副作用，例如 `time` 仍因时间类型而允许导入；业务行为、真实 PostgreSQL、mTLS RPC 与多副本恢复仍由各自测试验收，不能以架构检查通过替代。
+
+P7 本地验收（2026-10-21）：以下命令均退出 0。集成测试使用一次性 PostgreSQL 18.4，84 个测试及子用例通过，无跳过；真实 HTTP/gRPC、数据库和双 Service 实例参与执行，Content/Asset/Voting/Identity 仍为现有有状态 gRPC fake，没有调用真实模型或部署沙箱。
+
+```sh
+# backend；CHALLENGE_TEST_DATABASE_URL_FILE 指向仓库外权限 600 的专用临时 DSN 文件
+go test -race ./internal/architecturetest ./internal/challenge/... ./internal/identity/... -count=1
+CHALLENGE_TEST_DATABASE_URL_FILE=/path/to/private/test-dsn \
+  go test -race -tags=integration ./internal/challenge/... -count=1 -timeout=180s -json
+go vet ./...
+go vet -tags=integration ./internal/challenge/...
+go test -tags=live ./internal/challenge/adapter/execution -run '^$'
+go build ./cmd/...
+# 仓库根目录
+npm run ci
+git diff --check
+```
+
+另短暂将领域工作项创建改回内部随机生成，架构检查与两项领域重放测试均按预期失败；恢复代码后针对性 race 测试通过，证明检查能够识别原问题。`live` 命令仅验证编译；`npm run ci` 的 5 项 Node HTTP 与 27 项 Python 检查通过。临时 PostgreSQL 容器、数据卷和凭据已清理；本轮未修改 Proto、迁移或公开 API，未提交、推送或部署。
+
+2026-10-21 补充架构边界修复：共享扫描器现拒绝 Challenge→Identity 与 Identity→Challenge 的内部包导入，且明确允许同服务包、`internal/platform` 和 `backend/gen` 契约。`go test -race ./internal/architecturetest ./internal/challenge/... ./internal/identity/... -count=1`、对应 `go vet`、`python3 scripts/check_docs.py` 与 `git diff --check` 均退出 0。
+
+**DTO 与协议映射取舍（2026-10-19；2026-10-22 修订）**：应用 DTO 与领域对象继续分开，Proto mapper 继续显式维护边界。经检查，DTO 提供不依赖生成 Proto 的应用服务契约，领域对象承载状态与规则；目前没有足够证据证明应按字段相似度合并它们。2026-10-22 人类决定删除当前无调用方的六个反向转换，取代此前为未来消费者暂时保留的决定：`ToStartRunRequest`、`FromStartRunResponse`、`ToGetRunRequest`、`FromGetRunResponse`、`ToCancelRunRequest`、`FromCancelRunResponse`。服务端正在使用的对应转换、worker 调用所需映射及持久化兼容层继续保留。
+
+未来出现实际消费者时，先确认调用方向与 DTO 边界是否适用，再按需找回函数并核对当时的 Proto 字段、身份断言和错误处理，用真实调用路径补充验证。旧实现可通过 `git show 52ed553646f00136649fb3a94b20cb56c5db6465:backend/internal/challenge/adapter/protobuf/messages.go` 查看；只提取需要的函数，避免覆盖后续文件修改。不要仅为形式对称给其他方法预先补齐转换。
+
+**Clone 与可变配置的边界（2026-10-19）**：当前 `domain.Clone*` 对参数 `map[string]any` 使用 `maps.Clone`，复制顶层键值表；map 内部的嵌套 map、slice 等引用值仍可能共享。当前配置在验证、指纹计算、状态保存和 worker 下发路径中按只读数据使用，因此接受这一浅复制行为，本轮不增加递归复制或额外依赖。若以后有代码需要修改嵌套参数，或这些对象跨并发执行者共享且至少一方会写入，应重新评估所有权约定；届时限定允许的数据类型，选择与其匹配的深复制或不可变表示，并用修改克隆后原值不变的测试覆盖嵌套 map、slice、nil 与普通标量。不得把当前实现描述成任意 `map[string]any` 的完全隔离副本。
+
 此前分层重构在独立的一次性 PostgreSQL 18 上运行 `go test -race -tags=integration ./... -count=1 -timeout=120s`，退出 0；Challenge 10.694 秒、执行适配器 4.847 秒、Identity 42.771 秒。`buf lint`、`buf generate` 及生成一致性、`go vet ./...`、`go build ./cmd/...` 和 `npm run ci` 均退出 0，Node HTTP 5 项与 Python 19 项通过。另以 `go test -tags=live ./internal/challenge/adapter/execution -run '^$'` 验证 opt-in 测试可编译，没有调用真实模型。该重构逐文件对比确认 OpenAPI 整份内容、全部 Proto 字段／服务契约及原迁移 SQL 不变。
 
 本轮 H12 实现在一次性 PostgreSQL 18 上再次运行上述全量 race 集成测试，退出 0；Challenge 13.535 秒、执行适配器 5.767 秒、Identity 39.395 秒。测试通过真实模型 HTTP 测试服务和 worker gRPC 验证每轮先生成标准再独立判断、失败后使用新样本、达标后冻结、每工作项只调用一次，以及材料不完整、非法 JSON 和工具调用的拒绝路径。`go vet ./...`、`go build ./cmd/...`、`npm run ci` 和 live 测试编译均退出 0。Proto 仅为标准生成输入增加可选上下文字段，`buf lint`、生成一致性及相对 `597ed51` 的 `buf breaking` 通过；HTTP 字段和迁移 SQL 保持不变。没有调用真实模型，不据此声明排名质量或沙箱已验收。
@@ -644,5 +679,10 @@ backend/internal/challenge/
 | `FAILED_PRECONDITION / ABORTED` | 409；终态写入、版本冲突、同键不同内容、`STALE_LEASE`、材料失效 |
 | `RESOURCE_EXHAUSTED` | 429；调用方限流；运行内部预算耗尽记录运行原因，不泄露余额 |
 | `UNAVAILABLE / DEADLINE_EXCEEDED` | 503 / 504；写入结果可能未知，使用幂等键查回，不直接重跑模型 |
+| `CANCELLED` | `request_cancelled`；外层 HTTP 连接仍有效时为 503，调用方已断开时不承诺响应送达；取消请求不替代业务 CancelRun |
 
 同步请求超时不等于取消异步 Run。取消指令已持久化但响应丢失时，重试返回同一取消进度。公开错误只给稳定原因和 request ID；内部实验指标与原始事件不进入公网 Problem。
+
+### Asset multipart 上传适配（2026-10-20）
+
+P6.1 保留 E → Challenge 的 64 KiB 输入帧与每帧 live/lease 校验，Asset 在单次流内聚合为 5 MiB part。part 编号、ETag、upload ID 和已接收 offset 落库；Challenge 的整流 advisory lock 保持不变。重传仍从头开始，清理旧 multipart 后创建新上传；若上次已确认全部 part，则优先恢复 Complete 与 ready。未完成流取消后由重传或 24 小时过期清理中止旧 multipart，清理任务不会打断持锁活跃流。协议和实际验证边界见 [Asset multipart](backend-asset.md#multipart-上传与重试写入语义2026-10-20)。

@@ -2,8 +2,10 @@ package protobuf
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	asset "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
@@ -11,10 +13,30 @@ import (
 	content "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	voting "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/challenge/domain"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func TestContextErrorWireContract(t *testing.T) {
+	for _, tc := range []struct {
+		cause  error
+		code   codes.Code
+		reason string
+	}{
+		{context.Canceled, codes.Canceled, "request_cancelled"},
+		{context.DeadlineExceeded, codes.DeadlineExceeded, "deadline_exceeded"},
+	} {
+		for _, err := range []error{tc.cause, fmt.Errorf("private details: %w", tc.cause), FromError(status.Error(tc.code, "private details"))} {
+			got := status.Convert(Error(domain.DependencyError(err)))
+			if got.Code() != tc.code || got.Message() != tc.reason {
+				t.Errorf("%v: %v", err, got)
+			}
+		}
+	}
+}
 
 // Existing protobuf bytes are the compatibility oracle, including presence,
 // oneof variants, nanoseconds and integers that cannot survive a JSON float bridge.

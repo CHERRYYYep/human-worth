@@ -114,7 +114,7 @@ func TestKindModerationDeployment(t *testing.T) {
 	}
 	l.request(serviceClient, user, "GET", "/api/me", "", nil, 200)
 	l.request(serviceClient, user, "GET", "/api/me/tasks/"+task.ID, "", nil, 200)
-	l.request(serviceClient, admin, "GET", "/api/admin/reviews", "", nil, 503)
+	l.request(serviceClient, admin, "GET", "/api/admin/reviews", "", nil, 503, 504)
 	l.request(serviceClient, user, "POST", "/api/tasks", `{"title":"outage draft","summary":"","description":"","entries":[]}`, map[string]string{"Idempotency-Key": "kind-review-outage-draft"}, 201)
 	var outageUpload kindUpload
 	kindDecode(t, l.request(serviceClient, user, "POST", "/api/me/assets/upload-sessions", body, map[string]string{"Idempotency-Key": "kind-review-outage-upload"}, 201), &outageUpload)
@@ -131,7 +131,7 @@ func TestKindModerationDeployment(t *testing.T) {
 	}
 	l.request(l.client, user, "PUT", "/api/me/tasks/"+task.ID, `{"expectedRevision":1,"content":`+draft+`}`, nil, 409)
 	restore("moderation")
-	t.Log("PASS: Moderation outage preserves both ready Gateway endpoints and login/session/draft/upload/submission via real NodePort/Service; review list alone returns 503")
+	t.Log("PASS: Moderation outage preserves both ready Gateway endpoints and login/session/draft/upload/submission via real NodePort/Service; review list alone reports dependency unavailability or deadline")
 	// Tolerate bounded discovery/lease recovery, never loosen individual RPC deadline.
 	poll := func(id, want string) kindReview {
 		t.Helper()
@@ -179,7 +179,7 @@ func TestKindModerationDeployment(t *testing.T) {
 	if rejected.Status != "pending" || rejected.DeliveryState != "pending" {
 		t.Fatal("decision declared effective before Content receipt")
 	}
-	l.request(l.client, admin, "GET", assetPath, "", nil, 503)
+	l.request(l.client, admin, "GET", assetPath, "", nil, 503, 504)
 	restore("content")
 	// Separate clients resolve Content independently. Rollout/Moderation receipt
 	// does not imply Asset's or Gateway's gRPC resolver has recovered yet.
@@ -196,14 +196,18 @@ func TestKindModerationDeployment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			io.Copy(io.Discard, response.Body)
+			body, readErr := io.ReadAll(response.Body)
 			response.Body.Close()
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
 			if response.StatusCode == expected {
 				return
 			}
-			if response.StatusCode != 503 || time.Now().After(deadline) {
+			if (response.StatusCode != 503 && response.StatusCode != 504) || time.Now().After(deadline) {
 				t.Fatalf("recovered GET %s: got %d, want %d", path, response.StatusCode, expected)
 			}
+			l.dependencyFailure(response.StatusCode, body)
 			time.Sleep(300 * time.Millisecond)
 		}
 	}

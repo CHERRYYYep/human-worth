@@ -8,6 +8,7 @@ import (
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/challenge/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/challenge/application/dto"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/challenge/domain"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -30,7 +31,11 @@ func Error(err error) error {
 	if !ok {
 		return status.Error(codes.Unavailable, "challenge_unavailable")
 	}
-	return status.Error(code, err.Error())
+	out := status.Error(code, err.Error())
+	if contextErr := platform.ContextError(out); contextErr != nil {
+		return contextErr
+	}
+	return out
 }
 func FromError(err error) error {
 	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -121,7 +121,9 @@ message CreateUploadSessionResponse {
 // Browser upload frames use actor_assertion/upload_session_id/offset. Challenge
 // upload frames use access/upload_id/filename/media_type/bytes/sha256. Keeping
 // both forms in one stream preserves one AssetService while separating auth
-// and ownership rules in the server implementation.
+// and ownership rules in the server implementation. Browser chunks are 5 MiB,
+// except for the final remainder; offsets are multiples of 5 MiB. Challenge
+// frames may remain small and are coalesced within the stream by Asset.
 message UploadAssetRequest {
   Access access = 1;
   string upload_id = 2;

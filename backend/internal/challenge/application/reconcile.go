@@ -83,7 +83,7 @@ func (s *Service) reconcileOne(ctx context.Context, runID string) error {
 		var batch *domain.PreferenceBatch
 		batch, inputs, err = s.batch(ctx, next, "training")
 		if err == nil {
-			s.engine.SetTraining(next, batch, inputs)
+			s.engine.SetTraining(next, batch, inputs, newID("work_"))
 			next.Pending = ""
 			err = s.checkInputs(ctx, next, next.Assignment)
 		}
@@ -92,7 +92,7 @@ func (s *Service) reconcileOne(ctx context.Context, runID string) error {
 		var ref *domain.SnapshotRef
 		input, ref, err = s.readSample(ctx, &domain.SnapshotRef{TaskId: r.Run.TaskId, TaskRevision: r.Task.Revision, CommentCutoff: domain.TimePtr(time.Now())})
 		if err == nil {
-			err = s.engine.RankGeneratedWork(next, input, ref)
+			err = s.engine.RankGeneratedWork(next, input, ref, newID("work_"))
 		}
 		if err == nil {
 			next.Pending = ""
@@ -160,7 +160,7 @@ func (s *Service) reconcileOne(ctx context.Context, runID string) error {
 				return nil
 			})
 		}
-		return domain.UnavailableError()
+		return domain.DependencyError(err)
 	}
 	return s.mutate(ctx, runID, func(_ Tx, current *Record) error {
 		if current.Version != r.Version {
@@ -191,10 +191,10 @@ func (s *Service) register(ctx context.Context, st *domain.State) (*domain.Regis
 			return nil, domain.UnavailableError()
 		}
 	} else if domain.ErrorCode(err) != domain.NotFound {
-		return nil, domain.UnavailableError()
+		return nil, domain.DependencyError(err)
 	}
 	if receipt == nil {
-		a := s.engine.ExplainOwnWork(st)
+		a := s.engine.ExplainOwnWork(st, newID("work_"))
 		if err = s.checkInputs(ctx, st, a); err != nil {
 			return nil, err
 		}

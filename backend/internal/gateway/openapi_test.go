@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -83,6 +84,12 @@ func TestOpenAPIContract(t *testing.T) {
 	} {
 		if operations[id] != route {
 			t.Errorf("%s: got %q, want %q", id, operations[id], route)
+		}
+	}
+	for _, route := range contract.HTTPRoutes() {
+		want := strings.ToLower(route.Method) + " " + route.Path
+		if got := operations[route.SpecOperationID()]; got != want {
+			t.Errorf("catalogued HTTP operation %s: got %q, want %q", route.Name, got, want)
 		}
 	}
 }

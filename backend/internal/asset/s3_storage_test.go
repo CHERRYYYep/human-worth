@@ -44,7 +44,9 @@ func TestS3StorageWireAndRecovery(t *testing.T) {
 		key := strings.TrimPrefix(r.URL.Path, "/test-assets/")
 		status, body := 200, []byte{}
 		headers := http.Header{}
-		if r.Method == "HEAD" && r.URL.Path == "/test-assets" { // readiness
+		if r.Method == "GET" && r.URL.Query().Has("uploads") {
+			body = []byte(`<ListMultipartUploadsResult><IsTruncated>false</IsTruncated></ListMultipartUploadsResult>`)
+		} else if r.Method == "HEAD" && r.URL.Path == "/test-assets" { // readiness
 		} else {
 			switch r.Method {
 			case "PUT":
@@ -94,6 +96,7 @@ func TestS3StorageWireAndRecovery(t *testing.T) {
 	})}
 	store.client = s3.New(options)
 	ctx := t.Context()
+	storageWriteContract(t, store)
 	if err = CheckStorage(ctx, store); err != nil {
 		t.Fatal(err)
 	}

@@ -66,7 +66,10 @@ func (s *Server) streamAuthorizedAsset(ctx context.Context, row assetRow, author
 		return err
 	}
 	size, err := s.Storage.Stat(ctx, row.FinalKey)
-	if err != nil || size != row.Expected {
+	if err != nil {
+		return unavailable(err)
+	}
+	if size != row.Expected {
 		return status.Error(codes.Unavailable, "asset_unavailable")
 	}
 	reader, err := s.Storage.Open(ctx, row.FinalKey)

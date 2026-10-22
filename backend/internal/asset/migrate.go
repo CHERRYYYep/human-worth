@@ -69,69 +69,11 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 
 func Ready(ctx context.Context, db *pgxpool.Pool) error {
 	var exists bool
-	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset.schema_migrations WHERE version='002_storage_cleanup.sql')`).Scan(&exists); err != nil {
+	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset.schema_migrations WHERE version='003_multipart.sql')`).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
 		return errors.New("asset schema not ready")
 	}
 	return nil
-}
-
-// CleanupExpired locks the same rows as upload/completion. Deletes are
-// idempotent; a failed deletion or commit leaves a durable retry candidate.
-// Never deletes a ready asset or uses a bucket-wide lifecycle rule for final.
-func CleanupExpired(ctx context.Context, db *pgxpool.Pool, storage Storage) error {
-	if storage == nil {
-		return errors.New("storage unavailable")
-	}
-	if _, err := db.Exec(ctx, `UPDATE asset.upload_sessions SET state='expired',updated_at=clock_timestamp() WHERE state='active' AND expires_at<=clock_timestamp()`); err != nil {
-		return err
-	}
-	for i := 0; i < 100; i++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		done, err := cleanupOne(ctx, db, storage)
-		if err != nil {
-			return err
-		}
-		if !done {
-			return nil
-		}
-	}
-	return nil
-}
-func cleanupOne(ctx context.Context, db *pgxpool.Pool, storage Storage) (bool, error) {
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	var session, assetID, staging, final string
-	err = tx.QueryRow(ctx, `SELECT s.id,a.id,a.staging_key,a.final_key
-        FROM asset.upload_sessions s JOIN asset.assets a ON a.id=s.asset_id
-        WHERE s.state IN ('expired','aborted') AND s.storage_cleaned_at IS NULL
-          AND a.state IN ('staging','failed')
-        ORDER BY s.expires_at,s.id LIMIT 1 FOR UPDATE OF s,a SKIP LOCKED`).Scan(&session, &assetID, &staging, &final)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	// A non-ready final can exist after copy succeeded but the DB commit failed.
-	if err = storage.Delete(ctx, staging); err != nil {
-		return false, err
-	}
-	if err = storage.Delete(ctx, final); err != nil {
-		return false, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE asset.assets SET state='failed',updated_at=clock_timestamp() WHERE id=$1`, assetID); err != nil {
-		return false, err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE asset.upload_sessions SET storage_cleaned_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, session); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
 }

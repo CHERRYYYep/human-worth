@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -15,7 +16,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"log/slog"
 	"net/http"
@@ -56,16 +56,7 @@ func Trace(ctx context.Context, service string) (func(context.Context) error, er
 func (r *Runtime) Unary(ctx context.Context, request any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (response any, err error) {
 	began := time.Now()
 	span := trace.SpanFromContext(ctx)
-	requestID := ""
-	if values := metadata.ValueFromIncomingContext(ctx, "x-request-id"); len(values) == 1 && len(values[0]) == 22 {
-		requestID = values[0]
-		for _, c := range requestID {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
-				requestID = ""
-				break
-			}
-		}
-	}
+	requestID := RequestIDFromIncomingContext(ctx)
 	defer func() {
 		if recover() != nil {
 			r.Log.Error("rpc_panic", "method", info.FullMethod)
@@ -90,21 +81,10 @@ func (r *Runtime) Unary(ctx context.Context, request any, info *grpc.UnaryServer
 }
 
 func methodTimeout(method string) time.Duration {
-	timeout := 2 * time.Second
-	switch method {
-	case "/humanworth.content.v1.ContentService/ListMySubmissions", "/humanworth.content.v1.ContentService/RequestTaskReview", "/humanworth.content.v1.ContentService/ApplyReviewDecision", "/humanworth.moderation.v1.ModerationService/CreateReviewCase", "/humanworth.moderation.v1.ModerationService/ListReviews":
-		timeout = 5 * time.Second
-	case "/humanworth.asset.v1.AssetService/UploadAsset", "/humanworth.asset.v1.AssetService/DownloadAsset",
-		"/humanworth.asset.v1.AssetService/DownloadPublicAsset", "/humanworth.asset.v1.AssetService/DownloadReviewAsset":
-		timeout = 15 * time.Minute
-	case "/humanworth.asset.v1.AssetService/CompleteUpload":
-		timeout = 30 * time.Second
-	case "/humanworth.identity.v1.IdentityService/CompleteGoogleLogin",
-		"/humanworth.challenge.v1.ChallengeService/StartRun",
-		"/humanworth.challenge.v1.ChallengeService/RestartRun":
-		timeout = 15 * time.Second
+	if operation, ok := contract.LookupMethod(method); ok && operation.RPCTimeout > 0 {
+		return operation.RPCTimeout
 	}
-	return timeout
+	return contract.DefaultRPCTimeout
 }
 
 type contextServerStream struct {

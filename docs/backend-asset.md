@@ -18,10 +18,10 @@
 以下是为完成首阶段而提出的技术选择，不是人类已经确认的产品参数：
 
 - Asset ID 使用 `ast_` 加 32 个小写十六进制字符；上传会话 ID 使用 `upl_` 加同样长度。ID 是引用标识，不是访问凭据。
-- 首阶段建议最大文件 32 MiB，单个上传 chunk 不超过 256 KiB；允许的检测类型先取 `image/png`、`image/jpeg`、`image/webp`、`application/pdf`、`text/plain`。不接受 SVG、可执行文件和压缩包，后续按真实需求扩展。
+- 首阶段建议最大文件 32 MiB，HTTP 完整上传块固定 5 MiB，末块为剩余字节；允许的检测类型先取 `image/png`、`image/jpeg`、`image/webp`、`application/pdf`、`text/plain`。不接受 SVG、可执行文件和压缩包，后续按真实需求扩展。
 - 生产/双副本存储使用 S3-compatible 共享对象存储；`FileStorage` 仅用于单进程单元测试与临时 FileStorage 集成夹具。配置为 filesystem 时必须显式设置测试开关，禁止以双副本生产模式启动。
 - 完成上传要求创建会话时提供 64 个小写十六进制字符的 SHA-256 期望值，由 Asset 读取对象后重新计算；客户端 `Content-Type` 只作为未信任提示。
-- 采用上传会话创建幂等键、连续 offset 和不透明分页 cursor。控制面调用的目标超时 2 秒，哈希校验和对象复制目标超时 30 秒，文件传输由 HTTP 请求的 15 分钟上限控制。
+- 采用上传会话创建幂等键、连续 offset 和不透明分页 cursor。控制面调用的目标超时 2 秒，完成接口预算 2 分钟，单次 S3 请求超时 30 秒，文件传输由 HTTP 请求的 15 分钟上限控制。
 - Asset 3A 的数据库夹具采用“随机 PostgreSQL 数据库 + 随机 owner/runtime 角色 + 临时 FileStorage + 进程内真实 mTLS gRPC server”；3B 另以 SeaweedFS 4.13 作为隔离 S3-compatible test store，验证两个 adapter/服务实例共享 bucket。这些都是 Agent Self-Claimed 测试方案：不代表 kind rollout、独立 OS 进程部署或生产 HA。
 - 3B kind 业务验收另复用真实 Deployment 模板创建临时 Gateway probe Pod，仅把 `ASSET_TARGET` 固定到不同 worker 上的 Asset Pod IP，保留证书与 NetworkPolicy；未满足的 readiness gate 阻止 probe 被普通 Gateway Service 选为就绪端点。数据库和 S3 对象观察只在随机验证 namespace 内进行。该方案为 Agent Self-Claimed，不扩大产品权限或公网范围。
 - Challenge 内部文件访问采用固定 purpose 白名单；浏览器流只允许 gateway 服务身份，Challenge 流只允许 challenge 服务身份。Asset 不复制 Challenge 的 Attempt 状态，也不跨 schema 查询其数据库。
@@ -130,7 +130,32 @@ assets/<asset_id>/content
 4. 如果服务在对象成功、数据库提交前超时，重复 `CompleteUpload` 检查 staging/final 对象并继续提交同一资产；不能重新生成另一个资产。
 5. 取消或过期先把数据库标为终态，再幂等删除 staging 对象。删除失败由后续清理重试，不恢复为 ready。
 
-定时清理任务只处理已过期且仍未完成的上传会话。首阶段不提供删除 `ready` 资产的 API，因而不会把 Content 的绑定关系偷偷当作 Asset 本地事实。
+定时清理任务处理已取消、已标记过期或已到期且仍未完成的上传会话，重试 staging/final 删除；不清理 `ready` 资产。首阶段不提供删除 `ready` 资产的 API，因而不会把 Content 的绑定关系偷偷当作 Asset 本地事实。
+
+### 上传持锁取舍与后续优化（2026-10-19）
+
+**Human Design：暂时保留现有上传写入方式与持锁范围，接受其等待和资源占用成本，将缩短持锁时间记录为后续优化方向。** 本轮不实施上传协议重构；后续讨论批准的事务清理、错误分类与拒绝终态修复见下节，存储行为差异仍单独处理。
+
+当前浏览器上传每个分块按 `BEGIN → SELECT … FOR UPDATE → Storage.WriteAt → 更新进度 → COMMIT` 执行；完成上传也在事务内进行对象检查、摘要计算与提升。锁保护的是根据已确认进度写入对象并确认新进度的完整过程，不能仅在最后更新数据库时才做并发检查。数据库回滚不会撤销已经成功的对象写入。
+
+成本主要是同一上传的冲突操作需要等待对象存储 I/O，以及事务在等待期间持续占用数据库连接。不同文件的会话通常不会争用相同的行锁，但大量并行上传仍会共同占用连接池和存储资源。目前没有容量测试证明这些成本已成为实际瓶颈，也没有测得固定的上传延迟增量。S3 前缀重写造成的额外传输属于相关但独立的优化问题，不能把全部上传耗时归因于数据库锁。
+
+**Agent Self-Claimed 后续优化建议（未实施）**：当实际观测到锁等待、连接池等待、上传尾延迟或吞吐不满足需求时，再评估缩短持锁时间。应先记录上述指标及存储请求耗时，区分数据库竞争与对象存储传输成本，不仅凭事务包含外部 I/O 就启动重构。
+
+若要将对象写入移出事务，必须同时设计写入与恢复协议，例如短事务记录操作及预期版本、锁外写入互不覆盖的不可变分块或候选对象、短事务核对版本及摘要后确认。仅在共享 staging key 写完后检查数据库冲突，无法防止未被接受的请求覆盖已确认内容。具体存储方案尚未选定，不能仅依靠租约过期阻止旧执行者继续覆盖对象。
+
+未来方案须验证同一会话并发写入、对象写成功但数据库未提交、请求超时与响应丢失、旧执行者迟到、双副本重启恢复、完成/取消竞争和孤立对象清理；最终大小与摘要确认前不得标记 `ready`。满足这些条件后，才能替换当前持锁协议。
+
+### 上传事务与失败契约（2026-10-19，本地修复）
+
+**Human Design**：批准 P3 的事务清理、错误判断顺序、存储故障分类和拒绝终态持久化修复，保留现有持锁协议。**Agent Self-Claimed**：以下 helper、2 秒清理预算与故障注入测试为本次实现选择；不扩展成全模块架构迁移。
+
+- 浏览器每个分块通过 `withinUploadTx` 执行一次回调并确认提交；不自动重试，事务在等待下一帧之前结束。`server.go` 的上传事务共用 `rollbackUploadTx`，使用脱离请求取消、最多 2 秒的 context 清理；清理失败记日志，pgx 丢弃无法回滚的连接。取消或 panic 仍触发清理，不吞掉原错误或 panic。
+- `CompleteUpload`、`AbortUpload` 先判断查询是否失败，再检查 owner；无权主体仍收到原有 NotFound。对象检查只有缺失或大小不符才判 `upload_incomplete`；存储不可用、取消和 deadline 分别保留技术错误分类，不继续把未知存储状态当成缺失。
+- 到期、摘要不符和媒体拒绝需要先检查所有状态更新、确认提交，再返回业务拒绝。任何更新/提交失败或提交响应丢失均返回技术失败，不同步删除对象，也不声称事务肯定回滚。摘要/媒体拒绝确认提交后才尝试删除 staging；删除失败记日志并保留终态，由既有 `CleanupExpired` 重试。到期仍走异步清理。
+- 对象已写入/提升而数据库未确认时，调用方通过 `GetUploadSession`、同一会话续传或 `CompleteUpload` 查证恢复；不能盲目重传或新建资产。回滚不撤销 S3 写入，现有 staging/final 恢复路径保留。协议、权限、表结构和 S3 前缀重写方式未变。
+
+验收使用专用 PostgreSQL、受限 runtime 角色与真实 mTLS RPC。`upload_integration_test.go` 覆盖查询故障、staging/final Stat 故障、终态 UPDATE/COMMIT 失败、数据库确实提交但响应丢失、删除失败后的持久清理，以及另一实例的续传/完成/下载恢复；`upload_tx_integration_test.go` 验证取消、panic、业务失败后连接和行锁释放，及开放上传流等待下一帧时已无分块事务。完整命令与结果见第 17 节。
 
 ## 4. 状态图与不变量
 
@@ -167,8 +192,8 @@ stateDiagram-v2
 | RPC | 调用方 | 选择与原因 |
 | --- | --- | --- |
 | `CreateUploadSession` | Gateway | unary；网站会话 assertion、幂等键、大小、SHA-256、原始名和声明类型；写入 `active`/`staging`；2 秒控制面超时；同 fingerprint 可重试，不同 fingerprint 拒绝 |
-| `UploadAsset` | Gateway | client-streaming；首消息带 session、offset 和 assertion，后续消息为连续 chunk；单 chunk 256 KiB；请求断开后以返回/元数据中的 offset 恢复；15 分钟 HTTP deadline；不以重试整条流代替断点续传 |
-| `CompleteUpload` | Gateway | unary；Asset 重新验证 assertion，读取对象并计算 SHA-256；已完成重试返回同一结果；30 秒控制面/对象校验预算 |
+| `UploadAsset` | Gateway | client-streaming；首消息带 session、offset 和 assertion，后续消息为连续 chunk；完整 chunk 5 MiB、末块可更小，offset 按 5 MiB 对齐；请求断开后以返回/元数据中的 offset 恢复；15 分钟 HTTP deadline；不以重试整条流代替断点续传 |
+| `CompleteUpload` | Gateway | unary；Asset 重新验证 assertion，读取对象并计算 SHA-256；已完成重试返回同一结果；2 分钟完成/对象校验预算（单次 S3 请求 30 秒） |
 | `AbortUpload` | Gateway | unary，网站会话；active 会话转 `aborted`；已完成资产不接受；2 秒 |
 | `GetUploadSession` | Gateway | unary，网站会话；返回当前 offset 和状态，供断点续传及超时恢复；2 秒 |
 | `GetAssetMetadata` | Gateway 或 Content | 网站会话只返回本人资产；Content 使用带 Asset audience 的 assertion 做绑定校验；不返回对象 URL；2 秒 |
@@ -228,7 +253,7 @@ OpenAPI 已将旧的 `POST /api/assets` planned multipart 草案替换为本阶�
 | HTTP | Auth / CSRF | RPC | 成功响应 |
 | --- | --- | --- | --- |
 | `POST /api/me/assets/upload-sessions` | 网站会话 + 写操作 CSRF；`Idempotency-Key` 必须恰好一个 | `CreateUploadSession` | `201`：`{asset, uploadSession}`，不含 URL |
-| `PUT /api/me/assets/upload-sessions/{uploadSessionId}/content` | 网站会话 + CSRF；`Content-Range` 必须连续，单段不超过 256 KiB | `UploadAsset` client stream | `200`：`receivedBytes`、`nextOffset`、`state`；未完成仍为 `active` |
+| `PUT /api/me/assets/upload-sessions/{uploadSessionId}/content` | 网站会话 + CSRF；`Content-Range` 必须连续，完整块 5 MiB、末块可更小，offset 按 5 MiB 对齐 | `UploadAsset` client stream | `200`：`receivedBytes`、`nextOffset`、`state`；未完成仍为 `active` |
 | `POST /api/me/assets/{assetId}/complete`（JSON 携带 `uploadSessionId`） | 网站会话 + CSRF | `CompleteUpload` | `200`：`Asset`，只有 `state=ready` 才能引用 |
 | `DELETE /api/me/assets/upload-sessions/{uploadSessionId}` | 网站会话 + CSRF | `AbortUpload` | `204`；重复取消仍返回 `204` |
 | `GET /api/me/upload-sessions/{uploadSessionId}` | 网站会话 | `GetUploadSession` | `200`：当前 `receivedBytes`、`expectedBytes`、`state`、`expiresAt` |
@@ -260,7 +285,7 @@ HTTP 的 `Asset` 字段为 `id`、`filename`、`mediaType`、`bytes`、`sha256`�
 
 - owner 只从 Identity assertion 取得；请求中不接受 `owner_id`、账号、角色、管理员标记或公开标记。管理员也只能以自己的 web session 管理自己的资产。
 - Asset 的 Identity method policy 首阶段只允许 `CLIENT_KIND_WEB_SESSION`；MCP token 没有上传、私有元数据或下载权限。
-- Gateway 限制请求体为 `32 MiB + 协议余量`，Asset 对每个 chunk 限制 256 KiB，对 session 总字节数和对象存储实际长度再次限制；gRPC server/client send/receive 上限必须包含 protobuf wrapper 并留余量。
+- Gateway 每个上传请求体最多 5 MiB；Asset browser 完整 chunk 固定 5 MiB，末块可更小，对 session 总字节数和对象存储实际长度再次限制。Asset gRPC 接收和指向 Asset 的客户端发送上限为 6 MiB，留出 protobuf 包装余量；通用客户端对其他服务仍维持 2 MiB，原有更小的专用连接上限不变。
 - 文件名去除 `\`、`/` 路径部分，拒绝 NUL 和控制字符，限制 255 UTF-8 字节，空名使用固定 `upload`；文件名只用于 `Content-Disposition`，不参与对象键和权限。
 - 先检查声明类型，再读取文件头进行服务端检测；最终 allowlist 以检测结果为准。不要把客户端 `Content-Type`、扩展名或文件名当作安全判断。
 - SHA-256 由 Asset 对对象内容计算；客户端提供的期望摘要只是比较值，不是证明。摘要错误不生成 `ready` 状态。
@@ -294,9 +319,48 @@ HTTP 的 `Asset` 字段为 `id`、`filename`、`mediaType`、`bytes`、`sha256`�
 
 - `S3Storage` 使用 AWS SDK Go v2，配置为 `ASSET_STORAGE_BACKEND=s3`、`ASSET_S3_ENDPOINT`、`ASSET_S3_BUCKET`、`ASSET_S3_REGION`、`ASSET_S3_ACCESS_KEY_FILE`、`ASSET_S3_SECRET_KEY_FILE` 与 `ASSET_S3_FORCE_PATH_STYLE`。缺任一必要配置、bucket 不可达或对象存储异常时，Asset 不会悄悄降级，`/readyz` 失败。
 - staging 到 final 使用 `CopyObject` 后核对大小再删除 staging；这不是原子 rename。重复完成或崩溃恢复以数据库状态、对象大小和摘要复核决定，未完成/过期对象可由清理任务重试删除，`ready` final 不进入过期清理。
-- 现有 `Storage` 五方法保持不变。为了兼容它，S3 `WriteAt` 按已确认 offset 重写前缀；在 32 MiB/256 KiB 上限下可用，但写放大明显。它是 Agent Self-Claimed 的临时实现选择；文件上限提高前应改 multipart。
+- `Storage` 保留五方法兼容契约，生产 S3 上传另外实现 multipart 能力。browser 与 Challenge 上传均使用 multipart；兼容 `WriteAt` 仅供既有对象操作和存储契约测试，不用于生产分块上传。
 - `ops/lab/asset-store.yaml` 定义仅集群内可访问的单实例 SeaweedFS 4.13 + PVC。`ops/lab/object_store.py` 生成仓库外、权限 `0600` 的 lab S3 配置，创建并确认带 `asset-runtime` IAM owner 的 bucket；`app.main` 在 Asset 模块激活前幂等调和该私有存储。它不开放 NodePort/Ingress。
 - `ops/lab/services.json` 已登记 `asset`（依赖 Identity）；Content 和 gateway 也声明 Asset 依赖，并配置 `ASSET_TARGET` 和到 Asset 的受限 egress。Asset 为两个副本、独立 schema owner/runtime、迁移 Job、mTLS、PDB、探针、非 root、只读根文件系统及无 ServiceAccount token。
+
+### Multipart 上传与重试写入语义（2026-10-20）
+
+**Human Design 决定**：采用较大的客户端上传块，让每个完整块可直接对应一个 S3 Multipart part；通常块至少 5 MiB，文件最后一块可小于 5 MiB。暂保留 32 MiB 文件上限。这里的客户端块指 HTTP `Content-Range` 请求体；Gateway 需将该请求转发为对应的 Asset 上传数据。旧的 256 KiB 限制及 Asset gRPC 512 KiB 接收上限已由下方实施方案替换。S3 multipart 的 5 MiB 最小 part 规则和 10,000 part 上限来自 AWS S3；实际使用的 S3-compatible 服务还须通过真实适配器验收其 multipart、checksum、重复 part、abort 与恢复行为。
+
+本方案下，上传会话持久化 multipart upload ID、已确认偏移及完成所需的 part 编号/ETag。一个 part 上传成功后再确认该块偏移；同 part 编号重试必须可恢复对象已上传而数据库确认未知的情况。完成时按持久化 part 列表提交 multipart，再核对最终对象长度与 SHA-256，成功前资产保持不可读。取消、过期及失败会话应中止未完成 multipart；清理需覆盖服务重启与多副本，并验证 S3 生命周期清理作为兜底是否受当前兼容存储支持。数据库行锁范围沿用现行决定，不随本次存储协议决策自动缩短。
+
+**Human Design 决定**：`WriteAt` 的成功重试语义按当前 S3 行为定义：保留 `[0, offset)` 前缀，在 `offset` 写入本次数据，并将对象截断到 `offset + len(data)`；FileStorage 与共享契约测试应遵守相同语义。调用方只能用权威已确认偏移推进，offset 不得跳过当前对象尾部；从旧 offset 重放会截断后续尾部，不能被当成对任意位置的无损覆盖。FileStorage 与 S3 的共享契约测试覆盖截断、禁止空洞、取消与越界；FileStorage 已实现并通过该契约。
+
+**Agent Self-Claimed 实施选择**（2026-10-20，本地实现）：
+
+- browser 完整块固定 `5 × 1024 × 1024` 字节（5 MiB），最后一块取剩余字节；`offset % 5242880 == 0`。32 MiB 最多 7 个 part，HTTP 请求和 part 一一对应。现有仓库尚无浏览器上传组件，本次更新 Gateway、OpenAPI 和 Proto 契约，供前端按此切块。
+- `003_multipart.sql` 追加 `asset.assets.storage_upload_id`、JSONB `storage_parts`（编号及 ETag）和 Challenge 清理标记。browser 原有 `FOR UPDATE` 锁覆盖 part 上传、manifest/双份 offset 更新和 commit；Challenge 保留整条流 advisory lock，小帧在 Asset 单次流内聚合为 5 MiB，再逐 part 持行锁提交。Challenge 对 E 的 64 KiB 帧及逐帧租约/取消校验不变。
+- 第一次初始化或 part 成功但数据库未确认时，仍只返回技术错误。已持久化 ID 的重试覆盖同 part number；没有持久化 ID 时，重试先列举并 abort **完全相同 staging key** 的所有旧 multipart，再新建。客户端必须先查会话进度，不能盲重放已确认 offset。Complete 只使用持久化清单，不把 ETag 当 SHA-256；完成后、复制后分别校验实际长度、摘要及媒体类型，ready 前下载仍被拒绝。
+- Complete 成功但响应丢失后，重试可能得到 `NoSuchUpload`；仅在随后找到 staging/final 并通过完整校验时才设 ready。复制成功、数据库提交失败仍由既有 final 恢复机制找回相同资产。
+- `Delete` 先精确匹配并 abort 未完成 multipart，再删除对象；browser 取消/过期及失败清理可重复执行。Challenge 超过 24 小时未更新的 staging/failed 记录进入后台清理，先持行锁再尝试同一 advisory lock，跳过活跃流；重启后可根据数据库和 exact-key 列表找回未记录 ID 的上传。
+- SeaweedFS 4.13 的单 part multipart ETag 在 HEAD 与 Copy 条件检查不一致，真实验收触发 `PreconditionFailed`。仅在 multipart ETag 且遇到该错误时，在现有锁内计算源摘要后取消条件重试 Copy，再核对目标摘要，匹配才删源；服务在 ready 前继续核对完整期望摘要。普通对象仍走条件复制。
+- Gateway 与 Asset 每实例同时接收最多 2 条上传流；Gateway 在读请求体前限流，Asset 在首个 `Recv` 前限流。Gateway 每次按声明长度分配最多 5 MiB，Challenge 聚合缓冲最多 5 MiB；protobuf/SDK 另有编码缓冲，不能把 10 MiB 说成进程内存上限。保留 lab Gateway 192 MiB、Asset 384 MiB limit，不宣称已完成并发内存压力测试。
+- 域名 Nginx 的 Asset 上传/完成/下载 location 单独允许 5 MiB body、900 秒读写代理等待并关闭上传请求预缓冲；其他 API 保留原默认限制。Gateway upload 15 分钟、complete 2 分钟；S3 单请求 30 秒，禁用自动写重试，超时后用上述持久化状态恢复。
+- 旧 active 会话若已确认非 5 MiB 边界偏移，或有旧前缀却无 multipart 清单，返回 `FailedPrecondition / upload_session_restart_required`，必须取消并新建；不静默丢弃已确认数据或修改偏移。旧已完整 staging/final、ready 对象继续可完成或读取。迁移和 runtime grants 先应用再发布新版服务；滚动期间旧副本不能参与新协议上传，需在发布窗口停止上传/排空旧流后统一切换，并同步客户端。此本地实现未进行生产发布。
+
+**验证与限制**：真实 PostgreSQL + SeaweedFS 4.13 的多实例测试覆盖 HTTP 5 MiB 块、32 MiB/7 part 的线性上传量、part/初始化/Complete 响应丢失、数据库更新/commit 失败与 commit 响应未知、同 part 覆盖、ready 前拒读、Challenge 64 KiB 帧聚合、取消后恢复、活跃流保护和持久化清理。SeaweedFS 实测接受仅含 `AbortIncompleteMultipartUpload` 的生命周期 PUT 后，GET 返回 `NoSuchLifecycleConfiguration`，**不能依赖其生命周期兜底**；日级生命周期执行未获验证，清理由数据库 janitor 负责。测试使用隔离 PostgreSQL/SeaweedFS 容器；除进程内服务实例外，`TestMultipartProcessRestart` 还对独立测试服务进程执行真实 SIGKILL：S3 已确认 part 2、数据库未确认时杀进程，新进程重放同 part 后校验完成。此项不是生产 `cmd/asset` 部署验收；本轮未执行 kind rollout 或公网验收。multipart 消除了每块重传已确认前缀，数据库持锁范围保持不变；这些证据不代表并发吞吐或总延迟已经完成基准测试。
+
+### P6.1 本地验收（2026-10-20）
+
+Agent Self-Claimed 验证方案；所有凭据保存在仓库外 `0600` 文件，测试在随机数据库/随机 bucket 中运行。证据目录 `/tmp/hw-p61-20261020-x46u_e3l/`，不提交临时配置及日志。
+
+| 命令 / 验证 | 结果与证据 |
+| --- | --- |
+| backend：设置专用 `IDENTITY_TEST_DATABASE_URL_FILE`、`CHALLENGE_TEST_DATABASE_URL_FILE`、`ASSET_TEST_DATABASE_URL_FILE`、`ASSET_S3_TEST_CONFIG_FILE` 后，`go test -race -tags=integration ./... -count=1 -timeout=180s -json` | exit 0，340 条测试/子测试通过，16 个测试包通过，没有因缺少 PostgreSQL/S3 配置而跳过的测试；`all-final.jsonl`。 |
+| `TestMultipartS3LinearTransfer` | 32 MiB，7 个 part，33,554,432 payload bytes；上传阶段 0 次前缀 GET、0 次普通 PutObject；完成、跨实例下载和 SHA-256 均通过。此计数不包含完成后的校验读取和服务端复制。 |
+| `TestMultipartProcessRestart` | exit 0；独立进程在真实 S3 part 成功后、DB offset 提交前被 SIGKILL，新进程按持久化 offset/manifest 重传并完成；`process-second.log` 和全量日志。 |
+| `go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...`、`buf lint`、`buf generate` | exit 0；Proto 仅更新上传契约注释，并同步生成文件。 |
+| `go test -tags=lab ./internal/identity -run '^$'` | exit 0，仅编译随协议同步更新的 kind 验收，未运行 kind 业务测试。 |
+| `npm run ci`、`git diff --check` | exit 0；文档链接/场景快照、5 项 Node 测试、27 项 Python 检查；`npm-ci-final.log`。 |
+| 隔离 Nginx `nginx -t` 与真实 TLS upstream HTTP 请求 | 5 项通过：完整 5 MiB 上传、超过 5 MiB 拒绝、其他 API 仍受 16 KiB 限制、完成路由、下载路由；`nginx-result.json`、`nginx-config.log`。使用仓库 Nginx 配置，只替换隔离端口和临时证书路径；没有修改运行入口。 |
+| `TestMultipartLifecycleCapability` | PUT 接受、GET 返回 `NoSuchLifecycleConfiguration`。能力探测通过不代表生命周期可用；应用清理独立通过，不能宣称已获得生命周期兜底。 |
+
+未验证：真实供应商 S3、完整生产发布/滚动迁移、kind rollout、并发内存压力和端到端耗时基准。保留当前锁范围，后续是否缩短持锁仍由已记录的独立优化方向决定。
 
 ### 验证边界
 
@@ -529,3 +593,98 @@ sg docker -c 'umask 022; DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" py
 正式审核由 [Moderation](backend-moderation.md) 与 Content 拥有。Asset 不增加审核状态/案件表，也不访问其他schema。新增 `DownloadReviewAsset`（仅gateway mTLS＋专用管理员网站断言），HTTP为 `GET /api/admin/reviews/{reviewId}/assets/{assetId}/content`；Content专用断言由Content复核，确切pending快照绑定且ready才允许。打开存储后再次复核管理员会话与Content，不缓存、不发长期URL、不能通过owner/admin头绕过；终审后待审入口404，过审文件仍使用原公开入口。两种受控流复用长度/offset/首帧校验；普通本人上传/下载及Challenge协议不变。
 
 旧ApplyAssetReview新草稿首次批准关闭，历史回执/展示收紧保留；新批准必须正式送审并由真实Moderation流程产生执行回执。旧3C验收记录为历史，不自动证明这一增量已验证或已部署；新测试结果见Moderation设计文档的实际验收节。
+
+## 17. 2026-10-19 P3 上传事务修复验收（Agent Self-Claimed）
+
+验证对象为 `dev@e2466a3` 上的本地事务修复，分支 `backend/fix-asset-upload-transactions`。使用一次性 PostgreSQL 18、随机数据库与受限 runtime 角色，以及 SeaweedFS 4.13 的随机 bucket；未连接产品数据库。故障测试仅包装指定的 Storage 操作，数据库事务、触发器故障和 mTLS RPC 均为真实调用；完整集成另覆盖共享 S3 和 HTTP → Identity → Asset/Content。
+
+命令均在 `backend/` 执行，`ASSET_TEST_DATABASE_URL_FILE`、`IDENTITY_TEST_DATABASE_URL_FILE`、`CHALLENGE_TEST_DATABASE_URL_FILE` 指向私有临时 DSN 文件，`ASSET_S3_TEST_CONFIG_FILE` 指向临时存储配置。日志不记录凭据。
+
+| 验证 | 命令与结果 |
+| --- | --- |
+| 旧缺陷可检出 | 归档原基线、仅复制 `upload_integration_test.go`，运行 `go test -race -tags=integration ./internal/asset -run '^TestBrowserUploadFailures$' -count=1 -timeout=120s -v`，退出 **1**；22 个失败子用例检出查询误分类、Stat 故障掩盖和拒绝 UPDATE/COMMIT 失败后误清理等缺陷 |
+| 修复后专项 | `go test -race -json -tags=integration ./internal/asset -run '^(TestBrowserUploadFailures\|TestBrowserUploadChunkAndCompletionRecovery\|TestUploadTransactionCleanup\|TestBrowserChunkTransactionBoundaries)$' -count=1 -timeout=120s`，退出 **0**；45 个测试/子测试 PASS，0 FAIL、0 SKIP |
+| 完整后端集成 | `go test -race -json -tags=integration -p=1 ./... -count=1 -timeout=120s`，退出 **0**；296 个测试/子测试 PASS，0 FAIL、0 SKIP；另有 27 个无测试包（不计作跳过测试） |
+| 后端回归与静态检查 | `go test -race ./... -count=1`、`go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...` 均退出 **0**；最终测试 helper 调整后 Asset integration vet 与专项再通过 |
+| 根 CI 与文档 | 根目录 `npm run ci` 退出 **0**，5 个 Node 测试、27 个 Python 测试通过；文档更新后 `python3 scripts/check_docs.py` 再次退出 **0** |
+| 格式与差异 | 修改 Go 文件的 `gofmt -l` 无输出，`git diff --check` 退出 **0** |
+
+提交响应丢失用例通过包装真实数据库连接，在服务端提交后丢弃响应；独立连接确认状态确实已提交。此时接口返回技术失败、不同步删除对象，后续从持久终态清理或从原会话恢复；测试同时断言事务回调/分块写入没有自动重跑。取消、panic 与业务失败后，另一连接能立即取得相同行锁，连接池不留占用；开放流等待下一帧时，另一实例能够完成上传。
+
+最初完整集成曾因临时 SeaweedFS `volume.max=4` 无法给新 bucket 分配存储而失败；调整为 `volume.max=64`、16 MiB volume、2 GiB tmpfs 后，首次启动尚未就绪时又遇到 bucket/首个对象写入失败。待存储就绪后按上表串行包回归通过，未为绕过失败修改生产 S3 adapter 或既有用例。原失败日志与最终结果均保留在 `/tmp/hw-asset-p3-20261019-tp6_krib/`；该路径为本机临时证据，可能被系统清理。
+
+本次不改 Proto、schema、部署配置或前端；保留现有 S3 前缀重写和 FileStorage/S3 重试尾部差异，未做吞吐/容量验收。真实 kind rollout、远端 CI、自动 Deploy Action 与公网部署未重跑，不以本地集成结果代替。P3 的全面分层与其余架构问题也不在本次完成范围。
+
+## 18. P3 上传生命周期分层重构（Agent Self-Claimed）
+
+本地将浏览器单块上传、Challenge 整流上传、会话创建/查询、完成/取消及过期清理迁移到 `internal/asset/application` 用例和 `internal/asset/repository/postgres` 仓储。gRPC `Server` 对上传路径负责协议和身份适配；用例编排流校验、摘要、对象存储与恢复；PostgreSQL 仓储拥有 SQL、事务、行锁及 Challenge 整流 advisory lock。用例仅通过受限的锁定会话接口访问事务内状态，不暴露 `pgx.Tx`。清理应用用例按次请求仓储一个候选项，并在事务锁持有期间调用精确对象删除；删除或提交失败时保留可重试的持久状态。集成测试装配通过应用用例进入清理路径。
+
+此重构刻意保持既有协议：浏览器同一会话的行锁与数据库事务仍覆盖 S3/FileStorage 写入及进度提交；Challenge 整流 advisory lock 仍覆盖会话读取、整个输入流、恢复及 ready 提交。Challenge 小帧继续聚合为 multipart part；整条流中断后的重试从头发送，持锁后精确清理未完成 multipart 并重置确认偏移，再按新流写入；已完成 final 的不确定提交仍通过摘要复核恢复。传输层不再直接管理上传相关数据库事务或锁，现存的非上传元数据读取仍由 Server 执行，属于后续独立边界整理范围。应用层依赖边界测试覆盖 PostgreSQL/传输层导入限制。
+
+**代码迁移与 P3 本地隔离集成验收已完成。** 集成覆盖并发重试、取消后锁释放、跨实例恢复、final-before-ready 恢复、对象/数据库故障及 Challenge multipart 清理；新增回归验证整流中途取消后从头重试，以及用另一条 PostgreSQL 连接确认 callback panic 后 advisory lock 已释放。2026-10-22 已在专用 PostgreSQL 18 与 SeaweedFS 4.13 上实跑完整 Asset integration 包，88 个测试及子测试通过，另有 1 个包通过事件；0 失败、0 跳过，原始 JSON 日志位于本机临时目录 `/tmp/hw-p3-retest-d8ypoh3v/asset-integration.jsonl`。这证明本地隔离环境中的数据库与 S3-compatible 行为，不等于真实供应商 S3、kind rollout 或生产部署验收。
+
+### 本地验证（2026-10-22）
+
+| 命令 / 验证 | 结果 |
+| --- | --- |
+| `go test ./internal/asset/...`、`go test ./...` | exit 0；包括 Challenge 中断后重试的应用层回归测试。 |
+| `go test -race ./internal/asset/...` | exit 0。 |
+| `go vet ./...`、`go build ./cmd/...`、`buf lint`、`git diff --check` | exit 0。 |
+| `go test -tags=integration -run '^$' ./...` | exit 0；集成测试代码全部编译。 |
+| `go test -race -tags=integration -p=1 ./internal/asset -count=1 -timeout=180s` | exit 0；一次性 PostgreSQL 18 + SeaweedFS 4.13，88 个测试及子测试 PASS，另有 1 个包通过事件；0 FAIL / SKIP。 |
+| `go test -race -json -tags=integration -p=1 ./... -count=1 -timeout=180s` | 2026-10-22 提交前补验 exit 0；已配置三个专用数据库变量及 S3 配置，399 个测试及子测试 PASS，20 个包 PASS，0 FAIL / SKIP。 |
+
+因此 P3 的代码边界、应用/仓储职责及关键 Asset 数据库/S3-compatible 集成行为在本地隔离环境为 **PASS**，包括 PostgreSQL panic 后锁释放与真实 S3-compatible 中断恢复。提交前已补齐 Identity、Challenge、Asset 的专用数据库及 S3 配置，完整仓库 integration suite 同样 **PASS**（399 个测试及子测试，20 个包，无跳过）；原始结果见第 19 节。真实供应商 S3 与生产部署仍未验证，kind 本轮验收结果也独立记录在第 19 节。历史上“缺少专用环境所以验收 INCONCLUSIVE”的描述已由真实依赖实测更新。P3 分层迁移本身未改 Proto/schema；本轮联合提交另含此前 P6 的 multipart 迁移、Proto 注释和 Nginx 块大小配置。issue.md 不纳入提交，本轮未创建 PR、推送、合并或发布。
+
+<a id="precommit-acceptance-20261022"></a>
+## 19. 2026-10-22 提交前联合隔离验收（Agent Self-Claimed）
+
+本轮验收覆盖 `backend/fix-asset-upload-transactions` 上累计的 P1–P7 整改和上传生命周期分层改动；各项采用与保留的范围见 [架构验收索引](backend-architecture.md#p1-p7-remediation)。验证目标是本地代码及隔离部署的行为，不是生产发布。原始日志与结果归档在本机 `/home/cherry/.local/state/human-worth/validation/20261022-6nw5xb60/`，不把凭据、测试对象或大型日志提交到 Git。
+
+### 全仓集成与契约检查
+
+一次性 PostgreSQL **18.4** 与 SeaweedFS **4.13** 使用随机数据库、受限角色及随机 bucket；Identity、Challenge、Asset 的专用数据库与 S3 配置全部显式提供。执行：
+
+```sh
+cd backend
+go test -race -json -tags=integration -p=1 ./... -count=1 -timeout=180s
+```
+
+退出 **0**，**399 个测试及子测试 PASS、20 个包 PASS，0 FAIL / SKIP**，用时 95.35 秒。原始日志 `all-final.jsonl`，汇总 `all-final-result.json`。覆盖应用/仓储分层后的锁、并发偏移、存储写入后数据库故障与未知提交、取消/panic 释放锁、multipart 重试与跨实例恢复，以及 Identity、Content、Moderation、Challenge 和 Gateway 相邻回归。一次性容器、数据库凭据与 S3 凭据已清理。
+
+首轮真实权限测试还暴露 gRPC 提前拒绝的读取缺口：客户端 `Send` 可先返回 `io.EOF`，真正的 PermissionDenied 等终态须经 `CloseAndRecv` 取得。修复测试客户端与 Gateway 的同类路径；新增确定性回归覆盖 metadata/chunk 拒绝、限流、容量、deadline、异常提前成功与非 EOF 错误，旧实现失败证据保留在 `gateway-early-before.log`。修复后权限场景连续运行 20 次通过（父/子测试共 40 个 PASS，0 FAIL / SKIP），最终全仓 399 项结果包含此修复。之后仅更新四个 `lab` 测试文件，业务代码未变，哈希对照见 `post-integration-changes.json`。
+
+`buf lint`、`buf generate`、`go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...`、lab 编译与 vet 均退出 0；`gofmt -l cmd internal` 无输出。生成前后文件哈希一致；生成文件暂存后再次生成，`git diff --exit-code -- gen` 退出 0。根目录 `npm run ci` 覆盖文档、接口入口与部署控制器检查；最终结果与提交关联在归档中记录。
+
+### Nginx 请求边界
+
+使用隔离 Nginx 容器加载仓库配置，仅替换 loopback upstream 和测试证书路径，`nginx -t` 退出 0。五项检查通过：完整 5 MiB PUT 转发；多 1 字节返回 413 且不转发；其他 API 超过 16 KiB 返回 413 且不转发；完成 POST 与下载 GET 转发。该检查的 upstream 是测试 HTTP 服务，证明 Nginx 路由和大小限制，真实 Asset 链路由集成/kind 测试单独验证。结果为 `nginx-result.json`，临时容器与证书密钥已删除。
+
+### 隔离 kind 联合验收
+
+根目录执行：
+
+```sh
+DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py
+```
+
+使用 `kind-lab` 的一次性 namespace，真实 PostgreSQL、SeaweedFS、mTLS、双副本业务服务与私有 Gateway 入口；源码在开始时复制为不可变快照。镜像构建标识为 `ee1a5d2de49a4b72b0fcb70bb0ca3967cac263c5`，它不是 Git commit 或生产发布 SHA。
+
+完整脚本 **PASS，退出 0，用时 509.99 秒**；临时 namespace 为 `human-worth-verify-33c5a124`。
+
+| 检查 | 实测结果 |
+| --- | --- |
+| 五模块部署与 HTTPS | Identity、Asset、Content、Moderation、Gateway rollout 和健康检查通过；完成标记仅在全部模块通过后发布。 |
+| `TestKindAssetDeployment` | PASS，131.65 秒；不同 worker 上两个 Asset Pod 的上传/恢复/完成/下载、隔离、数据库状态、后台清理、进程重建、对象提升后的恢复、S3 停机和同 PVC 恢复。 |
+| `TestKindPublicAssetDeployment` | PASS，54.17 秒；过审文件跨 Pod 读取、撤销/下架拒绝、Content 停机拒绝与恢复。 |
+| `TestKindContentDeployment` | PASS，3.05 秒；本人草稿增查改、冲突、重启持久化与会话撤销。 |
+| `TestKindModerationDeployment` | PASS，65.59 秒；正式送审、管理员决定、可靠应用、待审材料读取与依赖停机隔离/恢复。 |
+| NetworkPolicy | 六类调用方合计 50 项预期允许/拒绝检查通过，0 项失败。 |
+| 故障恢复与重复部署 | 坏镜像回滚恢复模板和策略；错误迁移凭据失败后，同镜像版本重试成功；重复完整部署仍健康。 |
+| 清理与影响核对 | 本轮三个临时 namespace 均已删除，没有残留验证 namespace；最终代码哈希与 kind 输入一致。默认 `human-worth` namespace 的 Deployment/StatefulSet/Service 快照前后均为空（0 项），因此只能证明未新增/修改这些资源，不把它描述为已有生产服务无影响的证据。 |
+
+原始输出为 `kind-complete.log`，退出码为 `kind-complete-result.json`。此前两轮分别在 Asset 与 Moderation 停机测试遇到旧断言：依赖停机可能立即拒绝连接（503）或耗尽 deadline（504），而测试固定要求 503。按 P6.2 已接受契约调整 lab 断言，503 必须携带 `*_unavailable`，504 必须携带 `deadline_exceeded`；原有进度不提交、权限不放行、状态不推进和恢复后准确状态检查保留。失败日志 `kind-validation.log`、`kind-final.log` 一并留存。
+
+### 验收范围
+
+真实供应商 S3、生产 S3 的 HA/容量/备份、生产 systemd 自动部署、远端 CI/Deploy Action 和公网 revision 验证均不在本次本地验收结论内。Challenge 未部署到本轮 kind，其专项以全仓真实 PostgreSQL/S3-compatible 集成测试为依据；真实 E 沙箱和完整挑战依赖闭环仍是后续独立验收。

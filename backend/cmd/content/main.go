@@ -61,7 +61,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
+	conn, err := platform.GRPCClient(target, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
 	if err != nil {
 		return errors.New("identity client initialization failed")
 	}
@@ -73,7 +73,7 @@ func run() error {
 		if e != nil {
 			return e
 		}
-		assetConn, e = grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
+		assetConn, e = platform.GRPCClient(target, grpc.WithTransportCredentials(credentials.NewTLS(config)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
 		if e != nil {
 			return errors.New("asset client initialization failed")
 		}
@@ -104,7 +104,7 @@ func run() error {
 			return e
 		}
 		defer c.Close()
-		go app.RunReviewDelivery(ctx, moderationpb.NewModerationServiceClient(c))
+		go app.RunReviewDelivery(ctx, moderationpb.NewModerationServiceClient(c), runtime.Log)
 	}
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)

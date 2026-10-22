@@ -24,7 +24,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -83,9 +82,6 @@ func (s *Server) actor(ctx context.Context, assertion, method string) (string, e
 	if s.Identity == nil {
 		return "", status.Error(codes.Unavailable, "identity_unavailable")
 	}
-	if values := metadata.ValueFromIncomingContext(ctx, "x-request-id"); len(values) == 1 {
-		ctx = metadata.AppendToOutgoingContext(ctx, "x-request-id", values[0])
-	}
 	response, err := s.Identity.VerifyActor(ctx, &identitypb.VerifyActorRequest{ActorAssertion: assertion, FullMethod: method})
 	if err != nil {
 		return "", err
@@ -119,13 +115,7 @@ type submissionCursor struct {
 
 func invalid(reason string) error { return status.Error(codes.InvalidArgument, reason) }
 func storage(err error) error {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return status.Error(codes.DeadlineExceeded, "deadline_exceeded")
-	}
-	if errors.Is(err, context.Canceled) {
-		return status.Error(codes.Canceled, "request_cancelled")
-	}
-	return status.Error(codes.Unavailable, "content_unavailable")
+	return platform.DependencyError(err, "content_unavailable")
 }
 
 func validCategory(value string) bool {
@@ -251,8 +241,7 @@ func (s *Server) CreateTaskDraft(ctx context.Context, r *pb.CreateTaskDraftReque
 	if err != nil {
 		return nil, storage(err)
 	}
-	var original []byte
-	submission, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE author_id=$1 AND create_key=$2`, author, r.IdempotencyKey), &original)
+	submission, original, err := scanTaskSubmission(tx.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE author_id=$1 AND create_key=$2`, author, r.IdempotencyKey))
 	if err != nil {
 		return nil, err
 	}
@@ -270,22 +259,30 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-func scan(row rowScanner, hash *[]byte, extra ...any) (*pb.TaskSubmission, error) {
+// taskSubmissionColumns is the shared projection consumed by scanTaskSubmission.
+// Keep query-specific predicates and ordering at each call site, but maintain
+// this positional contract in one place.
+const taskSubmissionColumns = `id,author_id,revision,state,content,create_hash,review_id,rejection_reason`
+
+const taskSubmissionListColumns = taskSubmissionColumns + `,created_at`
+
+func scanTaskSubmission(row rowScanner, extra ...any) (*pb.TaskSubmission, []byte, error) {
 	result := &pb.TaskSubmission{Content: &pb.TaskDraftInput{}}
 	var data []byte
-	values := []any{&result.Id, &result.AuthorId, &result.Revision, &result.State, &data, hash, &result.ReviewId, &result.RejectionReason}
+	var hash []byte
+	values := []any{&result.Id, &result.AuthorId, &result.Revision, &result.State, &data, &hash, &result.ReviewId, &result.RejectionReason}
 	values = append(values, extra...)
 	err := row.Scan(values...)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, status.Error(codes.NotFound, "task_not_found")
+		return nil, nil, status.Error(codes.NotFound, "task_not_found")
 	}
 	if err != nil {
-		return nil, storage(err)
+		return nil, nil, storage(err)
 	}
 	if err = protojson.Unmarshal(data, result.Content); err != nil {
-		return nil, status.Error(codes.Internal, "invalid_stored_draft")
+		return nil, nil, status.Error(codes.Internal, "invalid_stored_draft")
 	}
-	return result, nil
+	return result, hash, nil
 }
 func (s *Server) GetMyTaskSubmission(ctx context.Context, r *pb.GetMyTaskSubmissionRequest) (*pb.GetMyTaskSubmissionResponse, error) {
 	author, err := s.actor(ctx, r.ActorAssertion, pb.ContentService_GetMyTaskSubmission_FullMethodName)
@@ -295,8 +292,7 @@ func (s *Server) GetMyTaskSubmission(ctx context.Context, r *pb.GetMyTaskSubmiss
 	if !taskPattern.MatchString(r.TaskId) {
 		return nil, status.Error(codes.NotFound, "task_not_found")
 	}
-	var hash []byte
-	result, err := scan(s.DB.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author), &hash)
+	result, _, err := scanTaskSubmission(s.DB.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author))
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +377,7 @@ func (s *Server) ListMySubmissions(ctx context.Context, r *pb.ListMySubmissionsR
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason,created_at FROM content.task_drafts WHERE author_id=$1 AND state=$2`
+	query := `SELECT ` + taskSubmissionListColumns + ` FROM content.task_drafts WHERE author_id=$1 AND state=$2`
 	args := []any{author, filter.State}
 	if filter.Category != nil {
 		args = append(args, *filter.Category)
@@ -403,9 +399,8 @@ func (s *Server) ListMySubmissions(ctx context.Context, r *pb.ListMySubmissionsR
 		if len(page.response.Items) == int(limit) {
 			return page.finish(true), nil
 		}
-		var hash []byte
 		var itemCreated time.Time
-		item, scanErr := scan(rows, &hash, &itemCreated)
+		item, _, scanErr := scanTaskSubmission(rows, &itemCreated)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -484,15 +479,14 @@ func (s *Server) ReplaceTaskDraft(ctx context.Context, r *pb.ReplaceTaskDraftReq
 		return nil, storage(err)
 	}
 	defer tx.Rollback(ctx)
-	var hash []byte
-	previous, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author), &hash)
+	previous, _, err := scanTaskSubmission(tx.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author))
 	if err != nil {
 		return nil, err
 	}
 	if (previous.State != "draft" && previous.State != "rejected") || previous.Revision != r.ExpectedRevision {
 		return nil, status.Error(codes.Aborted, "revision_conflict")
 	}
-	result, err := scan(tx.QueryRow(ctx, `UPDATE content.task_drafts SET content=$3,revision=revision+1,state='draft',review_id=NULL,rejection_reason=NULL,updated_at=clock_timestamp() WHERE id=$1 AND author_id=$2 RETURNING id,author_id,revision,state,content,create_hash,review_id,rejection_reason`, r.TaskId, author, data), &hash)
+	result, _, err := scanTaskSubmission(tx.QueryRow(ctx, `UPDATE content.task_drafts SET content=$3,revision=revision+1,state='draft',review_id=NULL,rejection_reason=NULL,updated_at=clock_timestamp() WHERE id=$1 AND author_id=$2 RETURNING `+taskSubmissionColumns, r.TaskId, author, data))
 	if err != nil {
 		return nil, err
 	}

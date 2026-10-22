@@ -71,7 +71,7 @@ func (o *GoogleOAuth) AuthorizationURL(state, nonce, verifier string) string {
 
 // 【阅读 7】Exchange 由 login.go 的 CompleteGoogleLogin 在成功领取流程后调用，使用授权码与 PKCE verifier 换取 ID token。
 // 先通过 JWKS 验签及 issuer/audience/有效期校验，再核对该流程的 nonce、非空 subject 和多受众 azp。
-// 成功只输出 GoogleIdentity 给 finishLogin；提供方拒绝映射 401，网络、限流或 JWKS 故障映射 503。
+// 成功只输出 GoogleIdentity 给 finishLogin；提供方拒绝映射 401，网络、限流或 JWKS 故障映射 503，等待超时映射 504。
 // 【阅读 7.1】go-oidc v3.21 将 KeySet 错误包装为文本而未保留类型，这里识别取密钥失败以区别无效登录。
 // 【阅读 7.2】显示资料在信任校验后再做长度归一化；超长邮箱舍弃，绝不据此改变稳定账号的绑定规则。
 func (o *GoogleOAuth) Exchange(ctx context.Context, code, verifier string, nonceHash []byte) (application.GoogleIdentity, error) {
@@ -83,17 +83,28 @@ func (o *GoogleOAuth) Exchange(ctx context.Context, code, verifier string, nonce
 		if errors.As(err, &rejected) && rejected.Response != nil && rejected.Response.StatusCode >= 400 && rejected.Response.StatusCode < 500 && rejected.Response.StatusCode != 429 {
 			return application.GoogleIdentity{}, application.Reject(application.Unauthenticated, "invalid_google_login")
 		}
-		return application.GoogleIdentity{}, application.Reject(application.Unavailable, "login_unavailable")
+		return application.GoogleIdentity{}, application.DependencyFailure(err, "login_unavailable")
 	}
 	raw, ok := token.Extra("id_token").(string)
 	if !ok {
 		return application.GoogleIdentity{}, application.Reject(application.Unauthenticated, "invalid_google_login")
 	}
-	id, err := o.verifier.Verify(ctx, raw)
+	// go-oidc stringifies KeySet errors. A matching verification deadline keeps
+	// cancellation/timeout identifiable even when the HTTP error's cause is lost.
+	verification, cancel := context.WithTimeout(ctx, o.client.Timeout)
+	defer cancel()
+	id, err := o.verifier.Verify(verification, raw)
 	if err != nil {
 		// go-oidc v3.21 wraps KeySet errors as text rather than preserving their type.
-		if ctx.Err() != nil || strings.HasPrefix(err.Error(), "failed to verify signature: fetching keys ") {
-			return application.GoogleIdentity{}, application.Reject(application.Unavailable, "login_unavailable")
+		if verification.Err() != nil {
+			return application.GoogleIdentity{}, application.DependencyFailure(verification.Err(), "login_unavailable")
+		}
+		// The HTTP timeout can fire before the context timer is scheduled.
+		if deadline, ok := verification.Deadline(); ok && !time.Now().Before(deadline) {
+			return application.GoogleIdentity{}, application.DependencyFailure(context.DeadlineExceeded, "login_unavailable")
+		}
+		if strings.HasPrefix(err.Error(), "failed to verify signature: fetching keys ") {
+			return application.GoogleIdentity{}, application.DependencyFailure(err, "login_unavailable")
 		}
 		return application.GoogleIdentity{}, application.Reject(application.Unauthenticated, "invalid_google_login")
 	}

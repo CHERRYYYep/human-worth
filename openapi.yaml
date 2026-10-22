@@ -147,6 +147,7 @@ paths:
             Referrer-Policy: {$ref: '#/components/headers/NoReferrer'}
         '400': {$ref: '#/components/responses/Problem'}
         '503': {$ref: '#/components/responses/Problem'}
+        '504': {$ref: '#/components/responses/Problem'}
         default: {$ref: '#/components/responses/Problem'}
 
   /api/auth/google/callback:
@@ -164,7 +165,7 @@ paths:
         首次登录原子创建普通账号，重复登录复用账号；不按相同邮箱自动绑定其他账号，不重建投票资格，不自动授予管理员。
         成功时使当前浏览器的旧网站会话失效并签发新会话，清除流程 Cookie，303 回到 /；前端随后调用 GET /api/me 取得账号和 CSRF token。
         用户拒绝授权且流程验证通过时，清除流程 Cookie 并 303 回到 /?login=cancelled，保留原有网站会话。
-        验证失败不建立新会话：无效/过期/重放流程返回 400；授权码或 ID token 无效返回 401；账号禁用返回 403；供应方或存储暂不可用返回 503。
+        验证失败不建立新会话：无效/过期/重放流程返回 400；授权码或 ID token 无效返回 401；账号禁用返回 403；供应方或存储暂不可用返回 503；等待超时返回 504。
         流程占用后失败或结果未知须重新发起登录，不盲目重放授权码。已成功提交但响应丢失的会话轮换仍以持久记录为准；错误不改变其他账号或既有投票记录。
         所有回调响应（包括错误）均 no-store、no-referrer；访问日志须屏蔽回调 query、Cookie、授权码和 token。
         Google access/ID/refresh token 不返回前端、不作为网站或 MCP 凭据，不写 localStorage；携带 Bearer 返回 400。
@@ -205,6 +206,7 @@ paths:
         '401': {$ref: '#/components/responses/GoogleLoginProblem'}
         '403': {$ref: '#/components/responses/GoogleLoginProblem'}
         '503': {$ref: '#/components/responses/GoogleLoginProblem'}
+        '504': {$ref: '#/components/responses/GoogleLoginProblem'}
         default: {$ref: '#/components/responses/GoogleLoginProblem'}
 
   /api/auth/logout:
@@ -684,6 +686,10 @@ paths:
       tags: [Submissions]
       operationId: uploadAssetChunk
       summary: 上传本人资产的一段字节
+      description: >-
+        完整块固定为 5 MiB（5242880 字节），末块为剩余字节；offset 必须按 5 MiB 对齐。
+        32 MiB 为文件总上限。每个 HTTP 请求体直接对应一个持久化 S3 multipart part。
+        重试前查询会话 receivedBytes，从数据库已确认偏移继续；旧的 256 KiB 非完整会话须取消重建。
       x-implementation-status: implemented-local
       security: [{WebSession: [], CsrfToken: []}]
       parameters:
@@ -1558,7 +1564,8 @@ components:
     GoogleLoginProblem:
       description: |
         脱敏的登录失败；不返回授权码、state、token、Cookie、Client Secret 或供应方原始错误正文。
-        400 invalid_oauth_state / invalid_request；401 invalid_google_login；403 account_disabled；503 login_unavailable。
+        400 invalid_oauth_state / invalid_request；401 invalid_google_login；403 account_disabled；503 login_unavailable；504 deadline_exceeded。
+        请求取消保留 request_cancelled；外层 HTTP 连接仍有效时返回 503，连接已断开时不承诺响应送达。
         终结或失效流程应清除其浏览器 Cookie；确认拒绝时不改变既有网站会话，投票资格始终保留。
         提交结果未知时以服务端持久记录为准，客户端重新发起登录，不重放回调或假定旧会话仍有效。
       headers:
@@ -1576,7 +1583,9 @@ components:
         业务接口统一 application/problem+json；status 与 HTTP 状态相同。
         400 格式或游标错误；401 缺失/失效认证；403 权限、用途、CSRF 或永久投票资格不满足；
         404 不存在或不可见；409 版本、状态或幂等冲突；413 文件过大；415 类型不支持；
-        422 内容或确认无效；429 请求过多；503 依赖或持久化不可用。
+        422 内容或确认无效；429 请求过多；503 依赖或持久化不可用；504 deadline_exceeded 表示等待上游超时。
+        请求取消保留 request_cancelled；外层 HTTP 连接仍有效时为 503，连接已断开时不承诺响应送达。
+        超时、取消与不可用均不证明写入未提交；按各接口的幂等键或回执查证，不据此自动重试写入。
         所有失败均不得附带单题统计；拒绝请求不得产生未声明的业务副作用。
         此错误格式为 planned 接口约定，当前基础服务的 404/405 仍为空响应体。
       headers:

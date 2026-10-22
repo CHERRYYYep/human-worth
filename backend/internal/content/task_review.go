@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,6 +15,7 @@ import (
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,8 +74,7 @@ func (s *Server) RequestTaskReview(ctx context.Context, r *pb.RequestTaskReviewR
 	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, storage(e)
 	}
-	var hash []byte
-	before, err := scan(s.DB.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author), &hash)
+	before, _, err := scanTaskSubmission(s.DB.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE id=$1 AND author_id=$2`, r.TaskId, author))
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +95,7 @@ func (s *Server) RequestTaskReview(ctx context.Context, r *pb.RequestTaskReviewR
 		return nil, storage(err)
 	}
 	defer tx.Rollback(ctx)
-	current, err := scan(tx.QueryRow(ctx, `SELECT id,author_id,revision,state,content,create_hash,review_id,rejection_reason FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author), &hash)
+	current, _, err := scanTaskSubmission(tx.QueryRow(ctx, `SELECT `+taskSubmissionColumns+` FROM content.task_drafts WHERE id=$1 AND author_id=$2 FOR UPDATE`, r.TaskId, author))
 	if err != nil {
 		return nil, err
 	}
@@ -329,55 +330,62 @@ func (s *Server) CheckReviewAssetAccess(ctx context.Context, r *pb.CheckReviewAs
 // Deliver one committed outbox item. Lease survives process crashes; RPC is
 // outside transactions. A stale holder cannot acknowledge a newer claim.
 func (s *Server) DeliverReview(ctx context.Context, client moderationpb.ModerationServiceClient) (bool, error) {
+	result, err := s.deliverReview(ctx, client)
+	return result.HadWork, err
+}
+
+func (s *Server) deliverReview(ctx context.Context, client moderationpb.ModerationServiceClient) (platform.OutboxResult, error) {
+	result := platform.OutboxResult{Outcome: "idle", Stage: "claim"}
 	if client == nil {
-		return false, nil
+		return result, nil
 	}
 	token, err := reviewID("lease")
 	if err != nil {
-		return false, err
+		result.Cause = err
+		return result, err
 	}
 	var id string
 	err = s.DB.QueryRow(ctx, `UPDATE content.review_outbox o SET lease_token=$1,available_at=clock_timestamp()+interval '15 seconds',attempts=attempts+1 FROM (SELECT id FROM content.review_outbox WHERE delivered_at IS NULL AND available_at<=clock_timestamp() ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) q WHERE o.id=q.id RETURNING o.id`, token).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return result, nil
 	}
 	if err != nil {
-		return false, storage(err)
+		result.Cause = err
+		return result, storage(err)
 	}
+	result.HadWork, result.ItemID, result.Stage = true, id, "load_snapshot"
 	var raw []byte
 	err = s.DB.QueryRow(ctx, `SELECT snapshot FROM content.review_requests WHERE id=$1`, id).Scan(&raw)
 	snap := &pb.ReviewSnapshot{}
 	if err == nil {
+		result.Stage = "decode_snapshot"
 		err = protojson.Unmarshal(raw, snap)
 	}
 	if err == nil {
+		result.Stage = "call_moderation"
 		call, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_, err = client.CreateReviewCase(call, &moderationpb.CreateReviewCaseRequest{Snapshot: snap})
 		cancel()
 	}
 	if err != nil {
-		return true, err
+		result.Cause = err
+		return result, err
 	}
-	_, err = s.DB.Exec(ctx, `UPDATE content.review_outbox SET delivered_at=clock_timestamp(),lease_token=NULL WHERE id=$1 AND lease_token=$2`, id, token)
-	return true, storageIf(err)
-}
-func storageIf(err error) error {
+	result.Stage = "confirm_delivery"
+	command, err := s.DB.Exec(ctx, `UPDATE content.review_outbox SET delivered_at=clock_timestamp(),lease_token=NULL WHERE id=$1 AND lease_token=$2`, id, token)
 	if err != nil {
-		return storage(err)
+		result.Cause = err
+		return result, storage(err)
 	}
-	return nil
+	if command.RowsAffected() == 0 {
+		result.Outcome = "lease_lost"
+		return result, nil
+	}
+	result.Outcome = "delivered"
+	return result, nil
 }
-func (s *Server) RunReviewDelivery(ctx context.Context, client moderationpb.ModerationServiceClient) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			call, cancel := context.WithTimeout(ctx, 7*time.Second)
-			s.DeliverReview(call, client)
-			cancel()
-		}
-	}
+func (s *Server) RunReviewDelivery(ctx context.Context, client moderationpb.ModerationServiceClient, logger *slog.Logger) {
+	platform.RunOutbox(ctx, logger, "content_to_moderation", func(call context.Context) (platform.OutboxResult, error) {
+		return s.deliverReview(call, client)
+	})
 }

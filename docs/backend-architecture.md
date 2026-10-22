@@ -130,7 +130,60 @@ Challenge 的两个副本均可参与调度，通过数据库工作项领取和�
 
 契约定稿必须覆盖：全部 planned HTTP 操作的 RPC 对应关系、调用方与主体权限、超时、副作用、幂等键、版本冲突、流式传输、空值和错误映射。内部 Service 拆分不自动新增公开 HTTP/MCP 能力。已发布字段删除时保留编号与名称；发布后的破坏性变更采用新版本。
 
+### 操作元数据目录（P2，2026-10-21；Proto descriptor 核对，2026-10-22）
+
+为避免 HTTP 路由、Identity assertion 目标与 RPC 超时各自维护不一致的静态映射，`backend/internal/contract/operations.go` 集中维护 operation ID、完整 RPC method、静态 Identity 策略、RPC deadline，以及 HTTP method/path、HTTP deadline 和入口限制。gateway 的 OpenAPI 对照测试核对公开操作标识与路径；gateway 启动时校验目录路由与显式 handler 一一对应；Identity 从目录生成 assertion target；platform 按 RPC method 读取 deadline。新增或改名操作时应同步更新该目录及相关 Proto/OpenAPI，并通过这些一致性检查。
+
+该目录只保存跨边界静态元数据，不做用户授权决策，也不代替各模块的动态主体、凭据、账号和资源状态检查。HTTP handler 仍显式绑定，避免把安全敏感行为变成隐式注册。HTTP 与 RPC deadline 分开配置；未单独指定时分别使用各自默认值。目录中出现未来 RPC 不表示对应服务已实现或已发布。
+
+目录与 Proto 还通过独立 descriptor 测试核对：目录中的每个 RPC 必须能在生成的服务 descriptor 中精确找到。当前仅有 `ContentService/GetTask`、尚未新增 Discovery Proto 的 `DiscoveryService/ListTasks`，以及 Voting Proto 尚未声明的 `ViewTaskStatistics`、`CastVote` 被列为 planned 例外；每条例外记录 operation ID、完整 method 和原因。测试会在方法进入 descriptor、目录项被删除、例外拼错或新增未声明方法时失败，要求同步清理例外。核对方向是“目录中的方法必须已声明或明确 planned”，Proto 中的内部方法不要求都进入目录。Descriptor 仅证明 RPC 合同存在，不证明服务端已实现、运行或部署。
+
+本次验收范围：`go test ./internal/contract ./internal/identity/... ./internal/gateway ./internal/platform`，以及这些包的 race 测试、静态检查和根目录 CI；该验证覆盖本地目录一致性，不代表公网部署验收。
+
 下一阶段重点检查三处跨模块协议：审核决定的应用与回执、资产/内容权限协作、worker 的进度与产物传输。Proto 编译通过不能代替运行时验证。
+
+### 技术错误与请求终止（2026-10-20）
+
+人类选择区分取消、超时与依赖不可用（P6.2 方案 A）。业务拒绝、权限规则与稳定业务 reason 保持各模块所有；共同技术分类按下表贯穿仓储、应用、RPC 与 gateway：
+
+| 事实 | gRPC 状态与稳定 reason | HTTP 行为 |
+| --- | --- | --- |
+| 调用被取消 | `Canceled` / `request_cancelled` | 外层 HTTP 连接仍有效时返回 503；调用方已断开时不承诺能够送达响应 |
+| 等待期限耗尽 | `DeadlineExceeded` / `deadline_exceeded` | 504 |
+| 服务、存储或依赖不可用 | `Unavailable` / 模块已有的 `*_unavailable` | 503 |
+
+应用和仓储用 `errors.Is` 识别原始或包装后的 context 错误，并保留内部 cause；RPC 适配器还须识别依赖返回的 gRPC 状态。`platform.ContextError` / `DependencyError` 复用技术分类与脱敏，应用/领域层不为此引入 gRPC 依赖。未知底层错误不得把 SQL、路径、密钥或供应方原始正文带入公开 reason。
+
+请求取消不等于业务运行取消，子调用取消也不能直接标为用户主动取消。取消向下传播并执行既有有界清理；Challenge 的领取校验遇到取消、超时或不可用时退出当前事务，不把 Run 改为业务失败。已开始发送的下载流无法再改 HTTP 状态，后续故障通过中断流及长度/摘要检查发现。
+
+内部 RPC 的 `x-request-id` 由 HTTP Gateway 在入口生成，作为日志关联 ID 沿调用链传播。统一 gRPC client 拦截器覆盖 unary 和 streaming 调用：仅转发一个符合入口格式的 ID，已有 outgoing 值优先且不会重复追加；无效或多个值不传播。服务端日志使用同一校验规则。模块不得再手工复制该 metadata；Asset 的 `UploadAttemptID` 是上传重放标识，与 request ID 分离。OpenTelemetry `trace_id` 继续用于分布式追踪。
+
+取消、超时与不可用均不能证明此前写入没有提交，不据此新增自动重试。继续按幂等键、持久回执和各业务既有恢复协议查证结果，Google 授权码不重放。本轮不改变业务取消流程、数据库锁范围或投递并发。
+
+验收包括原始/包装后的 context 错误、依赖 RPC 状态、脱敏 reason、HTTP → gRPC 传递和客户端断开后的服务端释放；真实 PostgreSQL 检查事务取消/超时后的回滚、连接复用，以及 Challenge 技术失败不改变持久 Run 状态。实现与部署状态仍分开记录。
+
+2026-10-20 本地验收：`go test -race -tags=integration ./... -count=1 -timeout=180s -json` 在一次性隔离 PostgreSQL 中退出 0，317 个测试事件通过（含子用例），4 项专用 S3 环境测试因未配置而跳过；本次不声明真实 S3 或公网部署验收。`go test -race ./internal/identity/adapter/google -count=20`、`go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...`、根目录 `npm run ci` 与 `git diff --check` 均退出 0。旧映射下的错误分类/HTTP 契约测试曾失败；现有真实 HTTP 锁等待测试已按方案 A 将预期改为 504，继续检查超时后 revision 未变化。
+
+### 结构检查与领域可复现性（P7，2026-10-21）
+
+Identity 与 Challenge 共用源码遍历和 import 解析机制，各自保留必要的依赖边界差异；检查器拒绝独立部署组件直接导入彼此的 `internal` 实现包，`internal/platform` 等共享技术包不作为业务服务处理。Challenge 的随机 ID 生成移到应用层，领域方法显式接收工作项 ID；状态推进继续显式接收时间。具体范围、兼容约定和验收边界见 [Challenge P7 记录](backend-challenge.md#p7-determinism)。这项改进不调整业务状态机，也不把“只依赖标准库”当作领域无隐含副作用的证明；结构检查、领域行为测试与真实依赖集成各自承担不同的证据责任。
+
+<a id="p1-p7-remediation"></a>
+### P1–P7 整改范围与验收索引（2026-10-22）
+
+本表以逐项讨论确定的本地整改范围为准，不把整个后端全面分层或生产发布作为已经完成的事实。具体接口、包组织和测试实现属于 Agent Self-Claimed。
+
+| 问题 | 当前处理与保留边界 |
+| --- | --- |
+| P1 公共 SQL 投影重复 | Content 共用 `taskSubmissionColumns`、列表扩展列和 `scanTaskSubmission`；按人类决定保留当前 Content 包组织，不声明整个模块已完成仓储分层。 |
+| P2 静态登记分散 | operation catalog 统一操作、策略、目标及预算，路由/handler/OpenAPI 与 Proto descriptor 独立核对；四项 planned 例外明确保留，descriptor 不证明 RPC 已运行。 |
+| P3 上传编排与数据库职责混杂 | 浏览器/Challenge 上传、完成/取消、创建/查询和后台清理均经应用用例与 PostgreSQL 仓储；保留已接受的持锁协议及成本，后续按实测性能再评估缩短持锁。 |
+| P4 重复循环与不可见投递失败 | Content/Moderation 共用 outbox runner；暂用结构化日志定位任务和阶段，保持每次领取一项、串行推进；数据库失败观察字段仅记录为后续优化。 |
+| P5 转换与复制边界 | 删除六个无消费者的反向转换，保留跨模块实际调用与持久化兼容映射；按人类决定保留配置顶层浅复制并记录嵌套可变值风险。 |
+| P6 存储和错误契约不一致 | S3 multipart、5 MiB browser 块与截断式 `WriteAt` 统一契约；取消、超时和不可用分别映射。SeaweedFS 生命周期兜底不可依赖，后台清理承担持久化恢复。 |
+| P7 架构约束与领域确定性 | Identity/Challenge 共用依赖扫描，拒绝跨服务内部导入；领域 ID/时间显式输入，同时验证领域重放与真实数据库行为。 |
+
+共享 request ID 拦截器还统一 unary/stream RPC 关联信息。提交前补验发现的提前拒绝上传场景，Gateway 在 `Send` 返回 EOF 时继续读取最终 RPC 状态，保留权限拒绝、限流和超时分类；不会据 EOF 返回上传成功。完整后端真实依赖集成、隔离 kind、Nginx 路由检查、原始证据及未验收范围见 [Asset 第 19 节](backend-asset.md#precommit-acceptance-20261022)。
 
 ## 6. 实施顺序与完成条件
 

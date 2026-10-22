@@ -84,10 +84,10 @@ func TestAssetSharedS3HTTPContentIntegration(t *testing.T) {
 		must(t, e)
 		must(t, asset.CheckStorage(t.Context(), storage))
 		assets[i] = assetpb.NewAssetServiceClient(serviceTestGRPC(t, lab, "asset", "gateway", asset.Authorization, func(server *grpc.Server) {
-			assetpb.RegisterAssetServiceServer(server, &asset.Server{DB: assetDB, Storage: storage, Identity: lab.client(t, i, "asset", lab.pki)})
+			assetpb.RegisterAssetServiceServer(server, layeredAssetServer(assetDB, storage, lab.client(t, i, "asset", lab.pki), nil))
 		}))
 		ownership := assetpb.NewAssetServiceClient(serviceTestGRPC(t, lab, "asset", "content", asset.Authorization, func(server *grpc.Server) {
-			assetpb.RegisterAssetServiceServer(server, &asset.Server{DB: assetDB, Storage: storage, Identity: lab.client(t, i, "asset", lab.pki)})
+			assetpb.RegisterAssetServiceServer(server, layeredAssetServer(assetDB, storage, lab.client(t, i, "asset", lab.pki), nil))
 		}))
 		contents[i] = contentpb.NewContentServiceClient(serviceTestGRPC(t, lab, "content", "gateway", content.Authorization, func(server *grpc.Server) {
 			contentpb.RegisterContentServiceServer(server, &content.Server{DB: contentDB, Identity: lab.client(t, i, "content", lab.pki), Asset: ownership})
@@ -99,7 +99,7 @@ func TestAssetSharedS3HTTPContentIntegration(t *testing.T) {
 	alice, aliceSession := lab.login(t, "s3-alice", nil)
 	bob, bobSession := lab.login(t, "s3-bob", nil)
 	headers := map[string]string{"Origin": lab.origin, "X-CSRF-Token": aliceSession.CsrfToken, "Content-Type": "application/json", "Idempotency-Key": "s3-http-upload-key-01"}
-	data := []byte("private file shared across real S3 replicas")
+	data := bytes.Repeat([]byte("a"), platform.AssetUploadChunkBytes+43)
 	digest := sha256.Sum256(data)
 	body := fmt.Sprintf(`{"filename":"private.txt","mediaType":"text/plain","expectedBytes":%d,"sha256":"%s"}`, len(data), hex.EncodeToString(digest[:]))
 	httpStatus(t, lab.request(t, 0, "POST", "/api/me/assets/upload-sessions", nil, body, headers), 401)
@@ -114,10 +114,10 @@ func TestAssetSharedS3HTTPContentIntegration(t *testing.T) {
 		} `json:"uploadSession"`
 	}
 	readJSON(t, response, &created)
-	for i, part := range [][]byte{data[:7], data[7:]} {
+	for i, part := range [][]byte{data[:platform.AssetUploadChunkBytes], data[platform.AssetUploadChunkBytes:]} {
 		offset := 0
 		if i == 1 {
-			offset = 7
+			offset = platform.AssetUploadChunkBytes
 		}
 		chunkHeaders := map[string]string{"Origin": lab.origin, "X-CSRF-Token": aliceSession.CsrfToken, "Content-Type": "application/octet-stream", "Content-Range": fmt.Sprintf("bytes %d-%d/%d", offset, offset+len(part)-1, len(data))}
 		httpStatus(t, lab.request(t, i, "PUT", "/api/me/assets/upload-sessions/"+created.Session.ID+"/content", []*http.Cookie{alice}, string(part), chunkHeaders), 200)
@@ -203,7 +203,7 @@ func serviceTestGRPC(t *testing.T, lab *identityLab, name, caller string, author
 	if name == "content" {
 		streamAuthorize = content.AuthorizationStream
 	}
-	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.UnaryInterceptor(authorize), grpc.StreamInterceptor(streamAuthorize))
+	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.UnaryInterceptor(authorize), grpc.StreamInterceptor(streamAuthorize), grpc.MaxRecvMsgSize(platform.AssetUploadMessageBytes))
 	register(server)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	must(t, err)
@@ -212,7 +212,7 @@ func serviceTestGRPC(t *testing.T, lab *identityLab, name, caller string, author
 	c, k, a := lab.pki.cert(t, caller)
 	tlsConfig, err := platform.TLS(c, k, a, name)
 	must(t, err)
-	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)), grpc.WithDisableRetry())
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)), grpc.WithDisableRetry(), grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(platform.AssetUploadMessageBytes)))
 	must(t, err)
 	t.Cleanup(func() { conn.Close() })
 	return conn

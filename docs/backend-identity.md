@@ -180,7 +180,7 @@ MCP 管理已补 `CreateMcpToken(name, create_request_id)`、`ListMyMcpTokens(cu
 
 Content 的 `ListMySubmissions` 已加入 audience/method 策略，规则与私有详情一致：仅网站会话可取得绑定 `content` audience 和该完整 RPC 方法的 ActorAssertion；MCP token、匿名主体、错误 audience/method 均拒绝。Content 收到后仍调用 `VerifyActor` 复核当前凭据，管理员角色不会改变“我的”作者账号。该接入不新增 Identity Proto 字段，也不允许 Content 查询 Identity 表。
 
-错误延续既有映射：格式/流程问题 400，凭据无效 401，来源/CSRF/用途/角色禁止 403，依赖不可用 503。未知账号与无效凭据不返回可枚举的资料；错误只包含稳定原因和 request ID，不包含 Google 原始响应体。回调所有响应使用 no-store/no-referrer。
+错误映射：格式/流程问题 400，凭据无效 401，来源/CSRF/用途/角色禁止 403，依赖不可用 503。2026-10-20 按 P6.2 方案 A 区分请求超时：`DeadlineExceeded` 返回 504 / `deadline_exceeded`；`Canceled` 保持取消分类，外层 HTTP 连接仍有效时返回 503 / `request_cancelled`。仓储、应用与 Google 适配器保留可识别的 context cause，不把取消和超时先改为 `identity_unavailable`。具体边界见[共同技术错误约定](backend-architecture.md#技术错误与请求终止2026-10-20)。未知账号与无效凭据不返回可枚举的资料；错误只包含稳定原因和 request ID，不包含 Google 原始响应体。回调所有响应使用 no-store/no-referrer。
 
 <a id="platform"></a>
 ## 6. 为 Identity 实现哪些 platform 公共基座

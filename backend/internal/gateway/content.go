@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -75,19 +75,19 @@ func httpDraftNames(raw []byte) bool {
 	}
 	return walk(value)
 }
-func (h *Handler) contentActor(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
+func (h *Handler) contentActor(w http.ResponseWriter, r *http.Request, operation contract.OperationID) (string, bool) {
 	if h.options.Content == nil {
 		problem(w, 503, "content_unavailable")
 		return "", false
 	}
-	return h.actorFor(w, r, "content", method)
+	return h.actorFor(w, r, operation)
 }
-func (h *Handler) assetActor(w http.ResponseWriter, r *http.Request, method string) (string, bool) {
+func (h *Handler) assetActor(w http.ResponseWriter, r *http.Request, operation contract.OperationID) (string, bool) {
 	if h.options.Asset == nil {
 		problem(w, 503, "asset_unavailable")
 		return "", false
 	}
-	return h.actorFor(w, r, "asset", method)
+	return h.actorFor(w, r, operation)
 }
 func hasFileArtifact(input *pb.TaskDraftInput) bool {
 	for _, entry := range input.GetEntries() {
@@ -100,7 +100,7 @@ func hasFileArtifact(input *pb.TaskDraftInput) bool {
 	return false
 }
 func (h *Handler) createDraft(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.contentActor(w, r, pb.ContentService_CreateTaskDraft_FullMethodName)
+	actor, ok := h.contentActor(w, r, contract.CreateDraft)
 	if !ok {
 		return
 	}
@@ -120,7 +120,7 @@ func (h *Handler) createDraft(w http.ResponseWriter, r *http.Request) {
 	assetActor := ""
 	if hasFileArtifact(input) {
 		var assetOK bool
-		assetActor, assetOK = h.assetActor(w, r, assetpb.AssetService_CheckAssetOwnership_FullMethodName)
+		assetActor, assetOK = h.assetActor(w, r, contract.CheckAssetOwnership)
 		if !assetOK {
 			return
 		}
@@ -176,7 +176,7 @@ func submissionListRequest(rawQuery string) (*pb.ListMySubmissionsRequest, strin
 	return request, ""
 }
 func (h *Handler) listSubmissions(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.contentActor(w, r, pb.ContentService_ListMySubmissions_FullMethodName)
+	actor, ok := h.contentActor(w, r, contract.ListOwnSubmissions)
 	if !ok {
 		return
 	}
@@ -208,7 +208,7 @@ func (h *Handler) listSubmissions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) getDraft(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.contentActor(w, r, pb.ContentService_GetMyTaskSubmission_FullMethodName)
+	actor, ok := h.contentActor(w, r, contract.ReadOwnSubmission)
 	if !ok {
 		return
 	}
@@ -220,7 +220,7 @@ func (h *Handler) getDraft(w http.ResponseWriter, r *http.Request) {
 	taskResponse(w, 200, response.Submission)
 }
 func (h *Handler) replaceDraft(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.contentActor(w, r, pb.ContentService_ReplaceTaskDraft_FullMethodName)
+	actor, ok := h.contentActor(w, r, contract.ReplaceDraft)
 	if !ok {
 		return
 	}
@@ -239,7 +239,7 @@ func (h *Handler) replaceDraft(w http.ResponseWriter, r *http.Request) {
 	assetActor := ""
 	if hasFileArtifact(input) {
 		var assetOK bool
-		assetActor, assetOK = h.assetActor(w, r, assetpb.AssetService_CheckAssetOwnership_FullMethodName)
+		assetActor, assetOK = h.assetActor(w, r, contract.CheckAssetOwnership)
 		if !assetOK {
 			return
 		}

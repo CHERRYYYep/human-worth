@@ -259,25 +259,6 @@ func FromStartRunRequest(v *challenge.StartRunRequest) *dto.StartRunRequest {
 	out.IdempotencyKey = v.IdempotencyKey
 	return out
 }
-func ToStartRunRequest(v *dto.StartRunRequest) *challenge.StartRunRequest {
-	if v == nil {
-		return nil
-	}
-	out := &challenge.StartRunRequest{}
-	out.ActorAssertion = v.ActorAssertion
-	out.TaskId = v.TaskId
-	out.Configuration = ToRunConfiguration(v.Configuration)
-	out.IdempotencyKey = v.IdempotencyKey
-	return out
-}
-func FromStartRunResponse(v *challenge.StartRunResponse) *dto.StartRunResponse {
-	if v == nil {
-		return nil
-	}
-	out := &dto.StartRunResponse{}
-	out.Run = FromRun(v.Run)
-	return out
-}
 func ToStartRunResponse(v *dto.StartRunResponse) *challenge.StartRunResponse {
 	if v == nil {
 		return nil
@@ -293,23 +274,6 @@ func FromGetRunRequest(v *challenge.GetRunRequest) *dto.GetRunRequest {
 	out := &dto.GetRunRequest{}
 	out.ActorAssertion = v.ActorAssertion
 	out.RunId = v.RunId
-	return out
-}
-func ToGetRunRequest(v *dto.GetRunRequest) *challenge.GetRunRequest {
-	if v == nil {
-		return nil
-	}
-	out := &challenge.GetRunRequest{}
-	out.ActorAssertion = v.ActorAssertion
-	out.RunId = v.RunId
-	return out
-}
-func FromGetRunResponse(v *challenge.GetRunResponse) *dto.GetRunResponse {
-	if v == nil {
-		return nil
-	}
-	out := &dto.GetRunResponse{}
-	out.Run = FromRun(v.Run)
 	return out
 }
 func ToGetRunResponse(v *dto.GetRunResponse) *challenge.GetRunResponse {
@@ -406,24 +370,6 @@ func FromCancelRunRequest(v *challenge.CancelRunRequest) *dto.CancelRunRequest {
 	out.ActorAssertion = v.ActorAssertion
 	out.RunId = v.RunId
 	out.Reason = v.Reason
-	return out
-}
-func ToCancelRunRequest(v *dto.CancelRunRequest) *challenge.CancelRunRequest {
-	if v == nil {
-		return nil
-	}
-	out := &challenge.CancelRunRequest{}
-	out.ActorAssertion = v.ActorAssertion
-	out.RunId = v.RunId
-	out.Reason = v.Reason
-	return out
-}
-func FromCancelRunResponse(v *challenge.CancelRunResponse) *dto.CancelRunResponse {
-	if v == nil {
-		return nil
-	}
-	out := &dto.CancelRunResponse{}
-	out.Run = FromRun(v.Run)
 	return out
 }
 func ToCancelRunResponse(v *dto.CancelRunResponse) *challenge.CancelRunResponse {

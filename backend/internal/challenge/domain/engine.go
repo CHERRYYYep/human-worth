@@ -24,8 +24,8 @@ func (e Engine) WorkPolicyHash(kind WorkKind) string {
 }
 
 // assignment 每个工作项从白名单字段重新投影，绝不把整个运行状态交给模型。
-func (e Engine) assignment(st *State, kind WorkKind) *Assignment {
-	a := &Assignment{WorkItemId: NewID("work_"), Kind: kind, Role: "R", Model: CloneModelConfiguration(st.Run.Configuration.Ranker), ModelCallLimit: 1, InputPolicyHash: e.WorkPolicyHash(kind)}
+func (e Engine) assignment(st *State, kind WorkKind, workItemID string) *Assignment {
+	a := &Assignment{WorkItemId: workItemID, Kind: kind, Role: "R", Model: CloneModelConfiguration(st.Run.Configuration.Ranker), ModelCallLimit: 1, InputPolicyHash: e.WorkPolicyHash(kind)}
 	a.Model.Prompt = st.RankerPrompt
 	switch kind {
 	case WorkKind_WORK_KIND_PACK_TASK:
@@ -40,13 +40,13 @@ func (e Engine) assignment(st *State, kind WorkKind) *Assignment {
 	}
 	return a
 }
-func (e Engine) SetValidation(st *State, batch *PreferenceBatch, inputs []*RankingSample) {
+func (e Engine) SetValidation(st *State, batch *PreferenceBatch, inputs []*RankingSample, workItemID string) {
 	st.Validation = batch
-	st.Assignment = e.rankingAssignment(st, WorkKind_WORK_KIND_VALIDATE_RANKER, inputs)
+	st.Assignment = e.rankingAssignment(st, WorkKind_WORK_KIND_VALIDATE_RANKER, inputs, workItemID)
 }
 
 // SetTraining 把可用业务内容一次投影给标准生成调用，不复用之后判断时的会话。
-func (e Engine) SetTraining(st *State, batch *PreferenceBatch, inputs []*RankingSample) {
+func (e Engine) SetTraining(st *State, batch *PreferenceBatch, inputs []*RankingSample, workItemID string) {
 	st.Training = batch
 	st.TrainingInputs = inputs
 	input := &RefineRankerInput{
@@ -63,20 +63,20 @@ func (e Engine) SetTraining(st *State, batch *PreferenceBatch, inputs []*Ranking
 	for i, sample := range inputs {
 		input.Samples = append(input.Samples, &TrainingSample{Sample: sample, Ranking: byTask[sample.Task.TaskId], HumanCounts: batch.Samples[i].CountsByWork})
 	}
-	a := e.assignment(st, WorkKind_WORK_KIND_REFINE_RANKER)
+	a := e.assignment(st, WorkKind_WORK_KIND_REFINE_RANKER, workItemID)
 	a.Input = &Assignment_Refine{Refine: input}
 	a.Materials = append(RankMaterials(inputs), RankMaterials([]*RankingSample{input.Target})...)
 	st.Assignment = a
 }
 
-func (e Engine) rankingAssignment(st *State, kind WorkKind, inputs []*RankingSample) *Assignment {
-	a := e.assignment(st, kind)
+func (e Engine) rankingAssignment(st *State, kind WorkKind, inputs []*RankingSample, workItemID string) *Assignment {
+	a := e.assignment(st, kind, workItemID)
 	a.Input = &Assignment_Rank{Rank: &RankInput{Samples: inputs}}
 	a.Materials = RankMaterials(inputs)
 	return a
 }
 
-func (e Engine) RankGeneratedWork(st *State, input *RankingSample, ref *SnapshotRef) error {
+func (e Engine) RankGeneratedWork(st *State, input *RankingSample, ref *SnapshotRef, workItemID string) error {
 	st.Target = ref
 	st.Works = input.Works
 	st.Comments = input.Comments
@@ -86,7 +86,7 @@ func (e Engine) RankGeneratedWork(st *State, input *RankingSample, ref *Snapshot
 		}
 	}
 	input.Works = append(input.Works, st.Feedback.Work)
-	a := e.rankingAssignment(st, WorkKind_WORK_KIND_RANK_WORKS, []*RankingSample{input})
+	a := e.rankingAssignment(st, WorkKind_WORK_KIND_RANK_WORKS, []*RankingSample{input}, workItemID)
 	for _, material := range a.Materials {
 		if material.SourceId == st.Feedback.Work.Id {
 			material.SourceKind = "own_work"
@@ -97,18 +97,18 @@ func (e Engine) RankGeneratedWork(st *State, input *RankingSample, ref *Snapshot
 }
 
 // ExplainOwnWork 只投影当前作品和获准任务材料，不包含评论或其他作品。
-func (e Engine) ExplainOwnWork(st *State) *Assignment {
-	a := e.assignment(st, WorkKind_WORK_KIND_EXPLAIN_OWN_WORK)
+func (e Engine) ExplainOwnWork(st *State, workItemID string) *Assignment {
+	a := e.assignment(st, WorkKind_WORK_KIND_EXPLAIN_OWN_WORK, workItemID)
 	a.Input = &Assignment_Explain{Explain: &ExplainInput{TaskDescription: st.Task.Description, OwnWork: st.Feedback.Work}}
 	a.Materials = append(SelectedMaterials(st), WorkMaterials(st.Run.TaskId, st.Feedback.Work, true)...)
 	return a
 }
 
-func (e Engine) nextPack(st *State) {
+func (e Engine) nextPack(st *State, workItemID string) {
 	st.Run.Round++
 	st.Run.Stage = "optimizing_packer"
 	st.Pending = ""
-	a := e.assignment(st, WorkKind_WORK_KIND_PACK_TASK)
+	a := e.assignment(st, WorkKind_WORK_KIND_PACK_TASK, workItemID)
 	a.Input = &Assignment_Pack{Pack: &PackInput{Initial: st.Run.Configuration.InitialTaskPackage, ExecutionHints: st.ExecutionHints, Feedback: st.Feedback}}
 	a.Materials = append(SelectedMaterials(st), WorkMaterials(st.Run.TaskId, st.Feedback.GetWork(), true)...)
 	st.Assignment = a
@@ -116,7 +116,8 @@ func (e Engine) nextPack(st *State) {
 
 // ApplyResult 集中处理 R → P → E → R → 解释的结果与状态推进。
 // 不访问数据库、模型或其他服务。
-func (e Engine) ApplyResult(st *State, result Result, attemptID, fitBinding string, now time.Time) error {
+// nextWorkItemID 由应用层生成；未创建下一工作项的分支不使用它。
+func (e Engine) ApplyResult(st *State, result Result, attemptID, fitBinding, nextWorkItemID string, now time.Time) error {
 	a := st.Assignment
 	switch a.Kind {
 	case WorkKind_WORK_KIND_VALIDATE_RANKER:
@@ -136,13 +137,13 @@ func (e Engine) ApplyResult(st *State, result Result, attemptID, fitBinding stri
 			st.Training = nil
 			st.TrainingInputs = nil
 			st.TrainingRankings = nil
-			e.nextPack(st)
+			e.nextPack(st, nextWorkItemID)
 		} else if st.Run.RankerRound >= st.Run.Configuration.RankerRoundLimit {
 			Finish(st, "failed", "ranker_fit_not_met")
 		} else {
 			// 本次判断完成后才开放标签给下一轮标准生成；该批次不再作为独立验证集。
 			st.TrainingRankings = result.Rankings
-			e.SetTraining(st, st.Validation, a.GetRank().Samples)
+			e.SetTraining(st, st.Validation, a.GetRank().Samples, nextWorkItemID)
 			st.Validation = nil
 		}
 	case WorkKind_WORK_KIND_REFINE_RANKER:
@@ -166,7 +167,7 @@ func (e Engine) ApplyResult(st *State, result Result, attemptID, fitBinding stri
 			return Invalid("invalid_packer_prompt")
 		}
 		st.ExecutionHints = result.Prompt.Prompt
-		next := e.assignment(st, WorkKind_WORK_KIND_EXECUTE_PACKAGE)
+		next := e.assignment(st, WorkKind_WORK_KIND_EXECUTE_PACKAGE, nextWorkItemID)
 		next.Input = &Assignment_Execute{Execute: &ExecuteInput{Initial: st.Run.Configuration.InitialTaskPackage, ExecutionHints: st.ExecutionHints}}
 		next.Materials = SelectedMaterials(st)
 		st.Assignment = next
@@ -190,7 +191,7 @@ func (e Engine) ApplyResult(st *State, result Result, attemptID, fitBinding stri
 			}
 		}
 		st.Feedback.PopulationSize = int32(len(result.Rankings.Items[0].OrderedWorkIds))
-		st.Assignment = e.ExplainOwnWork(st)
+		st.Assignment = e.ExplainOwnWork(st, nextWorkItemID)
 	case WorkKind_WORK_KIND_EXPLAIN_OWN_WORK:
 		if err := ValidateJudgment(result.Judgment, st.Feedback.Work, st.Run.TaskId); err != nil {
 			return err
@@ -201,7 +202,7 @@ func (e Engine) ApplyResult(st *State, result Result, attemptID, fitBinding stri
 			st.Run.Stage = "registering"
 			st.Pending = "register"
 		} else {
-			e.nextPack(st)
+			e.nextPack(st, nextWorkItemID)
 		}
 	default:
 		return Invalid("invalid_work_kind")

@@ -6,10 +6,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/KDZZZZZZ/human-worth/backend/internal/asset/application"
 )
+
+type uploadPart = application.Part
 
 // Storage contains bytes only. The database remains the source of asset state.
 type Storage interface {
+	// WriteAt preserves [0, offset), writes data, and truncates the tail.
+	// It rejects holes. Callers serialize writes using the confirmed DB offset.
 	WriteAt(context.Context, string, int64, []byte) error
 	Stat(context.Context, string) (int64, error)
 	Open(context.Context, string) (io.ReadCloser, error)
@@ -23,6 +29,9 @@ type FileStorage struct{ Root string }
 
 func (s FileStorage) path(key string) string { return filepath.Join(s.Root, filepath.FromSlash(key)) }
 func (s FileStorage) WriteAt(ctx context.Context, key string, offset int64, data []byte) error {
+	if offset < 0 || len(data) == 0 || len(data) > maxChunkBytes || offset > maxAssetBytes-int64(len(data)) {
+		return errors.New("invalid object write")
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -36,12 +45,28 @@ func (s FileStorage) WriteAt(ctx context.Context, key string, offset int64, data
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if f != nil {
+			_ = f.Close()
+		}
+	}()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if offset > info.Size() {
+		return errors.New("object write would create a hole")
+	}
 	_, writeErr := f.WriteAt(data, offset)
-	closeErr := f.Close()
 	if writeErr != nil {
 		return writeErr
 	}
-	return closeErr
+	if err = f.Truncate(offset + int64(len(data))); err != nil {
+		return err
+	}
+	err = f.Close()
+	f = nil
+	return err
 }
 func (s FileStorage) Stat(ctx context.Context, key string) (int64, error) {
 	select {

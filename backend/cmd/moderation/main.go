@@ -60,7 +60,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
+	conn, err := platform.GRPCClient(target, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)), grpc.WithDisableRetry(), grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`), grpc.WithStatsHandler(otelgrpc.NewClientHandler()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(131072), grpc.MaxCallSendMsgSize(65536)))
 	if err != nil {
 		return errors.New("identity client initialization failed")
 	}
@@ -92,7 +92,7 @@ func run() error {
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, moderation.Authorization), grpc.StreamInterceptor(moderation.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(4<<20), grpc.MaxConcurrentStreams(64))
 	app := &moderation.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn), Content: contentpb.NewContentServiceClient(contentConn)}
 	pb.RegisterModerationServiceServer(server, app)
-	go app.RunDelivery(ctx)
+	go app.RunDelivery(ctx, runtime.Log)
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)

@@ -89,6 +89,7 @@ type dependencies struct {
 	counts                                map[string]int64
 	uploads                               map[string]*asset.Asset
 	lastReadTask                          string
+	materialFailure                       error
 }
 
 func (d *dependencies) principal(raw string) (*identity.Principal, error) {
@@ -146,6 +147,9 @@ func (d *dependencies) ListChallengeComments(_ context.Context, q *content.ListC
 func (d *dependencies) CheckChallengeMaterials(context.Context, *content.CheckChallengeMaterialsRequest) (*content.CheckChallengeMaterialsResponse, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.materialFailure != nil {
+		return nil, d.materialFailure
+	}
 	return &content.CheckChallengeMaterialsResponse{Allowed: d.allowed, AuthorizationVersion: "1"}, nil
 }
 func (d *dependencies) OpenRunRegistration(_ context.Context, q *content.OpenRunRegistrationRequest) (*content.OpenRunRegistrationResponse, error) {

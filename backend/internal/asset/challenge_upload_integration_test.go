@@ -14,6 +14,8 @@ import (
 	"time"
 
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
+	assetapp "github.com/KDZZZZZZ/human-worth/backend/internal/asset/application"
+	assetpostgres "github.com/KDZZZZZZ/human-worth/backend/internal/asset/repository/postgres"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -43,7 +45,12 @@ func waitChallengeObject(t *testing.T, f *assetIntegration, store Storage, id st
 	for ctx.Err() == nil {
 		var key string
 		if err := f.runtimeDB.QueryRow(ctx, `SELECT staging_key FROM asset.assets WHERE upload_id=$1`, id).Scan(&key); err == nil {
-			if n, err := store.Stat(ctx, key); err == nil && n == size {
+			if _, multipart := store.(assetapp.ChallengeMultipartStorage); multipart {
+				var n int64
+				if err := f.db.QueryRow(ctx, `SELECT received_bytes FROM asset.assets WHERE upload_id=$1`, id).Scan(&n); err == nil && n == size {
+					return
+				}
+			} else if n, err := store.Stat(ctx, key); err == nil && n == size {
 				return
 			}
 		}
@@ -60,6 +67,9 @@ func testChallengeConcurrentRetry(t *testing.T, f *assetIntegration, a, b Storag
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	data := []byte("ABCDEF")
+	if _, multipart := a.(assetapp.ChallengeMultipartStorage); multipart {
+		data = bytes.Repeat([]byte("a"), maxChunkBytes)
+	}
 	first, err := ca.UploadAsset(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +92,15 @@ func testChallengeConcurrentRetry(t *testing.T, f *assetIntegration, a, b Storag
 		t.Fatalf("concurrent retry: %v, want Aborted upload_in_progress", err)
 	}
 	_, staging, final := challengeKeys(t, f, frame.UploadId)
-	if !bytes.Equal(objectBytes(t, b, staging), data) {
+	if _, multipart := b.(assetapp.ChallengeMultipartStorage); multipart {
+		if _, err := b.Stat(ctx, staging); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("incomplete multipart is visible", err)
+		}
+		var n int64
+		if err := f.db.QueryRow(ctx, `SELECT received_bytes FROM asset.assets WHERE id=$1`, func() string { id, _, _ := challengeKeys(t, f, frame.UploadId); return id }()).Scan(&n); err != nil || n != int64(len(data)) {
+			t.Fatal("concurrent retry changed confirmed offset", n, err)
+		}
+	} else if !bytes.Equal(objectBytes(t, b, staging), data) {
 		t.Fatal("concurrent retry changed staging")
 	}
 	completed, err := first.CloseAndRecv()
@@ -118,12 +136,92 @@ func TestChallengeConcurrentS3Retry(t *testing.T) {
 	testChallengeConcurrentRetry(t, f, a, b)
 }
 
+func TestChallengeMultipartRetryRestartsInterruptedStream(t *testing.T) {
+	dsn := testDatabaseURL(t)
+	if dsn == "" {
+		t.Skip("INCONCLUSIVE: ASSET_TEST_DATABASE_URL[_FILE] is not configured")
+	}
+	storage, _ := newS3Integration(t)
+	f := newAssetIntegration(t, dsn)
+	firstClient, stopFirst := f.startStorage("challenge", storage)
+	defer stopFirst()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	data := bytes.Repeat([]byte("a"), maxChunkBytes+(64<<10))
+	frame := challengeFrame("multipart-interrupted-retry", "text/plain", data, data[:maxChunkBytes])
+	first, err := firstClient.UploadAsset(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = first.Send(frame); err != nil {
+		t.Fatal(err)
+	}
+	waitChallengeObject(t, f, storage, frame.UploadId, maxChunkBytes)
+	cancel()
+	_, _ = first.CloseAndRecv()
+
+	secondClient, stopSecond := f.startStorage("challenge", storage)
+	defer stopSecond()
+	second, err := secondClient.UploadAsset(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = second.Send(frame); err != nil {
+		t.Fatal(err)
+	}
+	if err = second.Send(&pb.UploadAssetRequest{Chunk: data[maxChunkBytes:]}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := second.CloseAndRecv()
+	if err != nil {
+		t.Fatal("complete stream retry after interruption:", err)
+	}
+	actual, err := readChallenge(t, secondClient, &pb.ReadAssetRequest{AssetId: result.GetAsset().GetId(), Access: frame.Access})
+	if err != nil || !bytes.Equal(actual, data) || result.GetAsset().GetSha256() != sha256Hex(data) {
+		t.Fatalf("retried bytes=%d sha=%s err=%v", len(actual), result.GetAsset().GetSha256(), err)
+	}
+}
+
 func TestChallengeUploadPostgresRegression(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	if dsn == "" {
 		t.Skip("INCONCLUSIVE: ASSET_TEST_DATABASE_URL[_FILE] is not configured")
 	}
 	f := newAssetIntegration(t, dsn)
+	t.Run("panic_releases_advisory_lock", func(t *testing.T) {
+		key := assetapp.ChallengeLockKey("panic-run", "panic-attempt", "panic-upload")
+		// Hold a separate connection so a leaked session lock cannot pass by
+		// being re-acquired reentrantly on the same PostgreSQL connection.
+		probe, err := f.runtimeDB.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer probe.Release()
+
+		repo := assetpostgres.UploadRepository{DB: f.runtimeDB}
+		func() {
+			defer func() {
+				if recovered := recover(); recovered == nil {
+					t.Fatal("expected the lease callback panic to propagate")
+				}
+			}()
+			_ = repo.WithChallengeLease(t.Context(), key, func(assetapp.ChallengeUploadLease) error {
+				panic("injected challenge upload panic")
+			})
+		}()
+
+		var locked bool
+		if err = probe.QueryRow(t.Context(), `SELECT pg_try_advisory_lock(hashtextextended($1,7185429004))`, key).Scan(&locked); err != nil {
+			t.Fatal(err)
+		}
+		if !locked {
+			t.Fatal("Challenge advisory lock remained held after panic")
+		}
+		if err = probe.QueryRow(t.Context(), `SELECT pg_advisory_unlock(hashtextextended($1,7185429004))`, key).Scan(&locked); err != nil || !locked {
+			t.Fatalf("release probe advisory lock: unlocked=%t err=%v", locked, err)
+		}
+	})
 	t.Run("concurrent_retry", func(t *testing.T) { testChallengeConcurrentRetry(t, f, f.storage, f.storage) })
 	t.Run("cancel_releases_lock", func(t *testing.T) {
 		ca, stopA := f.start("challenge")
