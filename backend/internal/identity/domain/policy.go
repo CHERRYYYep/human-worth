@@ -21,6 +21,7 @@ const (
 	ListMCPTokens            = contract.ListMCPTokens
 	RevokeMCPToken           = contract.RevokeMCPToken
 	ReadTask                 = contract.ReadTask
+	ListApprovedEntries      = contract.ListApprovedEntries
 	ListTasks                = contract.ListTasks
 	ViewStatistics           = contract.ViewStatistics
 	CastVote                 = contract.CastVote

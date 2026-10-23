@@ -268,12 +268,16 @@ func (s *Server) ApplyReviewDecision(ctx context.Context, r *pb.ApplyReviewDecis
 		if e = bundleRequired(snap.Submission.Content); e != nil {
 			return nil, e
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO content.reviewed_tasks(task_id,source_revision,revision,state,snapshot) VALUES($1,$2,1,'published',$3)`, r.TaskId, r.SubmissionRevision, snapshot)
+		var published time.Time
+		if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&published); err != nil {
+			return nil, storage(err)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO content.reviewed_tasks(task_id,source_revision,revision,state,snapshot,published_at) VALUES($1,$2,1,'published',$3,$4)`, r.TaskId, r.SubmissionRevision, snapshot, published)
 		if err != nil {
 			return nil, storage(err)
 		}
 		for i, id := range snap.EntryIds {
-			_, err = tx.Exec(ctx, `INSERT INTO content.reviewed_entries(id,task_id,position,state) VALUES($1,$2,$3,'approved')`, id, r.TaskId, i)
+			_, err = tx.Exec(ctx, `INSERT INTO content.reviewed_entries(id,task_id,position,state,approved_at) VALUES($1,$2,$3,'approved',$4)`, id, r.TaskId, i, published)
 			if err != nil {
 				return nil, storage(err)
 			}

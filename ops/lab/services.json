@@ -28,6 +28,16 @@
         "path": "/api/me/submissions",
         "status": 401,
         "code": "unauthenticated"
+      },
+      {
+        "path": "/api/tasks/tsk_00000000000000000000000000000000",
+        "status": 404,
+        "code": "task_not_found"
+      },
+      {
+        "path": "/api/tasks/tsk_00000000000000000000000000000000/entries",
+        "status": 404,
+        "code": "task_not_found"
       }
     ]
   },

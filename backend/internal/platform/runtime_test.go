@@ -18,9 +18,10 @@ func TestUnaryUsesMethodDeadline(t *testing.T) {
 		method string
 		err    error
 	}
-	results := make(chan result, 2)
+	results := make(chan result, 3)
 	for _, method := range []string{
 		"/humanworth.content.v1.ContentService/ListMySubmissions",
+		"/humanworth.content.v1.ContentService/ListApprovedEntries",
 		"/humanworth.content.v1.ContentService/GetMyTaskSubmission",
 	} {
 		go func(method string) {
@@ -38,10 +39,10 @@ func TestUnaryUsesMethodDeadline(t *testing.T) {
 		}(method)
 	}
 
-	for range 2 {
+	for range 3 {
 		result := <-results
 		switch result.method {
-		case "/humanworth.content.v1.ContentService/ListMySubmissions":
+		case "/humanworth.content.v1.ContentService/ListMySubmissions", "/humanworth.content.v1.ContentService/ListApprovedEntries":
 			if result.err != nil {
 				t.Fatalf("list deadline did not cover controlled delay: %v", result.err)
 			}

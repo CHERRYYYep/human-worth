@@ -36,44 +36,7 @@ import (
 // Real HTTP, Identity, mTLS gRPC, restricted PostgreSQL roles and external S3.
 // Services are in-process servers: this is NOT a kind rollout or OS-process test.
 func TestAssetSharedS3HTTPContentIntegration(t *testing.T) {
-	path := os.Getenv("ASSET_S3_TEST_CONFIG_FILE")
-	if path == "" {
-		t.Skip("INCONCLUSIVE: ASSET_S3_TEST_CONFIG_FILE is not configured")
-	}
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm()&0077 != 0 {
-		t.Fatal("S3 test config must be a private readable file")
-	}
-	raw, err := os.ReadFile(path)
-	must(t, err)
-	var cfg asset.S3Config
-	must(t, json.Unmarshal(raw, &cfg))
-	cfg.Bucket = fmt.Sprintf("hw-asset-http-%x", time.Now().UnixNano())
-	remote := s3.New(s3.Options{Region: cfg.Region, BaseEndpoint: aws.String(cfg.Endpoint), UsePathStyle: cfg.ForcePathStyle, RetryMaxAttempts: 1, Credentials: awscredentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")})
-	_, err = remote.CreateBucket(t.Context(), &s3.CreateBucketInput{Bucket: aws.String(cfg.Bucket)})
-	must(t, err)
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		pages := s3.NewListObjectsV2Paginator(remote, &s3.ListObjectsV2Input{Bucket: aws.String(cfg.Bucket)})
-		for pages.HasMorePages() {
-			page, e := pages.NextPage(ctx)
-			if e != nil {
-				t.Errorf("S3 cleanup: %T", e)
-				return
-			}
-			for _, obj := range page.Contents {
-				_, e = remote.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(cfg.Bucket), Key: obj.Key})
-				if e != nil {
-					t.Errorf("S3 cleanup: %T", e)
-				}
-			}
-		}
-		_, e := remote.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: aws.String(cfg.Bucket)})
-		if e != nil {
-			t.Errorf("S3 bucket cleanup: %T", e)
-		}
-	})
+	cfg := sharedS3TestConfig(t)
 	lab := newIdentityLab(t)
 	assetDB := serviceTestDatabase(t, lab, "asset", asset.Migrate, "../../../ops/asset-grants.sql")
 	contentDB := serviceTestDatabase(t, lab, "content", content.Migrate, "../../../ops/content/grants.sql")
@@ -156,6 +119,50 @@ func TestAssetSharedS3HTTPContentIntegration(t *testing.T) {
 	httpStatus(t, lab.request(t, 1, "GET", "/api/me/assets/"+created.Asset.ID, []*http.Cookie{alice}, "", nil), 401)
 }
 
+// Real S3 fixture reused by public browsing; absence is explicitly INCONCLUSIVE.
+func sharedS3TestConfig(t *testing.T) asset.S3Config {
+	t.Helper()
+	path := os.Getenv("ASSET_S3_TEST_CONFIG_FILE")
+	if path == "" {
+		t.Skip("INCONCLUSIVE: ASSET_S3_TEST_CONFIG_FILE is not configured")
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm()&0077 != 0 {
+		t.Fatal("S3 test config must be a private readable file")
+	}
+	raw, err := os.ReadFile(path)
+	must(t, err)
+	var cfg asset.S3Config
+	must(t, json.Unmarshal(raw, &cfg))
+	cfg.Bucket = fmt.Sprintf("hw-asset-http-%x", time.Now().UnixNano())
+	remote := s3.New(s3.Options{Region: cfg.Region, BaseEndpoint: aws.String(cfg.Endpoint), UsePathStyle: cfg.ForcePathStyle, RetryMaxAttempts: 1, Credentials: awscredentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")})
+	_, err = remote.CreateBucket(t.Context(), &s3.CreateBucketInput{Bucket: aws.String(cfg.Bucket)})
+	must(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		pages := s3.NewListObjectsV2Paginator(remote, &s3.ListObjectsV2Input{Bucket: aws.String(cfg.Bucket)})
+		for pages.HasMorePages() {
+			page, e := pages.NextPage(ctx)
+			if e != nil {
+				t.Errorf("S3 cleanup: %T", e)
+				return
+			}
+			for _, obj := range page.Contents {
+				_, e = remote.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(cfg.Bucket), Key: obj.Key})
+				if e != nil {
+					t.Errorf("S3 cleanup: %T", e)
+				}
+			}
+		}
+		_, e := remote.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: aws.String(cfg.Bucket)})
+		if e != nil {
+			t.Errorf("S3 bucket cleanup: %T", e)
+		}
+	})
+	return cfg
+}
+
 // Reuse the Identity lab's isolated database/PKI, not production schemas.
 func serviceTestDatabase(t *testing.T, lab *identityLab, name string, migrate func(context.Context, *pgxpool.Pool) error, grantsPath string) *pgxpool.Pool {
 	t.Helper()
@@ -176,6 +183,17 @@ func serviceTestDatabase(t *testing.T, lab *identityLab, name string, migrate fu
 	t.Cleanup(ownerDB.Close)
 	must(t, migrate(t.Context(), ownerDB))
 	must(t, migrate(t.Context(), ownerDB))
+	serviceTestGrants(t, lab, name, runtimeID, grantsPath)
+	cfg.ConnConfig.User = runtime
+	runtimeDB, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	must(t, err)
+	t.Cleanup(runtimeDB.Close)
+	return runtimeDB
+}
+
+// Use the checked-in grants, rather than a stale private copy of runtime grants.
+func serviceTestGrants(t *testing.T, lab *identityLab, name, runtimeID, grantsPath string) {
+	t.Helper()
 	sql, err := os.ReadFile(grantsPath)
 	must(t, err)
 	lines := strings.Split(string(sql), "\n")
@@ -188,11 +206,6 @@ func serviceTestDatabase(t *testing.T, lab *identityLab, name string, migrate fu
 	grantSQL := strings.ReplaceAll(strings.Join(filtered, "\n"), name+"_runtime", runtimeID)
 	_, err = lab.db.Exec(t.Context(), grantSQL)
 	must(t, err)
-	cfg.ConnConfig.User = runtime
-	runtimeDB, err := pgxpool.NewWithConfig(t.Context(), cfg)
-	must(t, err)
-	t.Cleanup(runtimeDB.Close)
-	return runtimeDB
 }
 func serviceTestGRPC(t *testing.T, lab *identityLab, name, caller string, authorize grpc.UnaryServerInterceptor, register func(*grpc.Server)) *grpc.ClientConn {
 	t.Helper()

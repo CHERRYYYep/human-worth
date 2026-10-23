@@ -19,6 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	ContentService_GetTask_FullMethodName                     = "/humanworth.content.v1.ContentService/GetTask"
+	ContentService_ListApprovedEntries_FullMethodName         = "/humanworth.content.v1.ContentService/ListApprovedEntries"
 	ContentService_CreateTaskDraft_FullMethodName             = "/humanworth.content.v1.ContentService/CreateTaskDraft"
 	ContentService_GetMyTaskSubmission_FullMethodName         = "/humanworth.content.v1.ContentService/GetMyTaskSubmission"
 	ContentService_ListMySubmissions_FullMethodName           = "/humanworth.content.v1.ContentService/ListMySubmissions"
@@ -45,6 +47,10 @@ const (
 //
 // Website draft RPCs are implemented; Challenge collaboration RPCs remain dependency contracts.
 type ContentServiceClient interface {
+	// Gateway mTLS + method-bound Identity assertion (anonymous/web/MCP); 2s.
+	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
+	// Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
+	ListApprovedEntries(ctx context.Context, in *ListApprovedEntriesRequest, opts ...grpc.CallOption) (*ListApprovedEntriesResponse, error)
 	CreateTaskDraft(ctx context.Context, in *CreateTaskDraftRequest, opts ...grpc.CallOption) (*CreateTaskDraftResponse, error)
 	GetMyTaskSubmission(ctx context.Context, in *GetMyTaskSubmissionRequest, opts ...grpc.CallOption) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(ctx context.Context, in *ListMySubmissionsRequest, opts ...grpc.CallOption) (*ListMySubmissionsResponse, error)
@@ -78,6 +84,26 @@ type contentServiceClient struct {
 
 func NewContentServiceClient(cc grpc.ClientConnInterface) ContentServiceClient {
 	return &contentServiceClient{cc}
+}
+
+func (c *contentServiceClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTaskResponse)
+	err := c.cc.Invoke(ctx, ContentService_GetTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) ListApprovedEntries(ctx context.Context, in *ListApprovedEntriesRequest, opts ...grpc.CallOption) (*ListApprovedEntriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListApprovedEntriesResponse)
+	err := c.cc.Invoke(ctx, ContentService_ListApprovedEntries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *contentServiceClient) CreateTaskDraft(ctx context.Context, in *CreateTaskDraftRequest, opts ...grpc.CallOption) (*CreateTaskDraftResponse, error) {
@@ -266,6 +292,10 @@ func (c *contentServiceClient) GetChallengeRegistration(ctx context.Context, in 
 //
 // Website draft RPCs are implemented; Challenge collaboration RPCs remain dependency contracts.
 type ContentServiceServer interface {
+	// Gateway mTLS + method-bound Identity assertion (anonymous/web/MCP); 2s.
+	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
+	// Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
+	ListApprovedEntries(context.Context, *ListApprovedEntriesRequest) (*ListApprovedEntriesResponse, error)
 	CreateTaskDraft(context.Context, *CreateTaskDraftRequest) (*CreateTaskDraftResponse, error)
 	GetMyTaskSubmission(context.Context, *GetMyTaskSubmissionRequest) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(context.Context, *ListMySubmissionsRequest) (*ListMySubmissionsResponse, error)
@@ -301,6 +331,12 @@ type ContentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedContentServiceServer struct{}
 
+func (UnimplementedContentServiceServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTask not implemented")
+}
+func (UnimplementedContentServiceServer) ListApprovedEntries(context.Context, *ListApprovedEntriesRequest) (*ListApprovedEntriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListApprovedEntries not implemented")
+}
 func (UnimplementedContentServiceServer) CreateTaskDraft(context.Context, *CreateTaskDraftRequest) (*CreateTaskDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateTaskDraft not implemented")
 }
@@ -374,6 +410,42 @@ func RegisterContentServiceServer(s grpc.ServiceRegistrar, srv ContentServiceSer
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&ContentService_ServiceDesc, srv)
+}
+
+func _ContentService_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).GetTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_GetTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).GetTask(ctx, req.(*GetTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_ListApprovedEntries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListApprovedEntriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ListApprovedEntries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ListApprovedEntries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ListApprovedEntries(ctx, req.(*ListApprovedEntriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ContentService_CreateTaskDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -707,6 +779,14 @@ var ContentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "humanworth.content.v1.ContentService",
 	HandlerType: (*ContentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetTask",
+			Handler:    _ContentService_GetTask_Handler,
+		},
+		{
+			MethodName: "ListApprovedEntries",
+			Handler:    _ContentService_ListApprovedEntries_Handler,
+		},
 		{
 			MethodName: "CreateTaskDraft",
 			Handler:    _ContentService_CreateTaskDraft_Handler,

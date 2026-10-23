@@ -1,6 +1,9 @@
 package contract
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestOperationCatalogIsCompleteAndUnique(t *testing.T) {
 	if err := ValidateOperations(); err != nil {
@@ -57,5 +60,47 @@ func TestRequestTaskReviewMetadataIsDeclaredOnce(t *testing.T) {
 	}
 	if !routeFound {
 		t.Fatal("RequestTaskReview HTTP route is missing")
+	}
+}
+
+// Public browsing must stay catalogued, read-only and method-scoped across all
+// adapters; descriptor and gateway OpenAPI tests check the remaining bindings.
+func TestPublicBrowseOperations(t *testing.T) {
+	for _, tc := range []struct {
+		id            OperationID
+		method, route string
+		timeout       time.Duration
+	}{
+		{ReadTask, "/humanworth.content.v1.ContentService/GetTask", "/api/tasks/{taskId}", DefaultRPCTimeout},
+		{ListApprovedEntries, "/humanworth.content.v1.ContentService/ListApprovedEntries", "/api/tasks/{taskId}/entries", 5 * time.Second},
+	} {
+		op, ok := LookupOperation(tc.id)
+		if !ok || op.FullMethod != tc.method || !op.HasPolicy || op.Policy != (IdentityPolicy{Audience: "content", Anonymous: true, MCP: true}) {
+			t.Fatalf("invalid public operation: %#v", op)
+		}
+		timeout := op.RPCTimeout
+		if timeout == 0 {
+			timeout = DefaultRPCTimeout
+		}
+		if timeout != tc.timeout {
+			t.Fatal("public RPC budget drift", op)
+		}
+		found := false
+		for _, route := range HTTPRoutes() {
+			if route.Path != tc.route {
+				continue
+			}
+			found = true
+			timeout := route.Timeout
+			if timeout == 0 {
+				timeout = DefaultHTTPTimeout
+			}
+			if route.Method != "GET" || route.Target != tc.id || timeout != tc.timeout {
+				t.Fatal("public HTTP binding/budget drift", route)
+			}
+		}
+		if !found {
+			t.Fatal("missing public route", tc.route)
+		}
 	}
 }

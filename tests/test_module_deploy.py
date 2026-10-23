@@ -130,7 +130,7 @@ class ModuleDeployTest(unittest.TestCase):
             if path == '/api/health':
                 return ready
             if path.startswith('/api/tasks/'):
-                return 404, {'code':'asset_not_found'}
+                return 404, {'code':'asset_not_found' if path.endswith('/content') else 'task_not_found'}
             return 401, {'code':'unauthenticated'}
 
         for failure in [(503,{'code':'content_unavailable'}), (404,{'code':'not_found'}), (401,{'code':'wrong_error'})]:
@@ -138,6 +138,22 @@ class ModuleDeployTest(unittest.TestCase):
                 self.assertFalse(deployment_health.healthy(sha, checks))
         with patch.object(deployment_health,'response',side_effect=response):
             self.assertTrue(deployment_health.healthy(sha, checks))
+
+    def test_public_browse_probes_reject_outages_and_false_success(self):
+        checks = [c for c in services.load_services(ROOT)['content']['checks'] if c['path'].startswith('/api/tasks/')]
+        self.assertEqual(len(checks), 2)
+        self.assertTrue(any(c['path'].endswith('/entries') for c in checks))
+        sha = 'a'*40
+        for public in checks:
+            for reply, expected in [((404, {'code':'task_not_found'}), True),
+                                    ((503, {'code':'content_unavailable'}), False),
+                                    ((200, {}), False), ((404, {'code':'asset_not_found'}), False)]:
+                def response(path, options=()):
+                    if path == '/api/health': return 200, {'status':'ok','service':'human-worth','revision':sha}
+                    if path == public['path']: return reply
+                    return 404, {'code':'task_not_found'}
+                with patch.object(deployment_health,'response',side_effect=response):
+                    self.assertEqual(deployment_health.healthy(sha, checks),expected)
 
     def test_public_file_probe_rejects_outage_and_wrong_denial(self):
         checks = services.load_services(ROOT)['asset']['checks']

@@ -158,3 +158,13 @@ runner 保持 1 秒轮询、7 秒单轮 deadline、每 tick 调用一次；无�
 本地验证：`go test -race ./... -count=1`、`go vet ./...`、`go vet -tags=integration ./...`、`go build ./cmd/...` 均退出 0；`go test -race -tags=integration ./internal/identity -run '^TestModerationHTTPOutbox$' -count=1 -timeout=180s -v` 使用一次性 PostgreSQL 18 退出 0。新增真实数据库场景在下游返回可阻塞业务冲突时，等 outbox 和 review 均提交 blocked 后由 runner 写出结构化 `ERROR`，并核对日志审核 ID、阶段及持久状态。`internal/platform` 单元测试覆盖技术失败 `WARN`、blocked `ERROR`、空队列/服务关闭静默及数据库错误详情脱敏。根目录 `npm run ci` 退出 0（5 个 Node、27 个 Python 测试），文档链接与 `git diff --check` 通过。测试 PostgreSQL 与私有 DSN 已清理。
 
 以上是本地代码、真实 PostgreSQL/mTLS 服务集成与项目检查；没有运行 kind、远端 GitHub CI、自动 Deploy Action 或公网部署。本次无 Proto/schema/前端改动，也未引入积压加速、并行消费或退避策略。
+
+## 12. 阶段五公开浏览衔接（2026-10-17，Agent Self-Claimed）
+
+本次开始已fetch并确认本模块通过PR #28进入 `origin/dev` / `upstream/dev` 的 `e2466a3`；本文阶段四当时未提交/未合入的记录属于历史证据。阶段五在此基线上扩展Content公开投影，不改变Moderation案件、理由、outbox、回执或批准权限。公开读取不依赖Moderation在线，也不读取本schema。
+
+[Content阶段五](backend-content.md#10-阶段五公开任务详情与过审作品分页2026-10-17未发布)记录字段来源、nullable历史时间和只读分页。Content首次正式批准现在同事务记录真实publishedAt/approvedAt，旧记录不伪造回填；审批时间与Moderation决定持久化时间是不同事件。旧决定重放只找回回执，不恢复已下架任务或撤销作品。
+
+现有 `TestKindModerationDeployment` 扩展在真实Moderation批准后验证普通公开详情/分页/S3文件；停Moderation时使用正常Service/NodePort验证可读，双Content Pod定向探针只作正向跨副本验证，不冒充Service故障隔离。具体运行结果见Content验收记录，不用历史阶段四PASS替代。
+
+2026-10-22 恢复整合：以PR #30后的dev `665bf4d` 为基线移植封存第五阶段；保留共享outbox runner、可靠投递/回执及技术错误分类，不改Moderation schema/协议/业务实现。Content新增批准时间写入与公开只读投影，无需Moderation在线。Service故障断言严格沿用503/504对应的不可用/deadline分类；本次结果见 [Content恢复整合](backend-content.md#11-第五阶段恢复整合2026-10-22未发布)，原第11节及此前阶段验收记录保留。

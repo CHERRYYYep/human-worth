@@ -196,3 +196,34 @@ IDENTITY_TEST_DATABASE_URL_FILE=/path/to/private/test-dsn \
 validator的登录发起检查使用临时合成OAuth client，仅验证真实Identity登录流程持久化和302构造，不跟随跳转/换码、不读取真人凭据，不代表真人Google登录成功。配置与隔离namespace一起清理。
 
 本轮不实现公开任务/作品详情、追加投稿、举报平台、Voting、Discovery、Challenge完整联调、自动审核/病毒扫描、生产S3 HA或公网部署。最多声明“审核及过审文件链路”，不能声明“公开内容浏览”。本地kind双副本共享SeaweedFS不等于生产HA。
+
+## 阶段五：公开详情与过审作品分页（本地增量，未发布）
+
+从已合入阶段四的dev `e2466a3`（PR #28）新建 `backend/feat-public-task-browse`。实现 `GET /api/tasks/{taskId}` → Content.GetTask、`GET /api/tasks/{taskId}/entries?limit=20&cursor=...` → Content.ListApprovedEntries。匿名/网站/MCP均由Identity方法级断言与Content mTLS复核，失效凭据不降级匿名；只读冻结过审快照/当前published+approved。三次固定RPC、每操作一条SQL，无逐条Identity/Asset/Moderation，无统计/资格副作用，不依赖Moderation在线。
+
+具体投影/排序/可空字段均为 **Agent Self-Claimed**：author.id为稳定作者，displayName/heat暂null，旧publishedAt/approvedAt未知为null；新增批准才记录真实数据库时间；taskAttachments当前[]，不从作品文件推导。公开契约不返回agentConfiguration/permissions/审核信息。当前兼容合法仅外链作品；不自动抓取。完整规则、契约调整及curl示例见 [Content阶段五](../docs/backend-content.md#10-阶段五公开任务详情与过审作品分页2026-10-17未发布)。
+
+先以owner执行Content `005_public_browse.sql`（只加可空时间），Readiness再放行；001～004不变，现有grants无需扩权，runtime不能更新时间/快照/作者或跨schema。复用既有mTLS/CONTENT_TARGET与文件入口，Asset无新状态/迁移。
+
+```sh
+# backend；必须专用PG及真实S3测试配置，缺失为INCONCLUSIVE而非通过
+IDENTITY_TEST_DATABASE_URL_FILE=/path/to/private/test-dsn \
+ASSET_S3_TEST_CONFIG_FILE=/path/to/private/s3-test-config.json \
+ go test -race -tags=integration ./internal/identity \
+ -run '^TestPublic(TaskBrowsing|BrowseMigrationUpgrade)$' -count=1 -timeout=120s
+# 根目录，隔离namespace、正常私有NodePort，不改公网入口
+DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py
+```
+
+本阶段只补已知task ID的公开阅读；不实现任务推荐/搜索流、Discovery/Voting、ballot、追加作品、MCP传输或前端。当前正文版本为source_revision；展示收紧使用另一内部revision。游标不是权限，每页重新检查展示；作品撤销/任务下架后新读取和文件拒绝，旧批准重放不能恢复。不把本地测试描述为生产部署。
+
+2026-10-17本轮本地验收：普通/race各138测试通过，真实PG/S3全量race集成262测试通过，公开专项连续三轮24测试通过，均无失败/跳过；最终完整kind validator退出0（两次完整重跑通过，双Content读取及Moderation停机走正常Service/NodePort），根目录CI为5个Node/28个Python通过。独立Proto重生成一致，breaking基线为开发前dev `e2466a3`。首次kind既有文件503未稳定复现，保留观察项与失败日志；完整命令、预期生成差异退出1及证据见Content文档执行记录。可提交审查，仍未发布，不代表生产S3 HA、Voting或公网验收。
+
+### 2026-10-22 第五阶段恢复整合（未提交、未发布）
+
+从实际fetch后相同的 `origin/dev` / `upstream/dev@665bf4d9c76fab14e58124594dc1975d4f70a40f`（Issue整改PR #30）创建 `backend/feat-public-task-browse-integration`，无提交地移植封存 `15fa65e`。原封存和Issue分支不变。保留操作目录驱动策略/超时/Identity目标、显式Gateway handler、共享outbox/技术错误/request ID以及Asset分层、5MiB multipart与恢复。只恢复上述公开正文及作品分页，不新增业务。
+
+以下为 **Agent Self-Claimed** 整合方案：`GetTask` planned descriptor例外移除，其他合理例外保留；005在最新Content基线未被占用，可追加，runtime无需扩权。owner先迁移，再滚动Content/Gateway；如要求升级窗口的新批准均有精确时间，先暂停决定投递并排空旧Content，全部升级后恢复，旧未知时间始终NULL。两个404发布探针不代替业务验收。真实命令、验收矩阵及本次结果见 [恢复整合记录](../docs/backend-content.md#11-第五阶段恢复整合2026-10-22未发布)；不引用2026-10-17历史数量作为本次结果，不声称远端CI/公网或生产S3 HA完成。
+
+
+本次重新验收（2026-10-22）：普通及race各220测试/子测试、公开专项三轮24、真实专用PG/S3全量race集成411，均退出0且无失败/跳过；完整kind validator退出0（678.82秒，4项真实业务测试及网络/恢复/重复部署通过），隔离namespace已清理。独立Proto重生成一致，breaking对比本次dev `665bf4d`，根目录CI为5个Node/28个Python通过。必要本地验收PASS，可提交独立审查；原第五阶段/Issue/第四阶段分支不变，未commit/push/PR/公网发布。完整命令、证据与后续追加作品边界见上述恢复整合记录，不使用历史测试数量替代本次结果。

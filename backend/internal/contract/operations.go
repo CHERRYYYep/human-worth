@@ -27,6 +27,7 @@ const (
 	ListMCPTokens            OperationID = "list_mcp_tokens"
 	RevokeMCPToken           OperationID = "revoke_mcp_token"
 	ReadTask                 OperationID = "read_task"
+	ListApprovedEntries      OperationID = "list_approved_entries"
 	ListTasks                OperationID = "list_tasks"
 	ViewStatistics           OperationID = "view_statistics"
 	CastVote                 OperationID = "cast_vote"
@@ -108,6 +109,7 @@ var operations = [...]Operation{
 	{ID: ListMCPTokens, FullMethod: "/humanworth.identity.v1.IdentityService/ListMyMcpTokens", Policy: IdentityPolicy{Audience: "identity"}, HasPolicy: true},
 	{ID: RevokeMCPToken, FullMethod: "/humanworth.identity.v1.IdentityService/RevokeMcpToken", Policy: IdentityPolicy{Audience: "identity", Write: true}, HasPolicy: true},
 	{ID: ReadTask, FullMethod: "/humanworth.content.v1.ContentService/GetTask", Policy: IdentityPolicy{Audience: "content", Anonymous: true, MCP: true}, HasPolicy: true},
+	{ID: ListApprovedEntries, FullMethod: "/humanworth.content.v1.ContentService/ListApprovedEntries", Policy: IdentityPolicy{Audience: "content", Anonymous: true, MCP: true}, HasPolicy: true, RPCTimeout: 5 * time.Second},
 	{ID: ListTasks, FullMethod: "/humanworth.discovery.v1.DiscoveryService/ListTasks", Policy: IdentityPolicy{Audience: "discovery", Anonymous: true, MCP: true}, HasPolicy: true},
 	{ID: ViewStatistics, FullMethod: "/humanworth.voting.v1.VotingService/ViewTaskStatistics", Policy: IdentityPolicy{Audience: "voting", Write: true, MCP: true}, HasPolicy: true},
 	{ID: CastVote, FullMethod: "/humanworth.voting.v1.VotingService/CastVote", Policy: IdentityPolicy{Audience: "voting", Write: true}, HasPolicy: true},
@@ -135,6 +137,8 @@ var operations = [...]Operation{
 }
 
 var httpRoutes = [...]HTTPRoute{
+	{Name: "getTask", Method: "GET", Path: "/api/tasks/{taskId}", Target: ReadTask},
+	{Name: "listApprovedEntries", Method: "GET", Path: "/api/tasks/{taskId}/entries", Target: ListApprovedEntries, Timeout: 5 * time.Second},
 	{Name: "requestTaskReview", Method: "POST", Path: "/api/me/tasks/{taskId}/review-requests", Target: RequestTaskReview, Timeout: 5 * time.Second},
 	{Name: "listReviews", Method: "GET", Path: "/api/admin/reviews", Target: ListReviews, Timeout: 5 * time.Second},
 	{Name: "getReview", Method: "GET", Path: "/api/admin/reviews/{reviewId}", Target: GetReview},

@@ -688,3 +688,13 @@ DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate
 ### 验收范围
 
 真实供应商 S3、生产 S3 的 HA/容量/备份、生产 systemd 自动部署、远端 CI/Deploy Action 和公网 revision 验证均不在本次本地验收结论内。Challenge 未部署到本轮 kind，其专项以全仓真实 PostgreSQL/S3-compatible 集成测试为依据；真实 E 沙箱和完整挑战依赖闭环仍是后续独立验收。
+
+## 20. 阶段五公开正文/作品协作增量（2026-10-17，Agent Self-Claimed）
+
+Asset PR #27和正式Moderation PR #28已进入dev；本次在其后实现 [公开任务/作品浏览](backend-content.md#10-阶段五公开任务详情与过审作品分页2026-10-17未发布)。前文各阶段“尚未合入/尚无Moderation”的表述保留为历史记录，不代表当前dev能力；没有据此推断公网发布状态。
+
+正文和作品返回冻结快照的file assetId及稳定entry ID，由调用方使用既有带task/entry/asset上下文的文件入口。Content仍是当前published/approved权威，正文/列表不调用Asset，不复制文件ready或对象元数据；实际下载由Asset同时检查ready/存储和Content确切引用，打开对象后再复核。无递归回调，不从作品附件推导任务描述附件，不返回对象存储URL，不把cloudUse当展示开关。
+
+未修改Asset Proto/表/存储/下载权限。正文/作品是可选认证（无效凭据拒绝）的新接口；既有完全匿名文件入口的Cookie/MCP不授予权限策略保持。S3文件的正式HTTP上传→草稿绑定→送审→真实Moderation批准→公开浏览/下载由新增真实PG/S3集成及kind扩展验证；未实施公网部署或生产HA验收。
+
+2026-10-22 恢复整合：第五阶段移植到Issue整改后的dev `665bf4d`，公开集成采用已分层的Asset装配，保留5MiB multipart、未知提交与对象恢复、共享技术错误和request ID；未修改Asset协议、上传实现、文件入口凭据处理或存储。上述第17～19节整改与历史验收完整保留，新增本次结果见 [Content恢复整合](backend-content.md#11-第五阶段恢复整合2026-10-22未发布)，不以本节历史数据代替。
