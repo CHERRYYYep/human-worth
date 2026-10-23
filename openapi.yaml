@@ -427,9 +427,15 @@ paths:
       tags: [Tasks]
       operationId: getTask
       summary: 阅读公开任务详情
-      description: 只返回已发布任务；草稿、待审、驳回和下架内容返回 404。普通作品浏览可分页；投票通过 ballot 一次取得全部过审作品，不隐式读取统计。
+      description: |
+        只读已批准冻结快照；草稿、待审、驳回和下架统一404 task_not_found。只允许无query请求。
+        匿名、有效网站会话及MCP读取凭据可用；携带无效/撤销凭据返回401，不降级匿名；混合或重复凭据400，空会话401。
+        不返回统计，不调用Voting、不写资格；不依赖Moderation在线。必要依赖不可用503，超时504 deadline_exceeded，取消503 request_cancelled；不缓存放行。
+        author.id取自不可变作者ID，displayName暂无可靠投影为null；heat未实现为null；旧publishedAt未知为null。
+        taskAttachments当前模型未支持独立任务附件，因此为[]，不从作品文件推导。此处nullable字段是原planned草案的显式调整，调用方需处理null。
       x-scenarios: [S1, S3, S5, S6]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       security: [{}, {WebSession: []}, {McpToken: []}]
       responses:
         '200':
@@ -448,9 +454,17 @@ paths:
       description: |
         任务须可见，作品须为 approved；没有作品公开/私有状态，也不检查单独的公开授权。
         此分页接口用于普通浏览；投票页面必须使用 ballot 一次取得全部过审作品，不得仅以某一页作为候选集合。
-        不暴露其他人的草稿、待审作品、内部配置或单题统计。
+        不暴露其他人的草稿、待审作品、内部配置、授权材料或单题统计；外链只作为数据返回，不访问。
+        固定按冻结position ASC、稳定entry ID ASC排序，limit默认20、1～100；limit+1判定后页，末页nextCursor=null，空结果items=[]。
+        版本化Base64URL游标绑定taskId、来源内容版本及排序，不是签名/授权凭据；省略或空cursor表示首页。
+        未知/重复query、非法limit返回400 invalid_request；损坏、跨任务/来源版本、超过2048字符游标400 invalid_cursor。
+        每页单条SQL重新检查当前published/approved；撤销作品即退出后续页，下架后404；不保持跨请求快照，已返回字节不撤回。
+        当前只有初始包（最多32件），未来新增过审作品需从第一页刷新；不可用分页替代完整ballot。
+        匿名/网站/MCP策略与任务详情一致；approvedAt历史未知为null，不以updated_at冒充。
+        必要依赖不可用503，超时504 deadline_exceeded，取消503 request_cancelled；重试时重新验证身份及当前展示状态，不承诺固定跨页快照。
       x-scenarios: [S1, S3, S5, H1]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       security: [{}, {WebSession: []}, {McpToken: []}]
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
@@ -830,7 +844,7 @@ paths:
         Content、数据库或对象存储不可用为 503，不返回旧授权或存储 URL。
         不接受 query（包括 ownerId/public/token）、不返回 304 或重定向；响应 no-store、attachment、nosniff。
         审核收紧提交后发起的新请求立即拒绝；已发送字节不能撤回，进行中的流不承诺瞬时中止。
-        仅实现审核决定的内部应用和文件读取，不表示 Moderation 工作流或公开任务/作品详情已经实现。
+        正式Moderation及公开任务/作品浏览现已本地实现，仍未公网发布；各自契约见对应接口。
       security: []
       parameters:
         - {$ref: '#/components/parameters/TaskId'}
@@ -1667,6 +1681,13 @@ components:
       properties:
         id: {$ref: '#/components/schemas/Id'}
         displayName: {type: string}
+    PublicAuthor:
+      type: object
+      additionalProperties: false
+      required: [id, displayName]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        displayName: {type: [string, 'null'], description: 尚无可信作者显示名投影时为null；不伪造、不逐作品查询Identity。与已实现Session.Author区分。}
     Session:
       type: object
       additionalProperties: false
@@ -1892,9 +1913,9 @@ components:
           items: {$ref: '#/components/schemas/Asset'}
           description: 随任务过审的描述附件，无附件时为空；下载仍检查当前可见性，云端使用权限不由此响应授予
         category: {type: [string, 'null']}
-        author: {$ref: '#/components/schemas/Author'}
-        heat: {type: number, description: 平台热度排序值；不包含可还原的票数或得票占比}
-        publishedAt: {$ref: '#/components/schemas/Timestamp'}
+        author: {$ref: '#/components/schemas/PublicAuthor'}
+        heat: {type: [number, 'null'], description: 热度尚未实现时为null，不伪造0；本阶段不读取统计}
+        publishedAt: {$ref: '#/components/schemas/NullableTime', description: 首次正式批准应用的数据库时间；旧数据无法证明时为null}
     ApprovedEntry:
       type: object
       additionalProperties: false
@@ -1910,14 +1931,9 @@ components:
           type: array
           minItems: 1
           items: {$ref: '#/components/schemas/Artifact'}
-          contains:
-            type: object
-            required: [kind]
-            properties:
-              kind: {enum: [text, file]}
-          minContains: 1
-        author: {$ref: '#/components/schemas/Author'}
-        approvedAt: {$ref: '#/components/schemas/Timestamp'}
+          description: 沿用已实现Content的file/link交付物；兼容已接受的仅外链作品，不在公开读取时补造text或抓取链接。更严格送审材料规则另行实现。
+        author: {$ref: '#/components/schemas/PublicAuthor'}
+        approvedAt: {$ref: '#/components/schemas/NullableTime', description: 此作品首次批准应用时间；旧数据未知为null}
       description: 任务可见且作品审核通过时的展示内容；没有公开/私有状态，不返回投稿审核材料、完整运行配置或未过审作品内容。
     VotingEligibility:
       type: object

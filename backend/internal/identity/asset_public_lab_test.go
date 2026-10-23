@@ -60,6 +60,18 @@ func (l *kindLab) reviewClient() contentpb.ContentServiceClient {
 
 func TestKindPublicAssetDeployment(t *testing.T) {
 	l := newKindLab(t)
+	t.Cleanup(func() {
+		if t.Failed() {
+			// Capture method/status diagnostics before later tests replace Content
+			// Pods. Application RPC logs contain no actor tokens or file contents.
+			for _, service := range []string{"content", "asset"} {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				out, err := l.command(ctx, "", "logs", "-l", "app="+service, "--tail=100", "--prefix=true").CombinedOutput()
+				cancel()
+				t.Logf("%s RPC diagnostics (%v):\n%s", service, err, out)
+			}
+		}
+	})
 	user := l.user()
 	var pods struct {
 		Items []struct{ Status struct{ PodIP string } }
@@ -118,6 +130,7 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 	entry := receipt.Entries[0].Id
 	download := func(want int) {
 		t.Helper()
+		t.Logf("public download: expect HTTP %d", want)
 		for _, client := range clients {
 			got := l.request(client, kindUser{}, "GET", path(entry), "", nil, want)
 			if want == 200 && !bytes.Equal(got, data) {

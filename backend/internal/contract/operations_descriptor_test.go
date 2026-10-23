@@ -23,7 +23,6 @@ type plannedMethod struct {
 // These policies are intentionally recorded before their RPC contracts exist.
 // Remove each exception as soon as its service method is declared in Proto.
 var plannedMethods = []plannedMethod{
-	{contract.ReadTask, "/humanworth.content.v1.ContentService/GetTask", "public task read is planned but not declared in Content Proto"},
 	{contract.ListTasks, "/humanworth.discovery.v1.DiscoveryService/ListTasks", "Discovery Proto has not been added"},
 	{contract.ViewStatistics, "/humanworth.voting.v1.VotingService/ViewTaskStatistics", "Voting Proto does not yet declare the statistics operation"},
 	{contract.CastVote, "/humanworth.voting.v1.VotingService/CastVote", "Voting Proto does not yet declare the vote operation"},

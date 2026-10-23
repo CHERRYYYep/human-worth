@@ -6,6 +6,8 @@ import "net/http"
 // shared contract owns route metadata; startup checks both sides match exactly.
 func (h *Handler) httpHandlers() map[string]http.HandlerFunc {
 	return map[string]http.HandlerFunc{
+		"getTask":                  h.getPublicTask,
+		"listApprovedEntries":      h.listPublicEntries,
 		"requestTaskReview":        h.requestTaskReview,
 		"listReviews":              h.listReviews,
 		"getReview":                h.getReview,

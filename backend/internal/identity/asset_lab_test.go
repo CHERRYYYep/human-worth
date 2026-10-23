@@ -82,6 +82,11 @@ FROM asset.assets a JOIN asset.upload_sessions s ON s.asset_id=a.id WHERE a.id='
 // preserving the real gateway NetworkPolicy, certificates, Identity and Content.
 // Agent Self-Claimed: deterministic routing, not random balancing as evidence.
 func (l *kindLab) pinnedGateway(name, assetIP string) *http.Client {
+	return l.pinnedGatewayTarget(name, "ASSET_TARGET", assetIP)
+}
+
+// Positive cross-Pod checks only; outage/readiness checks use normal NodePort.
+func (l *kindLab) pinnedGatewayTarget(name, target, ip string) *http.Client {
 	l.t.Helper()
 	var deployment struct {
 		Spec struct {
@@ -96,13 +101,13 @@ func (l *kindLab) pinnedGateway(name, assetIP string) *http.Client {
 	found := false
 	for _, item := range container["env"].([]any) {
 		env := item.(map[string]any)
-		if env["name"] == "ASSET_TARGET" {
-			env["value"] = net.JoinHostPort(assetIP, "8443")
+		if env["name"] == target {
+			env["value"] = net.JoinHostPort(ip, "8443")
 			found = true
 		}
 	}
 	if !found {
-		l.t.Fatal("deployed gateway has no Asset target")
+		l.t.Fatal("deployed gateway has no " + target)
 	}
 	spec["readinessGates"] = []any{map[string]any{"conditionType": "human-worth.io/isolated-verification"}}
 	pod := map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": name, "namespace": l.namespace, "labels": map[string]string{"app": "gateway"}}, "spec": spec}

@@ -11,7 +11,9 @@
 
 本文是当前七服务划分的依据。各模块分别编写核心对象、状态机、功能逻辑和接口设计，再形成独立 Proto 文件；七服务契约尚未定稿。公开 HTTP 草案由 [OpenAPI](../openapi.yaml) 管理，Google 登录见 Identity 设计；Identity 的登录、会话和 MCP 凭据管理也已有代码，公开部署状态见统一部署文档。
 
-模块详细设计从 [Identity](backend-identity.md) 开始，包含核心对象、功能逻辑、接口约定与 [platform 公共基座清单](backend-identity.md#platform)。[Identity Proto](../backend/proto/humanworth/identity/v1/identity.proto) 已实现；[Content 首阶段](backend-content.md) 已增加创建、详情、本人列表、替换四个草稿 RPC、本地服务与集成测试，不含审核/发布；[Challenge 设计](backend-challenge.md)及其最小依赖 Proto、核心服务和 worker 已本地落地，真实依赖闭环与 E 沙箱仍待验收；其余模块继续逐项推进。
+模块详细设计从 [Identity](backend-identity.md) 开始，包含核心对象、功能逻辑、接口约定与 [platform 公共基座清单](backend-identity.md#platform)。[Identity Proto](../backend/proto/humanworth/identity/v1/identity.proto) 已实现；[Content](backend-content.md) 的草稿、[Asset](backend-asset.md) 私有上传/受控文件读取和 [Moderation](backend-moderation.md) 正式送审闭环已合入dev。2026-10-17阶段五本地增量增加Content冻结过审正文及作品分页，未公网发布；具体证据见Content文档，不据此推断生产状态。[Challenge 设计](backend-challenge.md)及其最小依赖 Proto、核心服务和 worker 已本地落地，真实依赖闭环与 E 沙箱仍待验收；其余模块继续逐项推进。
+
+**Agent Self-Claimed（阶段五读取方案）**：公开正文/作品每次固定调用Identity与Content，Content单条SQL读取自己的当前展示状态/冻结投影，不逐作品调用Identity/Asset，不依赖Moderation在线。文件入口继续由Asset调用Content检查确切关系；本轮无新微服务/中间件，不实现Discovery、Voting或投票资格写入。
 
 ## 1. 划分结果与理由
 
@@ -136,7 +138,7 @@ Challenge 的两个副本均可参与调度，通过数据库工作项领取和�
 
 该目录只保存跨边界静态元数据，不做用户授权决策，也不代替各模块的动态主体、凭据、账号和资源状态检查。HTTP handler 仍显式绑定，避免把安全敏感行为变成隐式注册。HTTP 与 RPC deadline 分开配置；未单独指定时分别使用各自默认值。目录中出现未来 RPC 不表示对应服务已实现或已发布。
 
-目录与 Proto 还通过独立 descriptor 测试核对：目录中的每个 RPC 必须能在生成的服务 descriptor 中精确找到。当前仅有 `ContentService/GetTask`、尚未新增 Discovery Proto 的 `DiscoveryService/ListTasks`，以及 Voting Proto 尚未声明的 `ViewTaskStatistics`、`CastVote` 被列为 planned 例外；每条例外记录 operation ID、完整 method 和原因。测试会在方法进入 descriptor、目录项被删除、例外拼错或新增未声明方法时失败，要求同步清理例外。核对方向是“目录中的方法必须已声明或明确 planned”，Proto 中的内部方法不要求都进入目录。Descriptor 仅证明 RPC 合同存在，不证明服务端已实现、运行或部署。
+目录与 Proto 还通过独立 descriptor 测试核对：目录中的每个 RPC 必须能在生成的服务 descriptor 中精确找到。当前仅有尚未新增 Discovery Proto 的 `DiscoveryService/ListTasks`，以及 Voting Proto 尚未声明的 `ViewTaskStatistics`、`CastVote` 被列为 planned 例外；每条例外记录 operation ID、完整 method 和原因。测试会在方法进入 descriptor、目录项被删除、例外拼错或新增未声明方法时失败，要求同步清理例外。核对方向是“目录中的方法必须已声明或明确 planned”，Proto 中的内部方法不要求都进入目录。Descriptor 仅证明 RPC 合同存在，不证明服务端已实现、运行或部署。
 
 本次验收范围：`go test ./internal/contract ./internal/identity/... ./internal/gateway ./internal/platform`，以及这些包的 race 测试、静态检查和根目录 CI；该验证覆盖本地目录一致性，不代表公网部署验收。
 

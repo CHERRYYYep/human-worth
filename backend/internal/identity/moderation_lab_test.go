@@ -58,7 +58,7 @@ func TestKindModerationDeployment(t *testing.T) {
 	kindDecode(t, l.request(l.client, user, "POST", "/api/me/assets/upload-sessions", body, map[string]string{"Idempotency-Key": "kind-review-upload-01"}, 201), &upload)
 	l.request(l.client, user, "PUT", "/api/me/assets/upload-sessions/"+upload.UploadSession.ID+"/content", string(data), map[string]string{"Content-Type": "application/octet-stream", "Content-Range": fmt.Sprintf("bytes 0-%d/%d", len(data)-1, len(data))}, 200)
 	l.request(l.client, user, "POST", "/api/me/assets/"+upload.Asset.ID+"/complete", `{"uploadSessionId":"`+upload.UploadSession.ID+`"}`, nil, 200)
-	draft := `{"title":"real review task","summary":"","description":"body","entries":[{"side":"human","title":"human","source":"self","artifacts":[{"kind":"file","assetId":"` + upload.Asset.ID + `"}],"permissions":{"cloudUse":false}},{"side":"agent","title":"agent","source":"model","artifacts":[{"kind":"link","url":"https://example.com/agent"}],"permissions":{"cloudUse":false},"agentConfiguration":{"model":"test"}}]}`
+	draft := `{"title":"real review task","summary":"","description":"body","entries":[{"side":"human","title":"human","source":"self","artifacts":[{"kind":"file","assetId":"` + upload.Asset.ID + `"}],"permissions":{"cloudUse":false}},{"side":"agent","title":"agent","source":"model","artifacts":[{"kind":"file","assetId":"` + upload.Asset.ID + `"}],"permissions":{"cloudUse":false},"agentConfiguration":{"model":"test"}}]}`
 	var task struct {
 		ID, State string
 		Revision  int64
@@ -66,6 +66,16 @@ func TestKindModerationDeployment(t *testing.T) {
 	}
 	kindDecode(t, l.request(l.client, user, "POST", "/api/tasks", draft, map[string]string{"Idempotency-Key": "kind-review-draft-01"}, 201), &task)
 	reviewPath := "/api/me/tasks/" + task.ID + "/review-requests"
+	publicDetail := "/api/tasks/" + task.ID
+	publicEntries := publicDetail + "/entries"
+	hiddenPublic := func() {
+		t.Helper()
+		for _, p := range []string{publicDetail, publicEntries} {
+			l.request(serviceClient, kindUser{}, "GET", p, "", nil, 404)
+		}
+	}
+	hiddenPublic()
+
 	l.request(l.client, other, "POST", reviewPath, `{"expectedRevision":1}`, nil, 404)
 	l.request(l.client, user, "GET", "/api/admin/reviews", "", nil, 403)
 	l.request(l.client, kindUser{}, "GET", "/api/admin/reviews", "", nil, 401)
@@ -126,6 +136,7 @@ func TestKindModerationDeployment(t *testing.T) {
 		t.Fatal("not durably pending")
 	}
 	firstID := *task.ReviewID
+	hiddenPublic()
 	if l.sql(`SELECT count(*) FROM content.review_outbox WHERE id='`+firstID+`' AND delivered_at IS NULL`) != "1" {
 		t.Fatal("missing durable outbox during outage")
 	}
@@ -220,6 +231,7 @@ func TestKindModerationDeployment(t *testing.T) {
 	recoveredRead(user, "/api/me/tasks/"+task.ID, 200)
 	l.kube("", "rollout", "status", "deployment/gateway", "--timeout=120s")
 	l.client = serviceClient
+	hiddenPublic()
 	// Rejected editing creates a new version; old immutable case survives.
 	kindDecode(t, l.request(l.client, user, "PUT", "/api/me/tasks/"+task.ID, `{"expectedRevision":1,"content":`+draft+`}`, nil, 200), &task)
 	kindDecode(t, l.request(l.client, user, "POST", reviewPath, `{"expectedRevision":2}`, nil, 200), &task)
@@ -300,6 +312,96 @@ func TestKindModerationDeployment(t *testing.T) {
 	if l.sql(`SELECT count(*) FROM content.review_decision_receipts WHERE review_id='`+secondID+`'`) != "1" {
 		t.Fatal("replay duplicated execution")
 	}
+
+	// Stage 5: real formal approval above, then public read through both Content
+	// replicas and normal Service while Moderation is truly offline.
+	type browsePage struct {
+		Items []struct {
+			ID         string
+			ApprovedAt *string
+		}
+		NextCursor *string
+	}
+	checkPublic := func(client *http.Client) string {
+		t.Helper()
+		raw := l.request(client, kindUser{}, "GET", publicDetail, "", nil, 200)
+		var detail map[string]any
+		kindDecode(t, raw, &detail)
+		if detail["title"] != "real review task" || detail["revision"] != float64(2) || detail["heat"] != nil || detail["publishedAt"] == nil || len(detail["taskAttachments"].([]any)) != 0 {
+			t.Fatal("invalid public detail", detail)
+		}
+		for _, denied := range []string{"agentConfiguration", "permissions", "reviewer", "deliveryState", "材料完整"} {
+			if bytes.Contains(raw, []byte(denied)) {
+				t.Fatal("public data leak", denied)
+			}
+		}
+		var first, second browsePage
+		kindDecode(t, l.request(client, kindUser{}, "GET", publicEntries+"?limit=1", "", nil, 200), &first)
+		if len(first.Items) != 1 || first.Items[0].ID != approved.EntryIDs[0] || first.Items[0].ApprovedAt == nil || first.NextCursor == nil {
+			t.Fatal("first public page invalid")
+		}
+		kindDecode(t, l.request(client, kindUser{}, "GET", publicEntries+"?limit=1&cursor="+*first.NextCursor, "", nil, 200), &second)
+		if len(second.Items) != 1 || second.Items[0].ID != approved.EntryIDs[1] || second.NextCursor != nil {
+			t.Fatal("second public page invalid")
+		}
+		return *first.NextCursor
+	}
+	cursor := checkPublic(serviceClient)
+	// Pin only the Content RPC target in isolated probe gateways; never use
+	// these diagnostic tunnels to claim Service outage/readiness correctness.
+	var contentPods struct {
+		Items []struct{ Status struct{ PodIP string } }
+	}
+	kindDecode(t, l.kube("", "get", "pods", "-l", "app=content", "-o", "json"), &contentPods)
+	if len(contentPods.Items) != 2 {
+		t.Fatal("two Content Pods required")
+	}
+	var contentClients []*http.Client
+	for i, pod := range contentPods.Items {
+		client := l.pinnedGatewayTarget(fmt.Sprintf("public-content-probe-%d", i), "CONTENT_TARGET", pod.Status.PodIP)
+		contentClients = append(contentClients, client)
+		checkPublic(client)
+	}
+	l.kube("", "scale", "deployment/moderation", "--replicas=0")
+	l.kube("", "wait", "--for=delete", "pod", "-l", "app=moderation", "--timeout=90s")
+	time.Sleep(15 * time.Second)
+	checkPublic(serviceClient)
+	if actual := l.request(serviceClient, kindUser{}, "GET", publicPath, "", nil, 200); !bytes.Equal(actual, data) {
+		t.Fatal("approved S3 read depends on Moderation")
+	}
+	l.request(serviceClient, admin, "GET", "/api/admin/reviews", "", nil, 503, 504)
+	// Controlled state tightening fixture only. No public write/admin bypass
+	// API is introduced; real approval remains the Moderation workflow above.
+	l.sql(`UPDATE content.reviewed_entries SET state='approval_revoked' WHERE id='` + approved.EntryIDs[1] + `'; UPDATE content.reviewed_tasks SET revision=revision+1 WHERE task_id='` + task.ID + `';`)
+	revokedFile := publicDetail + "/entries/" + approved.EntryIDs[1] + "/assets/" + upload.Asset.ID + "/content"
+	for _, client := range append(contentClients, serviceClient) {
+		var next browsePage
+		kindDecode(t, l.request(client, kindUser{}, "GET", publicEntries+"?limit=1&cursor="+cursor, "", nil, 200), &next)
+		if len(next.Items) != 0 || next.NextCursor != nil {
+			t.Fatal("revocation not rechecked on next page")
+		}
+		l.request(client, kindUser{}, "GET", revokedFile, "", nil, 404)
+	}
+	l.sql(`UPDATE content.reviewed_tasks SET state='taken_down',revision=revision+1 WHERE task_id='` + task.ID + `';`)
+	for _, client := range append(contentClients, serviceClient) {
+		for _, path := range []string{publicDetail, publicEntries, publicEntries + "?cursor=" + cursor, publicPath} {
+			l.request(client, kindUser{}, "GET", path, "", nil, 404)
+		}
+	}
+	restore("moderation")
+	// At-least-once replay via REAL Moderation workers must not revive either
+	// current task or entry visibility, even though the stored receipt is approve.
+	l.sql(`UPDATE moderation.decision_outbox SET delivered_at=NULL,available_at=clock_timestamp()-interval '1 second' WHERE id='` + secondID + `';`)
+	deadline = time.Now().Add(105 * time.Second)
+	for l.sql(`SELECT count(*) FROM moderation.decision_outbox WHERE id='`+secondID+`' AND delivered_at IS NOT NULL`) != "1" {
+		if time.Now().After(deadline) {
+			t.Fatal("replay recovery timeout")
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	hiddenPublic()
+	l.request(serviceClient, kindUser{}, "GET", publicPath, "", nil, 404)
+	t.Log("PASS: stage 5 frozen public detail/keyset pages through both Content Pods; real Service/NodePort reads during Moderation outage; revoke/takedown denies new pages/files; real worker replay cannot revive")
 	// No synthetic reviewer certificate is used for this formal workflow.
 	t.Log("PASS: real Moderation Pods, HTTP/mTLS/PostgreSQL/S3, outbox outage/recovery, admin-only pending files, rejection/resubmit/history, receipt replay and approved file")
 }

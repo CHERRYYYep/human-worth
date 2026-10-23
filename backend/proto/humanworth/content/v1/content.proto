@@ -10,6 +10,10 @@ option go_package = "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/cont
 
 // Website draft RPCs are implemented; Challenge collaboration RPCs remain dependency contracts.
 service ContentService {
+  // Gateway mTLS + method-bound Identity assertion (anonymous/web/MCP); 2s.
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  // Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
+  rpc ListApprovedEntries(ListApprovedEntriesRequest) returns (ListApprovedEntriesResponse);
   rpc CreateTaskDraft(CreateTaskDraftRequest) returns (CreateTaskDraftResponse);
   rpc GetMyTaskSubmission(GetMyTaskSubmissionRequest) returns (GetMyTaskSubmissionResponse);
   rpc ListMySubmissions(ListMySubmissionsRequest) returns (ListMySubmissionsResponse);
@@ -37,6 +41,52 @@ service ContentService {
   rpc CloseRunRegistration(CloseRunRegistrationRequest) returns (CloseRunRegistrationResponse);
   rpc RegisterChallengeCandidate(RegisterChallengeCandidateRequest) returns (RegisterChallengeCandidateResponse);
   rpc GetChallengeRegistration(GetChallengeRegistrationRequest) returns (GetChallengeRegistrationResponse);
+}
+
+// Explicit public projections: no review metadata, permissions or model config.
+// Missing legacy timestamps/display names are absent, never synthesized.
+message PublicAuthor {
+  string id = 1;
+  optional string display_name = 2;
+}
+message PublicTask {
+  string id = 1;
+  int64 revision = 2;
+  string title = 3;
+  string summary = 4;
+  string description = 5;
+  optional string category = 6;
+  PublicAuthor author = 7;
+  optional double heat = 8;
+  google.protobuf.Timestamp published_at = 9;
+  // Current frozen task model has no task-level attachments; always empty.
+  repeated humanworth.asset.v1.Asset task_attachments = 10;
+}
+message ApprovedEntry {
+  string id = 1;
+  string task_id = 2;
+  string side = 3;
+  string title = 4;
+  string description = 5;
+  string source = 6;
+  repeated ArtifactInput artifacts = 7;
+  PublicAuthor author = 8;
+  google.protobuf.Timestamp approved_at = 9;
+}
+message GetTaskRequest {
+  string actor_assertion = 1;
+  string task_id = 2;
+}
+message GetTaskResponse { PublicTask task = 1; }
+message ListApprovedEntriesRequest {
+  string actor_assertion = 1;
+  string task_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+message ListApprovedEntriesResponse {
+  repeated ApprovedEntry items = 1;
+  string next_cursor = 2;
 }
 
 message ArtifactInput {
