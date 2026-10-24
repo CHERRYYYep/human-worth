@@ -15,6 +15,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -64,6 +66,10 @@ func (s *Server) GetTask(ctx context.Context, r *pb.GetTaskRequest) (*pb.GetTask
 	return &pb.GetTaskResponse{Task: out}, nil
 }
 
+// One shared frozen projection for browse and authorization. Initial rows keep
+// their exact legacy array reference; additional rows carry an immutable copy.
+const publicEntryContent = `COALESCE(e.content,t.snapshot->'entries'->e.position)`
+
 const publicEntrySort = "snapshot_position_asc_id_asc"
 
 type entryCursor struct {
@@ -76,7 +82,11 @@ type entryCursor struct {
 }
 
 func encodeEntryCursor(task string, revision int64, position int32, id string) string {
-	data, _ := json.Marshal(entryCursor{Version: 1, Task: task, SourceRevision: revision, Sort: publicEntrySort, Position: position, ID: id})
+	version := 1
+	if position > 31 {
+		version = 2
+	}
+	data, _ := json.Marshal(entryCursor{Version: version, Task: task, SourceRevision: revision, Sort: publicEntrySort, Position: position, ID: id})
 	return base64.RawURLEncoding.EncodeToString(data)
 }
 func decodeEntryCursor(raw, task string) (entryCursor, error) {
@@ -94,7 +104,7 @@ func decodeEntryCursor(raw, task string) (entryCursor, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
-	if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF || c.Version != 1 || c.Task != task || c.Sort != publicEntrySort || c.SourceRevision < 1 || c.Position < 0 || c.Position > 31 || !reviewedEntryPattern.MatchString(c.ID) {
+	if d.Decode(&c) != nil || d.Decode(new(any)) != io.EOF || (c.Version != 1 && c.Version != 2) || (c.Version == 1 && c.Position > 31) || (c.Version == 2 && c.Position <= 31) || c.Task != task || c.Sort != publicEntrySort || c.SourceRevision < 1 || c.Position < 0 || !reviewedEntryPattern.MatchString(c.ID) {
 		return c, invalid("invalid_cursor")
 	}
 	if raw != encodeEntryCursor(c.Task, c.SourceRevision, c.Position, c.ID) {
@@ -123,11 +133,11 @@ func (s *Server) ListApprovedEntries(ctx context.Context, r *pb.ListApprovedEntr
 	// ONE statement checks current task/entry eligibility and fetches limit+1.
 	// LEFT JOIN preserves the visible parent even when no approved entries remain.
 	// No cross-service calls or transaction spanning RPCs. Existing task/position
-	// unique index supports this bounded (<=32 initial entries) ordered range.
-	rows, err := s.DB.Query(ctx, `SELECT t.source_revision,d.author_id,e.id,e.position,e.approved_at,
- (t.snapshot->'entries'->e.position)-'agentConfiguration'-'permissions'
+	// unique index supports the growing ordered range. Each page is byte-bounded.
+	rows, err := s.DB.Query(ctx, `SELECT t.source_revision,COALESCE(e.author_id,d.author_id),e.id,e.position,e.approved_at,
+ (`+publicEntryContent+`)-'agentConfiguration'-'permissions'
  FROM content.reviewed_tasks t JOIN content.task_drafts d ON d.id=t.task_id
- LEFT JOIN LATERAL (SELECT id,position,approved_at FROM content.reviewed_entries
+ LEFT JOIN LATERAL (SELECT id,position,approved_at,author_id,content FROM content.reviewed_entries
  WHERE task_id=t.task_id AND state='approved' AND (position,id)>($2,$3)
  ORDER BY position,id LIMIT $4) e ON true
  WHERE t.task_id=$1 AND t.state='published' ORDER BY e.position,e.id`, r.TaskId, cursor.Position, cursor.ID, limit+1)
@@ -139,6 +149,7 @@ func (s *Server) ListApprovedEntries(ctx context.Context, r *pb.ListApprovedEntr
 	found := false
 	var lastPosition int32
 	var sourceRevision int64
+	itemsSize := 0
 	for rows.Next() {
 		found = true
 		var author string
@@ -164,7 +175,18 @@ func (s *Server) ListApprovedEntries(ctx context.Context, r *pb.ListApprovedEntr
 			return nil, status.Error(codes.Internal, "invalid_review_snapshot")
 		}
 		// Construct an allowlisted type, never forward EntryInput or ReviewSnapshot.
-		out.Items = append(out.Items, &pb.ApprovedEntry{Id: *id, TaskId: r.TaskId, Side: input.Side, Title: input.Title, Description: input.GetDescription(), Source: input.Source, Artifacts: input.Artifacts, Author: &pb.PublicAuthor{Id: author}, ApprovedAt: publicTime(approved)})
+		item := &pb.ApprovedEntry{Id: *id, TaskId: r.TaskId, Side: input.Side, Title: input.Title, Description: input.GetDescription(), Source: input.Source, Artifacts: input.Artifacts, Author: &pb.PublicAuthor{Id: author}, ApprovedAt: publicTime(approved)}
+		itemSize := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(item))
+		next := encodeEntryCursor(r.TaskId, sourceRevision, *position, *id)
+		if itemsSize+itemSize+protowire.SizeTag(2)+protowire.SizeBytes(len(next)) > maxSubmissionPageBytes {
+			if len(out.Items) == 0 {
+				return nil, status.Error(codes.Internal, "stored_submission_too_large")
+			}
+			out.NextCursor = encodeEntryCursor(r.TaskId, sourceRevision, lastPosition, out.Items[len(out.Items)-1].Id)
+			break
+		}
+		itemsSize += itemSize
+		out.Items = append(out.Items, item)
 		lastPosition = *position
 	}
 	rows.Close()

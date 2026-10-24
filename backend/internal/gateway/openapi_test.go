@@ -92,4 +92,46 @@ func TestOpenAPIContract(t *testing.T) {
 			t.Errorf("catalogued HTTP operation %s: got %q, want %q", route.Name, got, want)
 		}
 	}
+	// New private entry routes must never inherit an anonymous/MCP alternative.
+	for _, tc := range []struct {
+		path, method string
+		write        bool
+	}{
+		{"/api/tasks/{taskId}/entries", "post", true},
+		{"/api/me/entries/{entryId}", "get", false},
+		{"/api/me/entries/{entryId}", "put", true},
+	} {
+		op := paths[tc.path].(map[string]any)[tc.method].(map[string]any)
+		security := op["security"].([]any)
+		if len(security) != 1 {
+			t.Fatal("entry operation has alternative credentials", tc, security)
+		}
+		schemes := security[0].(map[string]any)
+		_, web := schemes["WebSession"]
+		_, csrf := schemes["CsrfToken"]
+		count := 1
+		if tc.write {
+			count++
+		}
+		if !web || csrf != tc.write || len(schemes) != count || op["x-deployment-status"] != "unpublished" {
+			t.Fatal("entry auth/deployment contract drift", tc, op)
+		}
+	}
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	entry := schemas["EntrySubmission"].(map[string]any)
+	required := make(map[string]bool)
+	for _, name := range entry["required"].([]any) {
+		required[name.(string)] = true
+	}
+	for _, name := range []string{"createdAt", "updatedAt", "approvedAt", "kind", "origin", "taskId", "authorId", "reviewId", "rejectionReason"} {
+		if !required[name] {
+			t.Fatal("entry response property must be present", name)
+		}
+	}
+	properties := schemas["EntryInput"].(map[string]any)["properties"].(map[string]any)
+	for _, name := range []string{"origin", "author", "owner", "authorId", "ownerId", "state", "actorAssertion"} {
+		if _, exists := properties[name]; exists {
+			t.Fatal("trusted entry field became client input", name)
+		}
+	}
 }

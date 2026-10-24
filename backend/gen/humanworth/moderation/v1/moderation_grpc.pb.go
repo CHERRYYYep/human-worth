@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ModerationService_CreateReviewCase_FullMethodName = "/humanworth.moderation.v1.ModerationService/CreateReviewCase"
-	ModerationService_ListReviews_FullMethodName      = "/humanworth.moderation.v1.ModerationService/ListReviews"
-	ModerationService_GetReview_FullMethodName        = "/humanworth.moderation.v1.ModerationService/GetReview"
-	ModerationService_DecideReview_FullMethodName     = "/humanworth.moderation.v1.ModerationService/DecideReview"
+	ModerationService_CreateReviewCase_FullMethodName      = "/humanworth.moderation.v1.ModerationService/CreateReviewCase"
+	ModerationService_CreateEntryReviewCase_FullMethodName = "/humanworth.moderation.v1.ModerationService/CreateEntryReviewCase"
+	ModerationService_ListReviews_FullMethodName           = "/humanworth.moderation.v1.ModerationService/ListReviews"
+	ModerationService_GetReview_FullMethodName             = "/humanworth.moderation.v1.ModerationService/GetReview"
+	ModerationService_DecideReview_FullMethodName          = "/humanworth.moderation.v1.ModerationService/DecideReview"
 )
 
 // ModerationServiceClient is the client API for ModerationService service.
@@ -34,6 +35,8 @@ type ModerationServiceClient interface {
 	// content mTLS only; review ID + task/revision idempotent, payload mismatch
 	// AlreadyExists. 5s; safe identical retry. No transaction waits for RPC.
 	CreateReviewCase(ctx context.Context, in *CreateReviewCaseRequest, opts ...grpc.CallOption) (*CreateReviewCaseResponse, error)
+	// content mTLS only; entry/revision and review ID unique; exact retry, 5s.
+	CreateEntryReviewCase(ctx context.Context, in *CreateEntryReviewCaseRequest, opts ...grpc.CallOption) (*CreateEntryReviewCaseResponse, error)
 	// gateway mTLS + admin web assertion; 5s, byte-budgeted full snapshots.
 	ListReviews(ctx context.Context, in *ListReviewsRequest, opts ...grpc.CallOption) (*ListReviewsResponse, error)
 	// gateway mTLS + admin web assertion; 2s, safe read.
@@ -56,6 +59,16 @@ func (c *moderationServiceClient) CreateReviewCase(ctx context.Context, in *Crea
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateReviewCaseResponse)
 	err := c.cc.Invoke(ctx, ModerationService_CreateReviewCase_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *moderationServiceClient) CreateEntryReviewCase(ctx context.Context, in *CreateEntryReviewCaseRequest, opts ...grpc.CallOption) (*CreateEntryReviewCaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateEntryReviewCaseResponse)
+	err := c.cc.Invoke(ctx, ModerationService_CreateEntryReviewCase_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +114,8 @@ type ModerationServiceServer interface {
 	// content mTLS only; review ID + task/revision idempotent, payload mismatch
 	// AlreadyExists. 5s; safe identical retry. No transaction waits for RPC.
 	CreateReviewCase(context.Context, *CreateReviewCaseRequest) (*CreateReviewCaseResponse, error)
+	// content mTLS only; entry/revision and review ID unique; exact retry, 5s.
+	CreateEntryReviewCase(context.Context, *CreateEntryReviewCaseRequest) (*CreateEntryReviewCaseResponse, error)
 	// gateway mTLS + admin web assertion; 5s, byte-budgeted full snapshots.
 	ListReviews(context.Context, *ListReviewsRequest) (*ListReviewsResponse, error)
 	// gateway mTLS + admin web assertion; 2s, safe read.
@@ -121,6 +136,9 @@ type UnimplementedModerationServiceServer struct{}
 
 func (UnimplementedModerationServiceServer) CreateReviewCase(context.Context, *CreateReviewCaseRequest) (*CreateReviewCaseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateReviewCase not implemented")
+}
+func (UnimplementedModerationServiceServer) CreateEntryReviewCase(context.Context, *CreateEntryReviewCaseRequest) (*CreateEntryReviewCaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateEntryReviewCase not implemented")
 }
 func (UnimplementedModerationServiceServer) ListReviews(context.Context, *ListReviewsRequest) (*ListReviewsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListReviews not implemented")
@@ -166,6 +184,24 @@ func _ModerationService_CreateReviewCase_Handler(srv interface{}, ctx context.Co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ModerationServiceServer).CreateReviewCase(ctx, req.(*CreateReviewCaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ModerationService_CreateEntryReviewCase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateEntryReviewCaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModerationServiceServer).CreateEntryReviewCase(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModerationService_CreateEntryReviewCase_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModerationServiceServer).CreateEntryReviewCase(ctx, req.(*CreateEntryReviewCaseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -234,6 +270,10 @@ var ModerationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateReviewCase",
 			Handler:    _ModerationService_CreateReviewCase_Handler,
+		},
+		{
+			MethodName: "CreateEntryReviewCase",
+			Handler:    _ModerationService_CreateEntryReviewCase_Handler,
 		},
 		{
 			MethodName: "ListReviews",

@@ -475,8 +475,13 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 		}
 		return false
 	}
-	if decoder.Decode(new(any)) != io.EOF {
-		problem(w, 400, "invalid_request")
+	if err = decoder.Decode(new(any)); err != io.EOF {
+		var large *http.MaxBytesError
+		if errors.As(err, &large) {
+			problem(w, 413, "request_too_large")
+		} else {
+			problem(w, 400, "invalid_request")
+		}
 		return false
 	}
 	return true

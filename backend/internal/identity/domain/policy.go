@@ -15,6 +15,10 @@ const (
 	ReadOwnSubmission        = contract.ReadOwnSubmission
 	ListOwnSubmissions       = contract.ListOwnSubmissions
 	ReplaceDraft             = contract.ReplaceDraft
+	SubmitAdditionalEntry    = contract.SubmitAdditionalEntry
+	ReadOwnEntrySubmission   = contract.ReadOwnEntrySubmission
+	ResubmitRejectedEntry    = contract.ResubmitRejectedEntry
+	ListOwnEntrySubmissions  = contract.ListOwnEntrySubmissions
 	CurrentSession           = contract.CurrentSession
 	Logout                   = contract.Logout
 	CreateMCPToken           = contract.CreateMCPToken

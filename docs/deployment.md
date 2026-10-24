@@ -617,3 +617,12 @@ Identity 的公网迁移已完成；后续模块通过真实联调后再逐项�
 `validate_modules.py`在一次性namespace运行 `TestKindModerationDeployment`，真实HTTP→Identity→Moderation/Content→PostgreSQL/S3，真实停止/恢复Pod，覆盖送审与决定outbox、待审管理员文件、驳回重提和回执重放。旧3C证书测试只作为旧快照/回执升级回归。网络探针增加Moderation允许/拒绝方向。必要代码和集成先通过再运行kind；**当前执行结果以[Moderation验收记录](backend-moderation.md)为准**，不以YAML能解析或命令启动声明部署成功。本轮不发布公网、不自动提交/push/PR。
 
 2026-10-17 故障隔离修正（Agent Self-Claimed）：Gateway readiness 不包含 Moderation 健康。Moderation 停机时仅相关审核 RPC fail closed 为503，Content 仍可事务保存送审待办；不应移除 Gateway 正常 Service endpoints。`services.json` 中 gateway→moderation 是部署排序，不是此全局就绪依赖。新增 Moderation 002 迁移放开批准理由且保留旧案件，先迁移再滚动；不改001校验和。
+
+### 第六阶段追加作品的升级前置条件（2026-10-23，Agent Self-Claimed）
+
+本轮无公网发布授权，仅隔离kind namespace验收。先用Content owner执行新增006、Moderation owner执行新增003，再重跑各自最小grants；既有迁移内容/校验和不改。全部Content/Moderation副本升级后才开放新增Gateway追加作品入口：旧Moderation不能解释单件快照，不能用Proto字段兼容替代混合应用版本验证。就绪分别要求新迁移；部署排序与请求期健康依赖不同，不把Moderation故障变成Gateway全局未就绪。Asset、Identity不新增数据库迁移或跨schema权限，不增加生产对象存储配置。
+
+新增发布探针只检查本人entry入口未登录401，不能代替A发布→B上传并追加→真实管理员单件决定→公开列表/文件→下架拒绝的业务验收；完整结果见 [Content第12节](backend-content.md#12-第六阶段独立追加作品2026-10-23本地实现与验收未发布)。只操作临时验证namespace，不运行infra或更改常驻业务namespace、固定公网NodePort、生产凭据。
+
+
+本轮完整隔离kind验收已实际退出0（730.31秒）：5项业务、正常Service故障隔离、网络允许/拒绝、失败rollout回退、同SHA迁移失败重试和重复部署通过；namespace human-worth-verify-9f072b34已删除。该镜像内容快照并非新Git提交，也不代表常驻namespace升级或公网发布。实际代码仍未暂存/提交，等待人类审查及后续授权。

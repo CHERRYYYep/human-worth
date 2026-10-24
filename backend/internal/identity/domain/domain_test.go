@@ -160,3 +160,26 @@ func TestOperationPolicy(t *testing.T) {
 		t.Fatal("malformed anonymous accepted")
 	}
 }
+
+func TestAdditionalEntryPolicies(t *testing.T) {
+	web := Principal{AccountID: "acc", CredentialID: "cred", AuthVersion: 1, ClientKind: WebSession, Role: User}
+	for _, op := range []Operation{SubmitAdditionalEntry, ReadOwnEntrySubmission, ResubmitRejectedEntry, ListOwnEntrySubmissions} {
+		policy, ok := PolicyFor(op)
+		write := op == SubmitAdditionalEntry || op == ResubmitRejectedEntry
+		if !ok || policy != (Policy{Audience: "content", Write: write}) {
+			t.Fatal("incorrect entry policy", op, policy)
+		}
+		for _, kind := range []ClientKind{Anonymous, WebSession, MCPRead} {
+			for _, role := range []Role{User, Admin} {
+				actor := web
+				actor.ClientKind, actor.Role = kind, role
+				if kind == Anonymous {
+					actor = Principal{ClientKind: Anonymous}
+				}
+				if allowed := policy.Authorize(actor) == nil; allowed != (kind == WebSession) {
+					t.Fatalf("entry policy op=%s kind=%v role=%v allowed=%v", op, kind, role, allowed)
+				}
+			}
+		}
+	}
+}

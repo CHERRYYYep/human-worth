@@ -455,11 +455,11 @@ paths:
         任务须可见，作品须为 approved；没有作品公开/私有状态，也不检查单独的公开授权。
         此分页接口用于普通浏览；投票页面必须使用 ballot 一次取得全部过审作品，不得仅以某一页作为候选集合。
         不暴露其他人的草稿、待审作品、内部配置、授权材料或单题统计；外链只作为数据返回，不访问。
-        固定按冻结position ASC、稳定entry ID ASC排序，limit默认20、1～100；limit+1判定后页，末页nextCursor=null，空结果items=[]。
+        固定按冻结position ASC、稳定entry ID ASC排序，初始作品保留原位置，追加作品过审后获得单调递增位置；limit默认20、1～100，以limit+1和2MiB完整Protobuf字节预算判定后页，末页nextCursor=null，空结果items=[]。
         版本化Base64URL游标绑定taskId、来源内容版本及排序，不是签名/授权凭据；省略或空cursor表示首页。
         未知/重复query、非法limit返回400 invalid_request；损坏、跨任务/来源版本、超过2048字符游标400 invalid_cursor。
         每页单条SQL重新检查当前published/approved；撤销作品即退出后续页，下架后404；不保持跨请求快照，已返回字节不撤回。
-        当前只有初始包（最多32件），未来新增过审作品需从第一页刷新；不可用分页替代完整ballot。
+        初始包与独立追加作品共用只含过审内容的投影，各自使用真实作者；新作品不改变任务来源版本。旧初始位置游标继续有效，跨过31的位置使用新版本游标；已到末页后出现新过审作品需重新读取，不可用分页替代完整ballot。
         匿名/网站/MCP策略与任务详情一致；approvedAt历史未知为null，不以updated_at冒充。
         必要依赖不可用503，超时504 deadline_exceeded，取消503 request_cancelled；重试时重新验证身份及当前展示状态，不承诺固定跨页快照。
       x-scenarios: [S1, S3, S5, H1]
@@ -484,8 +484,21 @@ paths:
         任意网站用户可单方追加，不要求作者邀请或批准；即使已永久失去该题投票权也可投稿。
         仅新作品进入 pending_review，原任务保持 published。作品署名不能决定投稿者账号。
         校验资产归属、来源、授权及适用配置；不恢复投票资格，不启动云端挑战。
+        仅接受 EntryInput 的精确 camelCase 字段；拒绝重复字段、未知字段、模式不允许的null、snake_case 别名及客户端指定的 origin/author/owner/账号/审核状态。agentConfiguration.parameters内部保留JSON元数据及null，不将其中的键作为账号或权限。
+        cloudUse 必须显式选择；false 不阻止送审。file 材料必须属于当前会话账号且 ready，Content 与 Asset 的方法绑定断言在业务写入前取得。
+        必须提供唯一 Idempotency-Key，按账号×任务×键绑定规范化内容；相同键与内容重试找回原投稿，同键不同内容返回409，不创建重复作品。
+        HTTP请求体上限16384字节；写入整体预算5秒，超时后复用原键核对结果。201表示Content已持久保存作品、不可变送审快照和outbox，不等待Moderation远程接收。
+        非法作品字段返回400 invalid_entry；非法或重复幂等键400 invalid_idempotency_key，超大请求体413 request_too_large，非JSON媒体类型415 unsupported_media_type。依赖不可用503，超时504 deadline_exceeded，取消503 request_cancelled。
       x-scenarios: [S3]
-      x-implementation-status: planned
+      x-implementation-status: implemented-local
+      x-deployment-status: unpublished
+      security: [{WebSession: [], CsrfToken: []}]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 同账号同任务的一次创建固定使用同一键；网络重试不可更换。
+          schema: {type: string, pattern: '^[A-Za-z0-9_-]{16,128}$', minLength: 16, maxLength: 128}
       requestBody:
         required: true
         content:
@@ -493,7 +506,7 @@ paths:
             schema: {$ref: '#/components/schemas/EntryInput'}
       responses:
         '201':
-          description: 新作品与独立审核记录已建立
+          description: 新作品、不可变送审快照与审核outbox已持久保存，远程审核案件异步建立
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EntrySubmission'}
@@ -505,12 +518,15 @@ paths:
       operationId: listMySubmissions
       summary: 找回本人的任务草稿、投稿与审核结果
       description: |
-        只返回当前网站会话账号自己的完整 TaskSubmission；不查询 EntrySubmission。审核状态筛选为本轮未发布增量。
-        kind 缺省等同 task，state 缺省等同 draft；state支持draft/pending_review/rejected/published/taken_down，明确传入不支持的值或空kind/state返回400 unsupported_submission_filter，未知或重复参数返回 400 invalid_request。
+        只返回当前网站会话账号本人的完整投稿；管理员也不能读取他人投稿，MCP禁止。kind缺省等同task，沿用原任务RPC；kind=entry使用独立作品RPC，不混查、不逐项补取详情。
+        task本人列表已发布；entry分派及作品筛选为本轮本地实现、未发布增量。
+        kind=task时state缺省等同draft，支持draft/pending_review/rejected/published/taken_down。kind=entry时state缺省为空并查询全部追加作品状态，支持pending_review/approved/rejected/approval_revoked，不含draft、initial或cloud。
+        明确传入不支持的kind/state或空kind/state返回400 unsupported_submission_filter，未知或重复参数返回400 invalid_request。
         category 按草稿写入值精确匹配，不 trim、不改变大小写、不做 Unicode 归一化；缺省不筛选，显式空值返回 400。为容纳合法 UTF-8 值的 URL 编码，该路由允许最多 40 KiB Request-URI；超过时返回 414 invalid_request。
+        kind=entry时category精确匹配父任务冻结的category，不按可编辑任务工作副本筛选。
         固定按 created_at DESC、id DESC 排序并使用键集游标。省略 cursor 或 cursor= 都表示第一页；游标最长 2048 字符，绑定账号、有效筛选和排序，损坏、跨账号或换筛选复用返回 400 invalid_cursor。category 为空、含 NUL、不是有效 UTF-8 或超过 12000 个 UTF-8 字节返回 400 invalid_category；该字节上限覆盖所有满足草稿整体 12000 字节约束的既有分类。
         单页最多 limit 条，以 limit+1 查询判断 nextCursor；响应还受 2 MiB 的实际 Protobuf 编码预算约束，因此合法完整对象较大时可少于 limit 条，并以最后一条实际返回记录生成 nextCursor。空结果为 items: []、nextCursor: null，不查询 totalCount。
-        分页请求之间不保持数据库快照；编辑不改变 created_at，但翻页期间改变 category 会使草稿按新类别进入或离开后续结果。
+        分页请求之间不保持数据库快照；编辑不改变 created_at，但翻页期间改变 category 会使任务草稿按新类别进入或离开后续结果。task与entry游标scope隔离，换kind/state/category须从首页开始；entry读取整体预算5秒。
       x-scenarios: [S2, S3]
       x-implementation-status: implemented
       x-deployment-status: published
@@ -520,19 +536,19 @@ paths:
         - {$ref: '#/components/parameters/Limit'}
         - name: kind
           in: query
-          description: 首阶段唯一支持 task；缺省也表示 task。
-          schema: {type: string, enum: [task]}
+          description: 缺省task；entry仅查询本人独立追加作品，不返回初始或云端作品。
+          schema: {type: string, enum: [task, entry], default: task}
         - name: state
           in: query
-          description: 缺省draft；审核生命周期筛选为本轮未发布增量。
-          schema: {type: string, enum: [draft, pending_review, rejected, published, taken_down]}
+          description: task缺省draft；entry缺省全部作品状态。状态须与kind匹配，显式空值非法。
+          schema: {type: string, enum: [draft, pending_review, rejected, published, taken_down, approved, approval_revoked]}
         - name: category
           in: query
-          description: 按任务草稿 category 精确筛选；显式空值非法，最长 12000 个 UTF-8 字节，不建立分类枚举或分类表。
+          description: task按草稿category、entry按父任务冻结category精确筛选；显式空值非法，最长12000个UTF-8字节，不建立分类枚举或分类表。
           schema: {type: string, minLength: 1}
       responses:
         '200':
-          description: 本人完整任务投稿；nextCursor为null时没有下一页
+          description: 所选kind的本人完整投稿；nextCursor为null时没有下一页
           content:
             application/json:
               schema: {$ref: '#/components/schemas/SubmissionPage'}
@@ -624,8 +640,12 @@ paths:
       tags: [Account]
       operationId: getMyEntrySubmission
       summary: 读取本人追加作品与审核结果
+      description: |
+        只读取当前网站会话账号的独立追加作品；不存在或属于其他账号（含管理员读取他人作品）均返回404。MCP禁止。
+        包含当前审核结果、来源和私有配置，Cache-Control为no-store；不改变投票资格。拒绝query参数，读取整体预算2秒。
       x-scenarios: [S3]
-      x-implementation-status: planned
+      x-implementation-status: implemented-local
+      x-deployment-status: unpublished
       security: [{WebSession: []}]
       responses:
         '200':
@@ -642,8 +662,13 @@ paths:
         仅被驳回且原任务仍公开的独立追加作品可重提；初始作品随任务整体修改。
         校验 expectedRevision，生成新审核记录并保留历史；其他状态或并发冲突返回 409。
         网络重试若携带同一旧版本和完全相同内容，找回该版本产生的重提结果，不再次投稿。
+        仅接受精确的expectedRevision与content；expectedRevision为大于等于1的JSON整数，content遵循EntryInput严格字段规则。拒绝重复、大小写别名、未知字段、模式不允许的null和query参数。
+        重新验证来源、授权、适用配置及当前账号的ready资产；Content/Asset方法绑定断言在业务写入前取得。写入整体预算5秒；超时重试保留原expectedRevision和内容。
+        新版本pending_review、不可变快照与outbox同事务持久保存，不修改或重新审核原任务；远程审核案件异步建立。
       x-scenarios: [S3]
-      x-implementation-status: planned
+      x-implementation-status: implemented-local
+      x-deployment-status: unpublished
+      security: [{WebSession: [], CsrfToken: []}]
       requestBody:
         required: true
         content:
@@ -1109,7 +1134,7 @@ paths:
           schema: {type: string, enum: [pending, approved, rejected], default: pending}
       responses:
         '200':
-          description: 当前仅初始任务及双方作品的完整快照；追加/云端投稿未实现
+          description: 任务初始包或独立追加作品的完整不可变快照；submission.kind区分task/entry，云端投稿尚未实现
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ReviewPage'}
@@ -1886,18 +1911,21 @@ components:
     EntrySubmission:
       type: object
       additionalProperties: false
-      required: [kind, id, taskId, authorId, revision, origin, state, content, reviewId, rejectionReason]
+      required: [kind, id, taskId, authorId, revision, origin, state, content, reviewId, rejectionReason, createdAt, updatedAt, approvedAt]
       properties:
         kind: {type: string, const: entry}
         id: {$ref: '#/components/schemas/Id'}
         taskId: {$ref: '#/components/schemas/Id'}
         authorId: {$ref: '#/components/schemas/Id'}
         revision: {type: integer, minimum: 1}
-        origin: {type: string, enum: [initial, additional, cloud]}
+        origin: {type: string, enum: [initial, additional, cloud], description: 服务端来源；当前本人独立作品生命周期仅返回additional，不能在请求中指定}
         state: {$ref: '#/components/schemas/EntryReviewState'}
         content: {$ref: '#/components/schemas/EntryInput'}
         reviewId: {$ref: '#/components/schemas/NullableId'}
         rejectionReason: {type: [string, 'null']}
+        createdAt: {$ref: '#/components/schemas/Timestamp'}
+        updatedAt: {$ref: '#/components/schemas/Timestamp'}
+        approvedAt: {$ref: '#/components/schemas/NullableTime'}
     PublicTask:
       type: object
       additionalProperties: false
@@ -2148,8 +2176,8 @@ components:
         decidedAt: {$ref: '#/components/schemas/NullableTime'}
         decision: {type: [string, 'null'], enum: [approve, reject, null]}
         deliveryState: {type: string, enum: [undecided, pending, applied, blocked], description: 只有applied表示Content回执确认生效；blocked需处理不可恢复的版本冲突}
-        entryIds: {type: array, items: {$ref: '#/components/schemas/Id'}, description: 按初始作品顺序冻结的稳定ID，不是可重排草稿的数组索引}
-        applicationRevision: {type: [integer, 'null'], minimum: 1, description: Content已应用的投稿revision，不是工作副本当前revision}
+        entryIds: {type: array, items: {$ref: '#/components/schemas/Id'}, description: task为按初始作品顺序冻结的稳定ID；entry为仅含该追加作品ID的数组，不是可重排草稿的索引}
+        applicationRevision: {type: [integer, 'null'], minimum: 1, description: Content已应用的任务或作品投稿revision；分别取任务回执或作品回执，不是工作副本当前revision}
     Quantity:
       type: object
       additionalProperties: false

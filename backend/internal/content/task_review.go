@@ -324,7 +324,9 @@ func (s *Server) CheckReviewAssetAccess(ctx context.Context, r *pb.CheckReviewAs
 		return nil, status.Error(codes.PermissionDenied, "administrator_required")
 	}
 	var allowed bool
-	err = s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM content.review_requests r JOIN content.task_drafts d ON d.id=r.task_id AND d.review_id=r.id WHERE r.id=$1 AND r.state='pending_review' AND d.state='pending_review' AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.snapshot->'submission'->'content'->'entries') e WHERE e->'artifacts' @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$2::text))))`, r.ReviewId, r.AssetId).Scan(&allowed)
+	err = s.DB.QueryRow(ctx, `SELECT
+ EXISTS(SELECT 1 FROM content.review_requests r JOIN content.task_drafts d ON d.id=r.task_id AND d.review_id=r.id WHERE r.id=$1 AND r.state='pending_review' AND d.state='pending_review' AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.snapshot->'submission'->'content'->'entries') e WHERE e->'artifacts' @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$2::text))))
+ OR EXISTS(SELECT 1 FROM content.entry_review_requests r JOIN content.entry_submissions s ON s.id=r.entry_id AND s.review_id=r.id AND s.revision=r.submission_revision JOIN content.reviewed_tasks t ON t.task_id=s.task_id WHERE r.id=$1 AND r.state='pending_review' AND s.state='pending_review' AND t.state='published' AND r.snapshot->'submission'->'content'->'artifacts' @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$2::text)))`, r.ReviewId, r.AssetId).Scan(&allowed)
 	if err != nil {
 		return nil, storage(err)
 	}
@@ -389,6 +391,14 @@ func (s *Server) deliverReview(ctx context.Context, client moderationpb.Moderati
 	return result, nil
 }
 func (s *Server) RunReviewDelivery(ctx context.Context, client moderationpb.ModerationServiceClient, logger *slog.Logger) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		platform.RunOutbox(ctx, logger, "content_entry_to_moderation", func(call context.Context) (platform.OutboxResult, error) {
+			return s.deliverEntryReview(call, client)
+		})
+	}()
+	defer func() { <-done }()
 	platform.RunOutbox(ctx, logger, "content_to_moderation", func(call context.Context) (platform.OutboxResult, error) {
 		return s.deliverReview(call, client)
 	})

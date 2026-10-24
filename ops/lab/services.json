@@ -30,6 +30,11 @@
         "code": "unauthenticated"
       },
       {
+        "path": "/api/me/entries/ent_00000000000000000000000000000000",
+        "status": 401,
+        "code": "unauthenticated"
+      },
+      {
         "path": "/api/tasks/tsk_00000000000000000000000000000000",
         "status": 404,
         "code": "task_not_found"

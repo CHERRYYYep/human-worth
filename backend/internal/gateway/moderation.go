@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,11 +58,35 @@ func (h *Handler) moderationActor(w http.ResponseWriter, r *http.Request, operat
 	return h.actorFor(w, r, operation)
 }
 func reviewJSON(r *pb.Review) (map[string]any, error) {
-	sub, err := taskJSON(r.GetSnapshot().GetSubmission())
+	if r == nil || (r.Snapshot == nil) == (r.EntrySnapshot == nil) {
+		return nil, errors.New("review must have exactly one snapshot")
+	}
+	var sub map[string]any
+	var err error
+	var applicationRevision any
+	entryIDs := r.GetSnapshot().GetEntryIds()
+	if r.EntrySnapshot != nil {
+		if r.Receipt != nil {
+			return nil, errors.New("entry review has task receipt")
+		}
+		sub, err = entryJSON(r.EntrySnapshot.Submission)
+		entryIDs = []string{r.EntrySnapshot.GetSubmission().GetId()}
+		if r.EntryReceipt != nil {
+			applicationRevision = r.EntryReceipt.Revision
+		}
+	} else {
+		if r.EntryReceipt != nil {
+			return nil, errors.New("task review has entry receipt")
+		}
+		sub, err = taskJSON(r.Snapshot.Submission)
+		if r.Receipt != nil {
+			applicationRevision = r.Receipt.Revision
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	var reason, reviewer, decided, decision, applicationRevision any
+	var reason, reviewer, decided, decision any
 	if r.Reason != nil {
 		reason = *r.Reason
 	}
@@ -77,11 +102,8 @@ func reviewJSON(r *pb.Review) (map[string]any, error) {
 	case contentpb.ReviewOutcome_REVIEW_OUTCOME_REJECT:
 		decision = "reject"
 	}
-	if r.Receipt != nil {
-		applicationRevision = r.Receipt.Revision
-	}
 	delivery := map[pb.DeliveryState]string{pb.DeliveryState_DELIVERY_STATE_UNDECIDED: "undecided", pb.DeliveryState_DELIVERY_STATE_PENDING: "pending", pb.DeliveryState_DELIVERY_STATE_APPLIED: "applied", pb.DeliveryState_DELIVERY_STATE_BLOCKED: "blocked"}[r.DeliveryState]
-	return map[string]any{"id": r.Id, "submission": sub, "status": r.Status, "reason": reason, "reviewerId": reviewer, "createdAt": r.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano), "decidedAt": decided, "decision": decision, "deliveryState": delivery, "entryIds": r.GetSnapshot().GetEntryIds(), "applicationRevision": applicationRevision}, nil
+	return map[string]any{"id": r.Id, "submission": sub, "status": r.Status, "reason": reason, "reviewerId": reviewer, "createdAt": r.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano), "decidedAt": decided, "decision": decision, "deliveryState": delivery, "entryIds": entryIDs, "applicationRevision": applicationRevision}, nil
 }
 func reviewResponse(w http.ResponseWriter, r *pb.Review) {
 	value, err := reviewJSON(r)

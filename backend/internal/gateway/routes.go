@@ -8,6 +8,9 @@ func (h *Handler) httpHandlers() map[string]http.HandlerFunc {
 	return map[string]http.HandlerFunc{
 		"getTask":                  h.getPublicTask,
 		"listApprovedEntries":      h.listPublicEntries,
+		"submitAdditionalEntry":    h.submitAdditionalEntry,
+		"getMyEntrySubmission":     h.getEntrySubmission,
+		"resubmitRejectedEntry":    h.resubmitRejectedEntry,
 		"requestTaskReview":        h.requestTaskReview,
 		"listReviews":              h.listReviews,
 		"getReview":                h.getReview,

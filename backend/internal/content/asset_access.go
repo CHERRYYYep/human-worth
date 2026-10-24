@@ -42,7 +42,7 @@ func (s *Server) CheckAssetAccess(ctx context.Context, r *pb.CheckAssetAccessReq
 	}
 	err := s.DB.QueryRow(ctx, `SELECT t.revision,
  t.state='published' AND e.state='approved' AND
- (t.snapshot->'entries'->e.position->'artifacts') @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$3::text))
+ (`+publicEntryContent+`->'artifacts') @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$3::text))
  FROM content.reviewed_tasks t JOIN content.reviewed_entries e ON e.task_id=t.task_id
  WHERE t.task_id=$1 AND e.id=$2`, ref.TaskId, ref.EntryId, ref.AssetId).Scan(&result.Revision, &result.Allowed)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -134,7 +134,7 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 	// receipts above remain replayable; tightening existing visibility is allowed.
 	if taskState == "published" || entryState == "approved" {
 		var formal bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM content.review_requests WHERE task_id=$1)`, r.TaskId).Scan(&formal); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM content.review_requests WHERE task_id=$1) OR EXISTS(SELECT 1 FROM content.entry_submissions WHERE task_id=$1 AND id=$2)`, r.TaskId, r.GetEntryReview().GetEntryId()).Scan(&formal); err != nil {
 			return nil, storage(err)
 		}
 		if formal {
@@ -160,7 +160,12 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 			if tag.RowsAffected() != 1 {
 				return nil, status.Error(codes.NotFound, "entry_not_found")
 			}
-			_, err = tx.Exec(ctx, `UPDATE content.reviewed_tasks SET revision=revision+1,updated_at=clock_timestamp() WHERE task_id=$1`, r.TaskId)
+			if entryState == "approval_revoked" {
+				if _, e = tx.Exec(ctx, `UPDATE content.entry_submissions SET state='approval_revoked',updated_at=clock_timestamp() WHERE id=$1 AND task_id=$2 AND state='approved'`, r.GetEntryReview().EntryId, r.TaskId); e != nil {
+					return nil, storage(e)
+				}
+			}
+			_, err = tx.Exec(ctx, `UPDATE content.reviewed_tasks SET revision=revision+1,catalog_revision=catalog_revision+1,updated_at=clock_timestamp() WHERE task_id=$1`, r.TaskId)
 		} else {
 			_, err = tx.Exec(ctx, `UPDATE content.reviewed_tasks SET state=$2,revision=revision+1,updated_at=clock_timestamp() WHERE task_id=$1`, r.TaskId, taskState)
 		}

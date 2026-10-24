@@ -21,6 +21,12 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ContentService_GetTask_FullMethodName                     = "/humanworth.content.v1.ContentService/GetTask"
 	ContentService_ListApprovedEntries_FullMethodName         = "/humanworth.content.v1.ContentService/ListApprovedEntries"
+	ContentService_SubmitAdditionalEntry_FullMethodName       = "/humanworth.content.v1.ContentService/SubmitAdditionalEntry"
+	ContentService_GetMyEntrySubmission_FullMethodName        = "/humanworth.content.v1.ContentService/GetMyEntrySubmission"
+	ContentService_ResubmitRejectedEntry_FullMethodName       = "/humanworth.content.v1.ContentService/ResubmitRejectedEntry"
+	ContentService_ListMyEntrySubmissions_FullMethodName      = "/humanworth.content.v1.ContentService/ListMyEntrySubmissions"
+	ContentService_GetEntryReviewSnapshot_FullMethodName      = "/humanworth.content.v1.ContentService/GetEntryReviewSnapshot"
+	ContentService_ApplyEntryReviewDecision_FullMethodName    = "/humanworth.content.v1.ContentService/ApplyEntryReviewDecision"
 	ContentService_CreateTaskDraft_FullMethodName             = "/humanworth.content.v1.ContentService/CreateTaskDraft"
 	ContentService_GetMyTaskSubmission_FullMethodName         = "/humanworth.content.v1.ContentService/GetMyTaskSubmission"
 	ContentService_ListMySubmissions_FullMethodName           = "/humanworth.content.v1.ContentService/ListMySubmissions"
@@ -51,6 +57,18 @@ type ContentServiceClient interface {
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
 	// Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
 	ListApprovedEntries(ctx context.Context, in *ListApprovedEntriesRequest, opts ...grpc.CallOption) (*ListApprovedEntriesResponse, error)
+	// Web-only additional work; durable local acceptance, not remote case acknowledgement.
+	// Create idempotency: owner + task + key; normalized content SHA-256. 5s.
+	SubmitAdditionalEntry(ctx context.Context, in *SubmitAdditionalEntryRequest, opts ...grpc.CallOption) (*SubmitAdditionalEntryResponse, error)
+	GetMyEntrySubmission(ctx context.Context, in *GetMyEntrySubmissionRequest, opts ...grpc.CallOption) (*GetMyEntrySubmissionResponse, error)
+	// Rejected only; expected_revision identifies the immutable retry result. 5s.
+	ResubmitRejectedEntry(ctx context.Context, in *ResubmitRejectedEntryRequest, opts ...grpc.CallOption) (*ResubmitRejectedEntryResponse, error)
+	// Web-only; default all additional-entry states, never initial/cloud. 5s.
+	ListMyEntrySubmissions(ctx context.Context, in *ListMyEntrySubmissionsRequest, opts ...grpc.CallOption) (*ListMyEntrySubmissionsResponse, error)
+	// Moderation mTLS only. No user assertion or Asset callback.
+	GetEntryReviewSnapshot(ctx context.Context, in *GetEntryReviewSnapshotRequest, opts ...grpc.CallOption) (*GetEntryReviewSnapshotResponse, error)
+	// Exact decision + snapshot digest; persistent receipt; safe identical retry, 5s.
+	ApplyEntryReviewDecision(ctx context.Context, in *ApplyEntryReviewDecisionRequest, opts ...grpc.CallOption) (*ApplyEntryReviewDecisionResponse, error)
 	CreateTaskDraft(ctx context.Context, in *CreateTaskDraftRequest, opts ...grpc.CallOption) (*CreateTaskDraftResponse, error)
 	GetMyTaskSubmission(ctx context.Context, in *GetMyTaskSubmissionRequest, opts ...grpc.CallOption) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(ctx context.Context, in *ListMySubmissionsRequest, opts ...grpc.CallOption) (*ListMySubmissionsResponse, error)
@@ -100,6 +118,66 @@ func (c *contentServiceClient) ListApprovedEntries(ctx context.Context, in *List
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListApprovedEntriesResponse)
 	err := c.cc.Invoke(ctx, ContentService_ListApprovedEntries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) SubmitAdditionalEntry(ctx context.Context, in *SubmitAdditionalEntryRequest, opts ...grpc.CallOption) (*SubmitAdditionalEntryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitAdditionalEntryResponse)
+	err := c.cc.Invoke(ctx, ContentService_SubmitAdditionalEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) GetMyEntrySubmission(ctx context.Context, in *GetMyEntrySubmissionRequest, opts ...grpc.CallOption) (*GetMyEntrySubmissionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMyEntrySubmissionResponse)
+	err := c.cc.Invoke(ctx, ContentService_GetMyEntrySubmission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) ResubmitRejectedEntry(ctx context.Context, in *ResubmitRejectedEntryRequest, opts ...grpc.CallOption) (*ResubmitRejectedEntryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResubmitRejectedEntryResponse)
+	err := c.cc.Invoke(ctx, ContentService_ResubmitRejectedEntry_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) ListMyEntrySubmissions(ctx context.Context, in *ListMyEntrySubmissionsRequest, opts ...grpc.CallOption) (*ListMyEntrySubmissionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMyEntrySubmissionsResponse)
+	err := c.cc.Invoke(ctx, ContentService_ListMyEntrySubmissions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) GetEntryReviewSnapshot(ctx context.Context, in *GetEntryReviewSnapshotRequest, opts ...grpc.CallOption) (*GetEntryReviewSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetEntryReviewSnapshotResponse)
+	err := c.cc.Invoke(ctx, ContentService_GetEntryReviewSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *contentServiceClient) ApplyEntryReviewDecision(ctx context.Context, in *ApplyEntryReviewDecisionRequest, opts ...grpc.CallOption) (*ApplyEntryReviewDecisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyEntryReviewDecisionResponse)
+	err := c.cc.Invoke(ctx, ContentService_ApplyEntryReviewDecision_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +374,18 @@ type ContentServiceServer interface {
 	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
 	// Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
 	ListApprovedEntries(context.Context, *ListApprovedEntriesRequest) (*ListApprovedEntriesResponse, error)
+	// Web-only additional work; durable local acceptance, not remote case acknowledgement.
+	// Create idempotency: owner + task + key; normalized content SHA-256. 5s.
+	SubmitAdditionalEntry(context.Context, *SubmitAdditionalEntryRequest) (*SubmitAdditionalEntryResponse, error)
+	GetMyEntrySubmission(context.Context, *GetMyEntrySubmissionRequest) (*GetMyEntrySubmissionResponse, error)
+	// Rejected only; expected_revision identifies the immutable retry result. 5s.
+	ResubmitRejectedEntry(context.Context, *ResubmitRejectedEntryRequest) (*ResubmitRejectedEntryResponse, error)
+	// Web-only; default all additional-entry states, never initial/cloud. 5s.
+	ListMyEntrySubmissions(context.Context, *ListMyEntrySubmissionsRequest) (*ListMyEntrySubmissionsResponse, error)
+	// Moderation mTLS only. No user assertion or Asset callback.
+	GetEntryReviewSnapshot(context.Context, *GetEntryReviewSnapshotRequest) (*GetEntryReviewSnapshotResponse, error)
+	// Exact decision + snapshot digest; persistent receipt; safe identical retry, 5s.
+	ApplyEntryReviewDecision(context.Context, *ApplyEntryReviewDecisionRequest) (*ApplyEntryReviewDecisionResponse, error)
 	CreateTaskDraft(context.Context, *CreateTaskDraftRequest) (*CreateTaskDraftResponse, error)
 	GetMyTaskSubmission(context.Context, *GetMyTaskSubmissionRequest) (*GetMyTaskSubmissionResponse, error)
 	ListMySubmissions(context.Context, *ListMySubmissionsRequest) (*ListMySubmissionsResponse, error)
@@ -336,6 +426,24 @@ func (UnimplementedContentServiceServer) GetTask(context.Context, *GetTaskReques
 }
 func (UnimplementedContentServiceServer) ListApprovedEntries(context.Context, *ListApprovedEntriesRequest) (*ListApprovedEntriesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListApprovedEntries not implemented")
+}
+func (UnimplementedContentServiceServer) SubmitAdditionalEntry(context.Context, *SubmitAdditionalEntryRequest) (*SubmitAdditionalEntryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitAdditionalEntry not implemented")
+}
+func (UnimplementedContentServiceServer) GetMyEntrySubmission(context.Context, *GetMyEntrySubmissionRequest) (*GetMyEntrySubmissionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMyEntrySubmission not implemented")
+}
+func (UnimplementedContentServiceServer) ResubmitRejectedEntry(context.Context, *ResubmitRejectedEntryRequest) (*ResubmitRejectedEntryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResubmitRejectedEntry not implemented")
+}
+func (UnimplementedContentServiceServer) ListMyEntrySubmissions(context.Context, *ListMyEntrySubmissionsRequest) (*ListMyEntrySubmissionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMyEntrySubmissions not implemented")
+}
+func (UnimplementedContentServiceServer) GetEntryReviewSnapshot(context.Context, *GetEntryReviewSnapshotRequest) (*GetEntryReviewSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetEntryReviewSnapshot not implemented")
+}
+func (UnimplementedContentServiceServer) ApplyEntryReviewDecision(context.Context, *ApplyEntryReviewDecisionRequest) (*ApplyEntryReviewDecisionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApplyEntryReviewDecision not implemented")
 }
 func (UnimplementedContentServiceServer) CreateTaskDraft(context.Context, *CreateTaskDraftRequest) (*CreateTaskDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateTaskDraft not implemented")
@@ -444,6 +552,114 @@ func _ContentService_ListApprovedEntries_Handler(srv interface{}, ctx context.Co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ContentServiceServer).ListApprovedEntries(ctx, req.(*ListApprovedEntriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_SubmitAdditionalEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitAdditionalEntryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).SubmitAdditionalEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_SubmitAdditionalEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).SubmitAdditionalEntry(ctx, req.(*SubmitAdditionalEntryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_GetMyEntrySubmission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMyEntrySubmissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).GetMyEntrySubmission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_GetMyEntrySubmission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).GetMyEntrySubmission(ctx, req.(*GetMyEntrySubmissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_ResubmitRejectedEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResubmitRejectedEntryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ResubmitRejectedEntry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ResubmitRejectedEntry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ResubmitRejectedEntry(ctx, req.(*ResubmitRejectedEntryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_ListMyEntrySubmissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMyEntrySubmissionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ListMyEntrySubmissions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ListMyEntrySubmissions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ListMyEntrySubmissions(ctx, req.(*ListMyEntrySubmissionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_GetEntryReviewSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEntryReviewSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).GetEntryReviewSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_GetEntryReviewSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).GetEntryReviewSnapshot(ctx, req.(*GetEntryReviewSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ContentService_ApplyEntryReviewDecision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyEntryReviewDecisionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).ApplyEntryReviewDecision(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_ApplyEntryReviewDecision_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).ApplyEntryReviewDecision(ctx, req.(*ApplyEntryReviewDecisionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -786,6 +1002,30 @@ var ContentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListApprovedEntries",
 			Handler:    _ContentService_ListApprovedEntries_Handler,
+		},
+		{
+			MethodName: "SubmitAdditionalEntry",
+			Handler:    _ContentService_SubmitAdditionalEntry_Handler,
+		},
+		{
+			MethodName: "GetMyEntrySubmission",
+			Handler:    _ContentService_GetMyEntrySubmission_Handler,
+		},
+		{
+			MethodName: "ResubmitRejectedEntry",
+			Handler:    _ContentService_ResubmitRejectedEntry_Handler,
+		},
+		{
+			MethodName: "ListMyEntrySubmissions",
+			Handler:    _ContentService_ListMyEntrySubmissions_Handler,
+		},
+		{
+			MethodName: "GetEntryReviewSnapshot",
+			Handler:    _ContentService_GetEntryReviewSnapshot_Handler,
+		},
+		{
+			MethodName: "ApplyEntryReviewDecision",
+			Handler:    _ContentService_ApplyEntryReviewDecision_Handler,
 		},
 		{
 			MethodName: "CreateTaskDraft",

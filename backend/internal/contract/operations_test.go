@@ -87,7 +87,7 @@ func TestPublicBrowseOperations(t *testing.T) {
 		}
 		found := false
 		for _, route := range HTTPRoutes() {
-			if route.Path != tc.route {
+			if route.Path != tc.route || route.Method != "GET" {
 				continue
 			}
 			found = true
@@ -101,6 +101,63 @@ func TestPublicBrowseOperations(t *testing.T) {
 		}
 		if !found {
 			t.Fatal("missing public route", tc.route)
+		}
+	}
+}
+
+func TestAdditionalEntryOperationContracts(t *testing.T) {
+	for _, tc := range []struct {
+		id           OperationID
+		method       string
+		actor, write bool
+		timeout      time.Duration
+	}{
+		{SubmitAdditionalEntry, "/humanworth.content.v1.ContentService/SubmitAdditionalEntry", true, true, 5 * time.Second},
+		{ReadOwnEntrySubmission, "/humanworth.content.v1.ContentService/GetMyEntrySubmission", true, false, 2 * time.Second},
+		{ResubmitRejectedEntry, "/humanworth.content.v1.ContentService/ResubmitRejectedEntry", true, true, 5 * time.Second},
+		{ListOwnEntrySubmissions, "/humanworth.content.v1.ContentService/ListMyEntrySubmissions", true, false, 5 * time.Second},
+		{GetEntryReviewSnapshot, "/humanworth.content.v1.ContentService/GetEntryReviewSnapshot", false, false, 2 * time.Second},
+		{ApplyEntryReviewDecision, "/humanworth.content.v1.ContentService/ApplyEntryReviewDecision", false, false, 5 * time.Second},
+		{CreateEntryReviewCase, "/humanworth.moderation.v1.ModerationService/CreateEntryReviewCase", false, false, 5 * time.Second},
+	} {
+		op, ok := LookupOperation(tc.id)
+		timeout := op.RPCTimeout
+		if timeout == 0 {
+			timeout = DefaultRPCTimeout
+		}
+		policy := IdentityPolicy{}
+		if tc.actor {
+			policy = IdentityPolicy{Audience: "content", Write: tc.write}
+		}
+		if !ok || op.FullMethod != tc.method || op.HasPolicy != tc.actor || op.Policy != policy || timeout != tc.timeout {
+			t.Fatalf("additional-entry operation drift: %#v", op)
+		}
+	}
+	for _, tc := range []struct {
+		name, method, path string
+		target             OperationID
+		timeout            time.Duration
+	}{
+		{"submitAdditionalEntry", "POST", "/api/tasks/{taskId}/entries", SubmitAdditionalEntry, 5 * time.Second},
+		{"getMyEntrySubmission", "GET", "/api/me/entries/{entryId}", ReadOwnEntrySubmission, 2 * time.Second},
+		{"resubmitRejectedEntry", "PUT", "/api/me/entries/{entryId}", ResubmitRejectedEntry, 5 * time.Second},
+	} {
+		found := false
+		for _, route := range HTTPRoutes() {
+			if route.Name != tc.name {
+				continue
+			}
+			found = true
+			timeout := route.Timeout
+			if timeout == 0 {
+				timeout = DefaultHTTPTimeout
+			}
+			if route.Method != tc.method || route.Path != tc.path || route.Target != tc.target || timeout != tc.timeout {
+				t.Fatalf("additional-entry HTTP drift: %#v", route)
+			}
+		}
+		if !found {
+			t.Fatal("missing route", tc.name)
 		}
 	}
 }

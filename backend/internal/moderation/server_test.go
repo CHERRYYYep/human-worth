@@ -62,9 +62,9 @@ func TestModerationServiceIdentity(t *testing.T) {
 		u, _ := url.Parse("spiffe://human-worth/services/" + caller)
 		cert := &x509.Certificate{URIs: []*url.URL{u}}
 		ctx := grpcpeer.NewContext(context.Background(), &grpcpeer.Peer{AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}, VerifiedChains: [][]*x509.Certificate{{cert}}}}})
-		for _, method := range []string{pb.ModerationService_CreateReviewCase_FullMethodName, pb.ModerationService_DecideReview_FullMethodName} {
+		for _, method := range []string{pb.ModerationService_CreateReviewCase_FullMethodName, pb.ModerationService_CreateEntryReviewCase_FullMethodName, pb.ModerationService_DecideReview_FullMethodName} {
 			expected := caller == "gateway"
-			if method == pb.ModerationService_CreateReviewCase_FullMethodName {
+			if method == pb.ModerationService_CreateReviewCase_FullMethodName || method == pb.ModerationService_CreateEntryReviewCase_FullMethodName {
 				expected = caller == "content"
 			}
 			called := false

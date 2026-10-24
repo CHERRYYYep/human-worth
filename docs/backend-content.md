@@ -475,3 +475,170 @@ kind是隔离namespace的本地验收，不是常驻环境或公网发布。收�
 提交前复跑 `buf lint`、`go test -race -json ./... -count=1`（220测试/子测试PASS）、根目录 `npm run ci`（5个Node、28个Python测试PASS）、`git diff --cached --check` 和 `git diff --exit-code`，均退出0。证据沿用本轮目录中的 `git-closeout-index.log` / `git-closeout-index-result.json` 与 `git-closeout-checks.log` / `git-closeout-checks-result.json`。本次没有重跑真实PG/S3或kind；前述414个集成PASS及核对过的kind证据仍对应相同运行时代码，不冒充重新执行。
 
 本阶段代码整合与必要本地验收完成，Git提交封存不等于远端CI、PR合入或公网发布；后续仍须按授权分别执行。独立追加作品、Voting及生产容量/高可用仍在本阶段之外，Asset持锁I/O和历史瞬态503观察项继续保留。
+
+## 12. 第六阶段：独立追加作品（2026-10-23，本地实现与验收，未发布）
+
+### 依据、真实基线与范围
+
+**Human Design**：本轮第六阶段指令及 PRD S3/FR-03/H1：任何合法网站用户可向任何当前公开任务单方追加；实际投稿者为作者；仅新作品送审；通过即展示；驳回可修改重提；云端授权与展示分离，投稿不改变投票资格。MCP 不允许写入，不实现 Voting、Discovery、Challenge 产物登记、前端或生产发布。
+
+开始工作区干净、没有 merge/rebase/cherry-pick。分别 fetch 后 `origin/dev` 与 `upstream/dev` 均为 `dc8e5758926b685e8bc4152190ddf82fce7abbbd`（第五阶段 PR #31 squash），与封存 `0542df697b05fd5e7165999aec2f1b64671be334` 的文件树完全一致；不能因 squash 后祖先关系不同就重复移植。从该最新集成基线建立 `backend/feat-additional-entry-review`，不改原分支/提交。后续审查面向包含该基线的 dev，不需要合入旧第四/第五阶段任务分支。本轮无 commit/push/PR/公网部署授权。
+
+以下数据、RPC、迁移、预算、游标及恢复方案均为 **Agent Self-Claimed**，不是新的人类产品要求。复用 PostgreSQL 18 行锁/`SKIP LOCKED`、现有双方 outbox runner/租约和 protobuf 的兼容追加字段规则；无新服务/中间件/Go 依赖。
+
+### 数据、版本和状态图
+
+| 权威记录 | 含义、唯一约束及兼容 |
+| --- | --- |
+| `reviewed_tasks` | 已批准的任务冻结包不变；`source_revision` 是任务正文版本，`revision` 是既有展示收紧序列；新增 `catalog_revision` 是作品目录变化序列，不是 Voting ballot；新增 `next_entry_position` 在父行锁内分配 |
+| 初始 `reviewed_entries` | ID、作者回退到原任务作者、数组位置、原快照及批准时间不变；不向旧 snapshot 数组追加数据 |
+| `entry_submissions` | 稳定 ent ID、task/author、origin=additional、工作 revision、当前状态/内容/review/rejection reason 与数据库时间；`(author_id,task_id,create_key)` 唯一，作者不可由 runtime 更新 |
+| `entry_review_requests` | 每个 `(entry_id,submission_revision)` 一个不可变快照、规范化内容摘要和确定性 Proto 快照 SHA-256；独立审核状态/原因；runtime 不可改快照/身份/摘要 |
+| `entry_review_outbox` | 与投稿/快照同事务创建；15秒租约，token 确认，独立队列复用 shared runner，避免任务案件积压饿死作品案件 |
+| `entry_decision_receipts` | decision ID 全局唯一（单件协议内）、review ID 唯一；请求摘要与回执同公开状态提交，重放仅读回执 |
+| 追加公开投影 | 批准后在 `reviewed_entries` 存冻结单件内容和实际 author；当前 approved 且父任务 published 才展示；初始包仍用旧数组投影 |
+| Moderation 案件 | 自己 schema 保存 task/entry 对象种类、对象版本、不可变快照、决定/管理员、投递状态/回执；不跨 schema FK/查询 |
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending_review: 创建投稿 revision=1 + 快照 + outbox
+    pending_review --> rejected: 应用单件驳回及回执
+    rejected --> pending_review: 本人 expectedRevision + 新内容版本/新review
+    pending_review --> approved: 父任务仍published，冻结公开投影及回执
+    approved --> approval_revoked: 既有受信收紧协议
+```
+
+没有独立作品草稿、发布开关或待审可编辑副本。初始作品只能走原任务流程；cloud/Challenge 不进入本轮本人列表。重提沿用同一个 entry ID，增加作品内容 revision；任务正文版本、首次发布时间、初始作品和作者均不变。追加批准只增加目录 revision，撤销同时增加既有收紧 revision 与目录 revision；这些版本不互相替代。
+
+### HTTP / RPC 与事务边界
+
+| HTTP | Content RPC | 行为 |
+| --- | --- | --- |
+| POST `/api/tasks/{taskId}/entries` | SubmitAdditionalEntry | 网站＋CSRF；恰一个16～128字符Idempotency-Key；201表示**Content本地已接受**，不是远端建案已确认；5秒 |
+| GET `/api/me/entries/{entryId}` | GetMyEntrySubmission | 仅本人追加投稿；管理员不能借此读取他人；不存在/越权统一404；2秒 |
+| PUT `/api/me/entries/{entryId}` | ResubmitRejectedEntry | 网站＋CSRF；`{expectedRevision,content:EntryInput}`；仅被驳回且父任务仍可接收；5秒 |
+| GET `/api/me/submissions?kind=entry` | ListMyEntrySubmissions | 新独立RPC/响应，不改旧Proto items的TaskSubmission类型；默认全部追加状态；5秒 |
+| 内部 | GetEntryReviewSnapshot / ApplyEntryReviewDecision | 仅moderation mTLS；决定绑定task/entry/review/revision/快照摘要；2秒读/5秒写 |
+| 内部 | Moderation.CreateEntryReviewCase | 仅content mTLS，确切entry/revision幂等建案；5秒 |
+
+每次入口先由 Gateway 向 Identity 取得对应方法断言，Content 再 VerifyActor。带文件时另取 CheckAssetOwnership 断言，Content 在**写事务前**批量校验 ready/实际作者，无逐资产RPC。本人读/公开列表仍固定3次内部RPC；有文件的新写入固定增加 ResolvePrincipal/CheckAssetOwnership/VerifyActor 三次，不随作品数增长。拒绝 ownerId/authorId/role/origin/state/object key 字段。外链只存储，不执行/代理抓取；配置只为送审保存，不执行。
+
+创建事务：锁已批准父任务行，重查 published → 建投稿 → 建不可变快照 → outbox → COMMIT。重提事务：父行 → 本人投稿行 → 查精确重提幂等记录 → 检查 rejected/revision → 新版本/快照/outbox → COMMIT。资产/身份 RPC、对象存储 I/O 均不在这些事务内。下架也锁同一父行，因此提交先后决定接收是否合法；验证后等待锁不能越过已提交下架。撤销/鉴权在途边界沿用前节：已完成鉴权/查询的旧在途响应和已发送字节无法追回。
+
+单件决定：decision advisory transaction lock → 父任务行 → 投稿行 → 审核快照行；精确回执在应用前查回。批准要求父任务仍published；分配 >=32 的唯一位置、插入冻结公开内容、更新单件状态与目录计数、保存回执，一次COMMIT。驳回保留非空理由，父任务已下架时仍可反馈驳回；批准不得重新发布父任务。决定投递永久业务冲突持久 blocked，技术故障等待租约重试。领取与确认独立事务，远端RPC不在事务内，旧token不能确认新领取。
+
+### 幂等、失败与恢复矩阵
+
+| 输入/故障 | 持久事实及恢复 |
+| --- | --- |
+| 相同作者+任务+创建键、相同规范化内容 | 找回同一个entry及初始版本送审结果，不增加投稿/案件；幂等记录没有短TTL |
+| 相同作用域键、不同内容 | 409 idempotency_key_conflict；不同作者/任务的相同键互不冲突 |
+| 重提相同旧expectedRevision、相同内容 | 找回该旧版本产生的精确新revision/review；不覆盖后来版本，找回不重新写入；不同内容409 |
+| 新请求遇任务下架 | 本地父行原子判据拒绝；已有已提交创建/重提仍允许幂等找回，不恢复展示 |
+| Moderation停机/尚未升级 | Content已持久接受，pending；outbox重投，不宣称远端已建案；无业务自动批准 |
+| 远端已建案或应用决定但响应丢失 | 同快照或同决定ID重试，找回持久案件/回执，不重新分配位置/批准时间 |
+| 两管理员相反决定 | Moderation案件行锁；只有一个持久决定，另一方409 |
+| 决定ID异内容/异快照 | 409；旧版本不能覆盖重提；精确旧批准回执只读，不恢复撤销/下架 |
+| 审核中父任务下架 | 待审文件新授权拒绝，批准应用blocked，不改父任务；驳回可反馈原因，不允许本人重提 |
+| COMMIT前失败 | 投稿/快照/outbox或公开投影/状态/回执整体回滚；不产生半公开状态 |
+| COMMIT响应不确定 | 不能推断回滚；同操作幂等查询数据库事实；不无条件新建 |
+| worker重启/切Pod/旧租约迟到 | 到期后新token接管；旧执行者不能确认新token；重复远端调用由唯一约束/回执消重 |
+| Identity/Content/Asset必要检查不可用 | 503或504，不能缓存放行；文件入口每次复核，Asset没有审核状态或永久URL |
+
+### 本人找回、公开分页与文件
+
+- `kind=task` 缺省/默认draft/分类、旧scope、排序与2MiB预算不变。`kind=entry` 默认全部 pending_review/approved/rejected/approval_revoked；显式state只接受这四种，draft/initial/cloud/混合kind拒绝。category按父任务**冻结**分类精确过滤；父任务下架不影响本人找回历史。
+- 本人entry使用独立scope（账号、kind、有效state/category、排序），`created_at DESC,id DESC`键集；重提不改变创建顺序；完整EntrySubmission按实际Proto 2MiB预算逐行计算；limit1～100/默认20，不查询totalCount。跨kind/账号/筛选游标拒绝。
+- 公共列表只输出独立ApprovedEntry白名单：实际投稿者ID；初始作者回退；displayName仍NULL。剔除agentConfiguration/permissions/原因/内部回执/统计，不逐条调用Identity/Asset/Moderation。
+- 保持原 `(position ASC,id ASC)`。0～31保留初始包，追加批准按父行锁下 `next_entry_position` 分配，拒绝计数耗尽；不使用事务外MAX。同决定重放不分配新位置。
+- 旧v1游标（position<=31）继续精确接受；>=32生成v2，绑定同一task/sourceRevision/sort。严格拒绝未知/重复字段、非规范编码、跨任务/正文版本/排序、损坏及超长游标；不是授权。每页重查当前published/approved，目录增长不使旧游标失效；新批准项在末尾，继续翻页可能看到，刷新重查全局集合。多个请求不是固定快照，也不是完整Voting ballot。
+- 公共列表新增2MiB Proto预算，最多额外解码第一条放不下的记录；游标为实际返回末项，不截断字段。task详情保持第五阶段语义，不把新增作品塞回任务正文。
+- CheckAssetAccess和公开列表共用冻结内容表达式；确切task/entry/asset、父published、作品approved同时满足。待审文件只允许当前管理员专用断言、当前pending review/投稿版本及可见父任务；Asset在Open前后复核，无owner/admin头绕过，不递归调用。
+- 本人历史重试返回对应版本的送审结果；当前完整时间/撤销状态应GET本人详情或列表，不能用重试回执替代当前授权。
+
+### 迁移、权限与滚动升级
+
+Content基线最后为005，追加 `006_additional_entries.sql`；Moderation基线最后002，追加003。001～005/Moderation001～002不改校验和。新增列/表兼容旧初始写入；旧未知时间保持NULL，不回填事实，不改初始作者/顺序/时间。owner迁移且重跑最小grants，runtime无DDL/跨schema、不能改作者、create键/摘要、快照/位置/回执。
+
+升级顺序：暂停新入口开放 → owner迁移并授权Content006与Moderation003 → 全部Content/Moderation副本滚动到能识别单件协议的版本 → 升级Gateway及开启新操作/探针。旧Proto客户端保留原任务字段类型/编号；新字段不改变旧类型，不用EntrySubmission替换TaskSubmission。**不能在旧Moderation实例仍运行时接收entry案件**：旧程序不识别entry快照；新RPC返回Unimplemented时outbox保留待重试，不当已建案。所有副本兼容后才能开放写入口；不能以Proto兼容证明混合应用语义兼容。Asset无需迁移/重构，新的Content授权支持追加引用即可。
+
+### 验收矩阵（执行前制定，结果另记）
+
+| 目标 | 必要真实证据 |
+| --- | --- |
+| A发布、B追加/找回、独立批准/驳回重提 | HTTPS Gateway→真实Identity/mTLS Content/Moderation→PG/S3，比较A原正文/初始ID/作者/时间均不变 |
+| 隔离与用途 | A/B/admin本人隔离、外人资产、未登录/MCP/撤销/错audience/method/服务证书、伪造输入拒绝 |
+| 幂等并发 | 同键/异内容、并发创建/重提/相反决定、重复应用，行数/目录位置/回执与内容摘要可观察 |
+| 恢复原子性 | 真实锁等待取消/超时、COMMIT失败/响应丢失、远端成功丢响应、陈旧租约、重启/跨Pod恢复 |
+| 展示与文件 | 混合初始/追加分页>32、末页/空页/异常scope、撤销/下架/旧游标/旧批准重放，新公开与待审文件拒绝 |
+| 升级最小权限 | 005带旧数据→006、重复迁移/篡改拒绝、旧时间NULL、受限账号拒绝改身份/快照/DDL/跨schema |
+| 相邻及部署 | 全量race/真实PG/S3、原草稿上传/审核/第五阶段回归、独立namespace真实双副本和正常Service故障隔离 |
+
+原始结果将在下方按实际退出码/数量追加，不使用历史测试数。缺环境/SKIP/只编译不能计真实PASS；不操作常驻namespace/产品库/公网，不提前声明生产发布或生产S3 HA。
+
+
+### 本轮代码、专项与全量验收（2026-10-23，Agent Self-Claimed）
+
+本次实际代码为 `dc8e5758926b685e8bc4152190ddf82fce7abbbd` 加 `backend/feat-additional-entry-review` 未提交差异；不是第五阶段旧结果，也没有新提交 SHA。证据目录为 `/home/cherry/.local/state/human-worth/validation/additional-entry-20261023-tlhay_qk/`，原始日志、命令/退出码/耗时及实际 JSON 测试计数保存在仓库外。专用一次性 PostgreSQL 18.4 和 SeaweedFS 4.13 使用受限配置文件、随机测试数据库/角色；不连接产品库。正常 Go build cache，未设置临时 GOCACHE，未用临时或替代生成插件，正式固定 `buf.gen.yaml` 未变，无新增依赖。
+
+下表为修复后重新执行的结果。普通测试和 Content/Moderation 数据库故障注入中的窄 Identity/Content 客户端不能冒充完整权限链路；`TestAdditionalEntry*` 使用真实 HTTPS Gateway、Identity、mTLS Content/Moderation/Asset、PostgreSQL 和共享 S3，但各服务在测试进程内启动；真正多进程和 Pod 恢复另由 kind 验证。
+
+| 实际命令（除注明外在 backend） | 退出码、实际结果及证据 |
+| --- | --- |
+| `gofmt -l cmd internal` | 0，输出空；`gofmt-release.log` |
+| `buf lint` | 0；`buf-lint-release.log` |
+| `buf generate` | 0，正式配置；`buf-generate-release.log` |
+| `buf breaking --against '../.git#ref=dc8e5758926b685e8bc4152190ddf82fce7abbbd,subdir=backend'` | 0，明确开发前最新dev基线；`buf-breaking-release.log` |
+| `buf generate --output <独立临时目录>`，`diff -qr gen <临时目录>/gen` | 各0，逐文件一致，临时输出已清理；`buf-generate-independent-release.log` / `gen-compare-release.log` |
+| `git diff --exit-code -- gen` | 1，预期的未提交新协议生成增量，不是独立重生成不一致；`gen-head-diff-release.log` |
+| `go vet ./...`，`go vet -tags=integration ./...`，`go vet -tags=lab ./internal/identity` | 各0；`vet*-release.log` |
+| `go build ./cmd/...` | 0；`build-release.log` |
+| `go test -json ./... -count=1` | 0，322测试/子测试PASS，0测试失败/跳过；`unit-release.log` |
+| `go test -race -json ./... -count=1` | 0，322测试/子测试PASS，0测试失败/跳过；`race-release.log` |
+| 专用PG：`go test -race -json -tags=integration ./internal/content -run TestEntryIntegration -count=3 -timeout=180s` | 0，三轮72测试/子测试PASS；`content-concurrency-fixed.log` |
+| 配齐专用PG/S3：`go test -race -json -tags=integration ./... -count=1 -timeout=240s` | 0，556测试/子测试PASS，0测试失败/跳过，51.42秒；`full-integration-release.log` |
+| 根目录 `npm run ci` | 0，真实退出，5个Node、28个Python测试PASS；`npm-ci-release.log` |
+| 根目录 `python3 -m py_compile ops/lab/*.py`，`python3 -m unittest discover -s tests -p 'test_*.py'` | 各0；28个Python测试PASS；`lab-python-static.log` |
+| 根目录 `git diff --check` | 0；`diff-check-release.log`；最终文档修改后再复核 |
+
+JSON计数见 `counts-release.json`，只计带 Test 字段的 pass/fail/skip。全量integration命令的556项包含322项常规测试，另234项由integration标签启用，不将全部556项冒称为逐项真实PG/完整HTTP测试；各测试的组件fake/真实链路边界如上。Go输出的23个 `[no test files]` 包不算跳过真实测试，也不计通过测试。完整命令和退出码另见 `checks-release.json`、各 `*-result.json`。根CI已经实际退出，不是只启动或仍卡在 npm test。
+
+**失败证据保留及修复**：初次旧回归把新支持的 `kind=entry` 仍当非法，改夹具为明确未实现的cloud；旧升级夹具使用多命令参数化SQL，拆为真实可执行语句；HTTP创建重试曾返回当前可变revision，修正为初始不可变revision=1的该次审核结果。最后的并发专项另复现：首次精确版本查询尚未存在、随后另一请求提交、当前行已前进时，相同重提会误报 revision_conflict；现对该窗口再次读取对应不可变版本，同内容找回、异内容409，确定性PG屏障与三轮race验证通过。`content-concurrency-review.log` 保留修复前失败，没有放宽权限或改预期掩盖。早期lab编译在测试编辑期间发现未使用变量，最终lab vet已0；首次lab专项的初始包/目录数量夹具不符（应为2初始+1追加），失败日志 `additional-kind-lab.log` 保留，修正后完整kind结果另记。
+
+数据库组件专项还实际覆盖005旧数据升级到006、002到003、重复迁移/篡改拒绝、列级最小权限、12件并发批准唯一稳定位置、35件混合公开目录及v1/v2游标、本人2MiB预算、父行锁下架竞争、取消/deadline单连接池与锁释放、提交前真实约束失败、真实COMMIT成功但丢响应、跨实例找回、远端成功丢RPC响应、陈旧租约不能确认、旧决定/撤销回放安全。组件fake边界已写在测试中；HTTP权限、真实文件及跨服务边界以完整Identity集成和kind为准。
+
+复现全量集成时，为 `IDENTITY_TEST_DATABASE_URL_FILE`、`CHALLENGE_TEST_DATABASE_URL_FILE`、`ASSET_TEST_DATABASE_URL_FILE` 提供同一个**专用隔离测试**管理员DSN文件，并设置 `ASSET_S3_TEST_CONFIG_FILE` 指向专用存储配置；测试各自随机建库/建角色。配置文件必须在仓库外且0600，不使用生产凭据。该环境由证据目录中的 `run.py` 注入，原始日志不含配置值。
+
+尚未容量验收的既有边界：Asset持锁上传协议保持原样；旧受信 `ApplyAssetReview` 仍返回该任务的全部 ReviewedEntry 回执，大规模目录时需另做维护响应/transport预算专项，不把新增浏览分页的2MiB预算说成全部维护RPC均有界。当前业务/恢复验收不替代负载、生产S3 HA、安全扫描或公网验收，也没有任何Voting真实联调。
+
+
+### 完整kind联合验收与本次结论
+
+根目录实际执行 `DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate_modules.py`，**退出0，730.31秒，脚本已结束**。`kind-complete.log` / `kind-complete-result.json` 保留完整构建、测试、网络、故障及清理输出。使用不可变工作区快照标识 `51bd6d0d89efd6d2e7de005a767364e959afaeb2`，它是测试镜像内容标识，不是新Git提交。`kind-source-manifest.json` 核对292个后端/运维/契约输入，运行时、测试、迁移、生成代码及部署输入与最终工作区一致；验收中后续改动仅文档记录。
+
+| 实际kind业务测试 | 结果 |
+| --- | --- |
+| `TestKindAdditionalEntryDeployment` | PASS，56.86秒；A正式发布，B真实S3上传并追加、跨Content本人找回、停Moderation仍持久接受；恢复后真实Moderation Pod/worker单件建案；管理员确切待审文件、驳回/原因/重提及批准；公开作者为B、文件相同，A正文/初始作品/首次发布时间不变；撤销/下架/旧游标/真实worker旧批准重放不恢复；真实Content Pod重启后仍拒绝新公开读取而保留B本人文件 |
+| `TestKindAssetDeployment` | PASS，118.47秒；双Asset跨节点共享S3、上传/恢复/完成、Content所有权、真实清理worker、对象先成功后数据库恢复、S3停机fail closed/恢复及撤销会话 |
+| `TestKindPublicAssetDeployment` | PASS，49.03秒；保留阶段三旧受信证书/审核回执兼容链路、双Asset文件权限与Content故障恢复；这一项本身不冒充真实Moderation业务 |
+| `TestKindContentDeployment` | PASS，3.13秒；既有本人草稿、版本冲突、重启持久化和会话撤销 |
+| `TestKindModerationDeployment` | PASS，91.41秒；真实Moderation Pod的任务送审/决定/文件及第五阶段公开读取、故障投递恢复，正常Service/NodePort下Gateway全局可用性 |
+
+五项测试进程实际退出0（319.938秒）；后续网络允许/拒绝探针、失败rollout恢复、同镜像版本失败迁移重试、重复完整模块部署均PASS。因此不是只跑新专项、仅YAML/rollout或用port-forward替代Service故障隔离。新增业务和Moderation故障隔离走私有NodePort→正常Gateway Service；定向Content/Asset探针只证明跨副本共享和当前权限一致。发布及单件批准使用真实Moderation Pod，测试CA/mTLS仅用于既有受信收紧协议，不能把该收紧调用声称为新增管理员下架产品接口。测试身份是隔离合成账号/会话，不是本轮真实Google或公网登录验证。
+
+临时namespace `human-worth-verify-9f072b34` 已由脚本删除并独立查询确认不存在；早期失败专项namespace也已清理。未操作常驻业务namespace、固定公网端口或生产凭据。专用PG/S3容器及仓库外测试凭据已删除，旧专项临时源码/CA目录与包装器已清理，保留无敏感值日志；清理记录在 `environment-cleanup.json` / `old-lab-cleanup.json`，凭据值日志扫描无命中。Go/容器正常工具缓存不提交到仓库。
+
+结束前重新fetch origin和upstream成功，双方dev仍为 `dc8e5758926b685e8bc4152190ddf82fce7abbbd`，未忽略更新基线。两次独立定向只读审查未发现可复现P1/P2，不能据此声称穷尽所有攻击或完成容量压测。
+
+**本次结论：第六阶段必要本地功能、专用PG/S3、双副本真实kind业务及恢复验收PASS，具备提交独立审查条件，无已知本阶段阻塞缺陷。** 代码仍是任务分支未暂存/未提交改动，不自动commit/push/PR/合并。不存在测试SKIP或缺环境INCONCLUSIVE被计入本次必要验收PASS；远端GitHub CI、公网发布、生产S3 HA/容量、自动扫描、Voting/Discovery、Challenge登记、MCP传输及前端均未实施/验收，不属于该结论。上线前仍必须按前述迁移/授权/全部兼容实例顺序升级，不能把本地验收当作生产发布。
+
+
+### 第六阶段本地封存提交（2026-10-25）
+
+**Human Design**：用户明确要求封存本阶段，然后规划 Voting；本轮仅封存第六阶段，不推送、不创建PR、不合并或部署。前述“未提交”的记载为当时状态，封存后以本节及Git历史为准；Voting设计另行开展，不夹入本功能提交。
+
+封存前核对50个任务文件，均与2026-10-23最终工作区验收摘要一致，无其他未审查改动。再次执行 `buf lint`、对开发前基线 `dc8e5758926b685e8bc4152190ddf82fce7abbbd` 的 `buf breaking`、正式固定配置独立生成与gen逐文件比较、普通及integration标签vet、`go build ./cmd/...`、`go test -race -json ./... -count=1`（322测试/子测试PASS）、根目录 `npm run ci`（5Node/28Python）、`git diff --check`，全部退出0。完整index导出后另检查核心Content/Moderation/Gateway/Identity策略/contract测试，防止缺少新文件的提交；结果记录于封存证据。
+
+本轮未重跑专用PG/S3和kind；沿用上节与当前运行时代码逐文件一致的556项integration及完整kind证据，不能描述为2026-10-25重新运行。临时资源保持已清理状态。封存复核日志位于 `/home/cherry/.local/state/human-worth/validation/additional-entry-closeout-20261025/`。
+
+本阶段功能、契约、迁移、最小权限、部署验收脚本与文档一起提交至 `backend/feat-additional-entry-review`；不改变dev/main或旧阶段分支。封存不代表远端CI、PR合入、公网验收或生产容量/HA完成，相关未覆盖范围与Asset持锁/维护回执容量观察项不变。
