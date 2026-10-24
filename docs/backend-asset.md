@@ -698,3 +698,14 @@ Asset PR #27和正式Moderation PR #28已进入dev；本次在其后实现 [公�
 未修改Asset Proto/表/存储/下载权限。正文/作品是可选认证（无效凭据拒绝）的新接口；既有完全匿名文件入口的Cookie/MCP不授予权限策略保持。S3文件的正式HTTP上传→草稿绑定→送审→真实Moderation批准→公开浏览/下载由新增真实PG/S3集成及kind扩展验证；未实施公网部署或生产HA验收。
 
 2026-10-22 恢复整合：第五阶段移植到Issue整改后的dev `665bf4d`，公开集成采用已分层的Asset装配，保留5MiB multipart、未知提交与对象恢复、共享技术错误和request ID；未修改Asset协议、上传实现、文件入口凭据处理或存储。上述第17～19节整改与历史验收完整保留，新增本次结果见 [Content恢复整合](backend-content.md#11-第五阶段恢复整合2026-10-22未发布)，不以本节历史数据代替。
+
+## 20. 第六阶段追加作品的文件边界（2026-10-23，未发布）
+
+**Human Design**：追加作品属于实际投稿者；只有作品自身过审且父任务允许展示才可公开文件；管理员必须通过确切待审案件访问，不能伪造所有者。**Agent Self-Claimed**：Asset正式Proto、对象存储、分层及既有持锁上传协议均不改；Content的新增追加写入在事务外批量调用既有CheckAssetOwnership，ready且owner与已验证投稿者相同才绑定。上传成功仍不意味着投稿/审核成功。
+
+公开 `DownloadPublicAsset → Content.CheckAssetAccess` 沿用相同task/entry/asset上下文，新Content识别冻结的追加内容和原初始包；父published＋该entry approved＋确切file引用同时满足。待审 `DownloadReviewAsset → CheckReviewAssetAccess` 新增识别当前entry review/version/pending及可见父任务；管理员身份仍由Identity每次验证，不允许普通管理员头或owner绕过。打开对象前后检查、失败拒绝、无永久URL、无回调递归均保留。本人Asset管理下载仍是独立owner权限，作品撤销不删除用户文件。
+
+Content/Moderation必须先迁移/滚动支持单件协议，再开放新增Gateway写路由；不要求Asset增加审核状态、跨schema权限或新存储配置。阶段六真实PG/S3/kind结果见 [Content记录](backend-content.md#12-第六阶段独立追加作品2026-10-23本地实现与验收未发布)，不沿用本节之前历史数量。本轮不建设生产S3高可用、扫描/转码、前端或公网发布；既有Asset持锁对象I/O取舍原样保留。
+
+
+2026-10-23阶段六实际追加文件验收已通过：真实HTTPS/mTLS/PG/S3集成及完整kind（退出0，730.31秒）中，B本人上传、独立投稿/待审管理员读取、驳回重提/批准公开、撤销/下架拒绝新读取、Content Pod恢复而不删除B私有文件均验证；原Asset双副本上传与恢复专项118.47秒PASS。完整命令/失败/边界见Content第12节。未改Asset上传协议、正式Proto、存储或文件入口凭据语义，未做生产HA/容量或公网发布。

@@ -48,7 +48,7 @@ func contentPeer(ctx context.Context, method string) error {
 	switch method {
 	case pb.ContentService_CheckAssetAccess_FullMethodName, pb.ContentService_CheckReviewAssetAccess_FullMethodName:
 		return requireContentCaller(ctx, "asset")
-	case pb.ContentService_ApplyAssetReview_FullMethodName, pb.ContentService_GetReviewSnapshot_FullMethodName, pb.ContentService_ApplyReviewDecision_FullMethodName:
+	case pb.ContentService_GetEntryReviewSnapshot_FullMethodName, pb.ContentService_ApplyEntryReviewDecision_FullMethodName, pb.ContentService_ApplyAssetReview_FullMethodName, pb.ContentService_GetReviewSnapshot_FullMethodName, pb.ContentService_ApplyReviewDecision_FullMethodName:
 		return requireContentCaller(ctx, "moderation")
 	case "/grpc.health.v1.Health/Check":
 		name, err := platform.ServiceName(ctx)

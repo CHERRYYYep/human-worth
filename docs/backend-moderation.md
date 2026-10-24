@@ -2,6 +2,8 @@
 
 日期：2026-10-16。**Human Design**：本轮 4A～4D 指令、PRD S2/S4 与过审即展示约束。下述数据结构、RPC、租约、超时及兼容策略均为 **Agent Self-Claimed 实现方案**，不是额外已批准产品规则。
 
+本文保留阶段四、五历史记录；2026-10-23 的单件追加作品审核增量及升级限制见第 13 节。历史“仅初始包”的范围说明不代表阶段六的现有接口。
+
 ## 1. 基线与范围
 
 Asset PR #27 已于 2026-10-16 合入上游 dev（`b2a7399`）；从该提交建立 `backend/feat-moderation-review`。旧 Content `ApplyAssetReview` 仅是受信决定应用端，不是案件系统。当前切片只处理任务及其 human/agent 初始作品整体送审；不实现独立追加投稿、举报、审计平台、自动审核/病毒扫描、Voting、Discovery、Challenge 完整联调、前端或公网部署。
@@ -168,3 +170,70 @@ runner 保持 1 秒轮询、7 秒单轮 deadline、每 tick 调用一次；无�
 现有 `TestKindModerationDeployment` 扩展在真实Moderation批准后验证普通公开详情/分页/S3文件；停Moderation时使用正常Service/NodePort验证可读，双Content Pod定向探针只作正向跨副本验证，不冒充Service故障隔离。具体运行结果见Content验收记录，不用历史阶段四PASS替代。
 
 2026-10-22 恢复整合：以PR #30后的dev `665bf4d` 为基线移植封存第五阶段；保留共享outbox runner、可靠投递/回执及技术错误分类，不改Moderation schema/协议/业务实现。Content新增批准时间写入与公开只读投影，无需Moderation在线。Service故障断言严格沿用503/504对应的不可用/deadline分类；本次结果见 [Content恢复整合](backend-content.md#11-第五阶段恢复整合2026-10-22未发布)，原第11节及此前阶段验收记录保留。
+
+## 13. 阶段六：单件追加作品审核（2026-10-23，未发布）
+
+基线为 PR #31 squash 后的 `origin/dev@dc8e5758926b685e8bc4152190ddf82fce7abbbd`，任务分支 `backend/feat-additional-entry-review`。**Human Design**：任意网站用户向可见任务追加一件 human 或 agent 作品，只审新作品，原任务不重审；本轮明确保留 TaskSubmission、旧 RPC/字段/编号及回执语义，新增独立 EntrySubmission/快照/决定接口。以下数据库组织、校验和测试实现为 **Agent Self-Claimed**。
+
+### 共享协议与 Moderation 行为
+
+| 接口 / 字段 | 实际语义 |
+| --- | --- |
+| Moderation.CreateEntryReviewCase | 只接受 content mTLS；请求 snapshot 为 Content 已持久化的 EntryReviewSnapshot；同 review ID、entry/revision 和相同完整快照重试找回原案件，身份/快照冲突 AlreadyExists |
+| Review.entry_snapshot（12） | 独立追加作品的不可变快照；旧 snapshot（2）保持 ReviewSnapshot 类型，追加案件中为 NULL/未设置 |
+| Review.entry_receipt（13） | 独立 ApplyEntryReviewDecisionResponse；旧 receipt（10）保持原类型，追加案件中为 NULL/未设置 |
+| ListReviews / GetReview / DecideReview | 沿用管理员网站断言、CSRF、理由约束与行锁；列表混合 task/entry 案件，原排序、status 筛选、游标及 2 MiB Protobuf 分页预算保持 |
+| Content.ApplyEntryReviewDecision | moderation mTLS；decision_id、review_id、task_id、entry_id、submission_revision、outcome、reason，以及必填 snapshot_sha256 |
+| 新决定回执 | decision_id/review_id/entry_id/revision/state；批准 state 必须为 approved，驳回必须为 rejected。旧 Task 批准仍为 published |
+
+EntrySnapshot 校验 review/entry/task ID、账号、正版本、origin=additional、state=pending_review、相同 review 绑定、单件 human/agent 内容、合法创建/更新时间、无先前批准/驳回结果，以及 512 KiB Protobuf 上限。不套用初始包必须齐备 human＋agent 的要求；完整作品、资产归属/ready 和父任务可见性由 Content 在送审事务边界负责。
+
+建案时对完整 EntryReviewSnapshot 执行 `proto.MarshalOptions{Deterministic:true}` 后 SHA-256，保存原始 32 字节 snapshot_hash。投递使用该已保存摘要的小写 64 字符 hex；不重算当前工作副本，不把 JSON 字符串哈希当作协议摘要，也不调用 Content 的当前稿件接口。Content 的 GetEntryReviewSnapshot 保持独立读取协议，本 worker 无需额外回调它。服务版本/快照字段扩展仍须遵守下方升级顺序，不能把 deterministic 序列化误作任意版本之间的通用规范化格式。
+
+读取根据数据库 object_kind 只填充对应快照和回执字段。未决定时 reason/reviewer/decided_at/decision_id/receipt 的 SQL NULL 保持未设置；不构造空 TaskSubmission 来伪装追加案件，不把 entry 回执反序列化成旧 task 类型。管理员决定一旦持久化仍保持 status=pending、deliveryState=pending，只有 Content 回执核对成功并提交后才变为 approved/rejected。
+
+### 迁移与运行权限
+
+新增 `internal/moderation/migrations/003_entry_reviews.sql`，001/002 及校验和不变：
+
+- `object_kind` 为 task/entry，默认 task，历史案件自动获得 task 类型。
+- `object_id` 为 STORED 生成列：task 取 task_id，entry 取不可变 snapshot.submission.id。旧服务省略新列的 INSERT 仍有正确对象身份，runtime 无法写入/修改生成列。
+- 用 `UNIQUE(object_kind,object_id,submission_revision)` 替换原 `UNIQUE(task_id,submission_revision)`；同任务多个 entry 的 revision=1 不再冲突，同一 entry/revision 仍唯一，review ID 和 decision ID 继续全局唯一。
+- 新增追加案件身份 CHECK，约束 entry ID、parent task、origin、review ID 与版本和快照一致；原快照、hash、理由、决定、时间和回执原样保留。
+- Ready 要求 003 已应用；grants 保留列级 UPDATE 白名单，不给 object_kind/object_id、snapshot/hash、来源版本、created_at 或历史回执重写权限。无跨 schema 查询/FK，无新运行账号、证书、数据库连接或队列服务。
+
+### 投递、下架与混合升级
+
+复用现有 decision_outbox、DeliverDecision / RunDelivery 与 platform.RunOutbox；task/entry 共用队列，领取后按类型分发到相应 Content RPC。仍为 1 秒 tick、单轮 7 秒、下游 5 秒、15 秒租约；RPC 不持数据库事务锁，原 decision ID、原因及摘要至少一次重试。回执核对全部标识、被审核版本及对应终态，错误/空回执按可重试技术错误处理，不误记 applied。
+
+| 结果 | 持久状态和恢复 |
+| --- | --- |
+| Unavailable / DeadlineExceeded / Canceled / Internal 等技术错误 | pending，租约到期重试；WARN，不能因升级或通信失败永久丢弃决定 |
+| Unimplemented | 同样技术重试，等待旧 Content/Moderation 实例升级；不得 blocked。Content → Moderation 新建案方向的对应分类由 Content worker 维护 |
+| Aborted / AlreadyExists / InvalidArgument / FailedPrecondition 业务冲突 | review.delivery_state 和 outbox.blocked 同事务提交后才输出 blocked/ERROR；事务提交失败仍是可重试 WARN |
+| 父任务下架后批准，Content 返回 FailedPrecondition task_not_accepting_entries | blocked；不重发新 decision、不改原决定，不恢复任务展示 |
+| 下架后的驳回 | Content 仍可接受原因反馈；本模块照常投递 reject 并等待 rejected 回执，不自行以父任务下架阻止驳回 |
+| Content 成功但响应丢失 / worker 崩溃 | 原 ID/摘要重试，取 Content 原回执；旧租约不能确认新持有者的投递 |
+| blocked 状态/COMMIT 故障 | review 与 outbox 一起回滚；不输出已持久化 blocked 的错误结论 |
+
+**必须按顺序升级**：先执行 Content 006、Moderation 003 owner 迁移及各自 grants；再滚动全部 Content、Moderation 及相关 Gateway 兼容实例，确认都支持新增字段/RPC；最后开放新增 Gateway 投稿/重提入口及新建案流量。迁移可兼容旧 Task 写入，不代表旧二进制能解释追加案件：旧 Moderation 读取 entry JSON 或旧 Gateway 忽略 entry_snapshot 都不具备完整语义。不能让旧实例处理新增案件，也不能仅依赖旧实例的历史 readiness 检查来宣称已兼容。
+
+既有待审文件 HTTP/Asset 流协议无需由 Moderation 扩展。Content 对 entry 快照、当前 pending 状态与可见父任务做权威判断；Asset 继续复核当前管理员和 ready、打开对象后再次授权。父任务下架时待审文件入口拒绝，并不妨碍管理员通过案件详情决定驳回。公开展示、撤销及旧回执重放不恢复展示仍由 Content 负责。
+
+### 本轮验证与边界
+
+修改范围仅 `internal/moderation`、`ops/moderation/grants.sql` 与本文；Proto/生成代码、Content、Gateway、contract 的协作修改不由本模块代写。
+
+2026-10-23 使用一次性 PostgreSQL 18.4 实际执行：
+
+| 命令 | 退出码 / 证据范围 |
+| --- | --- |
+| `go test -race ./internal/moderation` | 0；单件快照边界、服务身份、摘要、approve/reject 回执逐字段校验及理由/游标回归 |
+| `go vet -tags=integration ./internal/moderation` | 0 |
+| `go test -race -tags=integration ./internal/moderation -count=1 -v -timeout=120s` | 0；真实 owner/runtime、001/002→003 升级与重复迁移、历史 NULL 映射和记录不变、旧 INSERT 唯一性、最小权限、混合分页、同父多件/新版本/幂等冲突、稳定投递请求、租约恢复/陈旧确认、技术错误含 Unimplemented、错误回执、blocked COMMIT 故障及并发相反决定 |
+| `go test -race -tags=integration ./internal/identity -run '^TestModeration(HTTPOutbox\|IdentityAuthorization\|ApprovalMigration)$' -count=1 -v -timeout=180s` | 0；旧任务审核真实 HTTP/Identity/mTLS/Content/Asset/FileStorage 回归与历史迁移测试 |
+
+新增 Moderation 数据库测试使用受控 Identity/Content 客户端来注入响应和错误，不将其称为新追加作品的完整 HTTP/真实 Content/S3/kind 验收。旧审核真实链路回归证明旧 Task 行为，不替代新追加链路验收。新 Gateway/Content 联调、kind、远端 CI 和公网发布仍需按阶段六整体交付分别验证；未 commit/push/创建 PR 或部署。
+
+
+阶段六整体最终验收（2026-10-23）：上述“联调/kind仍需验证”是模块交接时状态，现由完整Identity真实HTTPS/mTLS/PG/S3链路及5项kind业务补齐；其中新增单件闭环56.86秒、真实Moderation任务/公开浏览回归91.41秒，全量validator退出0（730.31秒），网络、故障与重复部署也通过。正常Service/NodePort验证Moderation停机不移除Gateway端点，真实Pod完成建案/决定/回执，驳回历史与旧决定重放安全。完整命令、556项计数边界、修复前失败及资源清理见Content第12节，不将本模块受控下游客户端测试冒称为该真实链路。仍未发布公网、未commit/push/PR。

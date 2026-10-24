@@ -156,13 +156,19 @@ func submissionListRequest(rawQuery string) (*pb.ListMySubmissionsRequest, strin
 	}
 	if query.Has("kind") {
 		request.Kind = query.Get("kind")
-		if request.Kind != "task" {
+		if request.Kind != "task" && request.Kind != "entry" {
 			return nil, "unsupported_submission_filter"
 		}
 	}
 	if query.Has("state") {
 		request.State = query.Get("state")
-		if request.State != "draft" && request.State != "pending_review" && request.State != "rejected" && request.State != "published" && request.State != "taken_down" {
+		valid := request.State == "pending_review" || request.State == "rejected"
+		if request.Kind == "entry" {
+			valid = valid || request.State == "approved" || request.State == "approval_revoked"
+		} else {
+			valid = valid || request.State == "draft" || request.State == "published" || request.State == "taken_down"
+		}
+		if !valid {
 			return nil, "unsupported_submission_filter"
 		}
 	}
@@ -176,13 +182,21 @@ func submissionListRequest(rawQuery string) (*pb.ListMySubmissionsRequest, strin
 	return request, ""
 }
 func (h *Handler) listSubmissions(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.contentActor(w, r, contract.ListOwnSubmissions)
-	if !ok {
-		return
-	}
 	request, reason := submissionListRequest(r.URL.RawQuery)
 	if reason != "" {
 		problem(w, 400, reason)
+		return
+	}
+	operation := contract.ListOwnSubmissions
+	if request.Kind == "entry" {
+		operation = contract.ListOwnEntrySubmissions
+	}
+	actor, ok := h.contentActor(w, r, operation)
+	if !ok {
+		return
+	}
+	if request.Kind == "entry" {
+		h.listEntrySubmissions(w, r, &pb.ListMyEntrySubmissionsRequest{ActorAssertion: actor, State: request.State, Category: request.Category, Limit: request.Limit, Cursor: request.Cursor})
 		return
 	}
 	request.ActorAssertion = actor

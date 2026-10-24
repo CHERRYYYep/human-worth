@@ -12,6 +12,8 @@ service ModerationService {
   // content mTLS only; review ID + task/revision idempotent, payload mismatch
   // AlreadyExists. 5s; safe identical retry. No transaction waits for RPC.
   rpc CreateReviewCase(CreateReviewCaseRequest) returns (CreateReviewCaseResponse);
+  // content mTLS only; entry/revision and review ID unique; exact retry, 5s.
+  rpc CreateEntryReviewCase(CreateEntryReviewCaseRequest) returns (CreateEntryReviewCaseResponse);
   // gateway mTLS + admin web assertion; 5s, byte-budgeted full snapshots.
   rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
   // gateway mTLS + admin web assertion; 2s, safe read.
@@ -41,6 +43,10 @@ message Review {
   DeliveryState delivery_state = 9;
   humanworth.content.v1.ApplyReviewDecisionResponse receipt = 10;
   optional string decision_id = 11;
+  // Exactly one snapshot is populated. Older clients must not decide entry
+  // cases without this field; deploy compatible Moderation before gateway.
+  humanworth.content.v1.EntryReviewSnapshot entry_snapshot = 12;
+  humanworth.content.v1.ApplyEntryReviewDecisionResponse entry_receipt = 13;
 }
 message CreateReviewCaseRequest { humanworth.content.v1.ReviewSnapshot snapshot = 1; }
 message CreateReviewCaseResponse { Review review = 1; }
@@ -66,3 +72,6 @@ message DecideReviewRequest {
   optional string reason = 4;
 }
 message DecideReviewResponse { Review review = 1; }
+
+message CreateEntryReviewCaseRequest { humanworth.content.v1.EntryReviewSnapshot snapshot = 1; }
+message CreateEntryReviewCaseResponse { Review review = 1; }

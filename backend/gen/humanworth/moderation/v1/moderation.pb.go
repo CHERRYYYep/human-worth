@@ -92,6 +92,10 @@ type Review struct {
 	DeliveryState DeliveryState                   `protobuf:"varint,9,opt,name=delivery_state,json=deliveryState,proto3,enum=humanworth.moderation.v1.DeliveryState" json:"delivery_state,omitempty"`
 	Receipt       *v1.ApplyReviewDecisionResponse `protobuf:"bytes,10,opt,name=receipt,proto3" json:"receipt,omitempty"`
 	DecisionId    *string                         `protobuf:"bytes,11,opt,name=decision_id,json=decisionId,proto3,oneof" json:"decision_id,omitempty"`
+	// Exactly one snapshot is populated. Older clients must not decide entry
+	// cases without this field; deploy compatible Moderation before gateway.
+	EntrySnapshot *v1.EntryReviewSnapshot              `protobuf:"bytes,12,opt,name=entry_snapshot,json=entrySnapshot,proto3" json:"entry_snapshot,omitempty"`
+	EntryReceipt  *v1.ApplyEntryReviewDecisionResponse `protobuf:"bytes,13,opt,name=entry_receipt,json=entryReceipt,proto3" json:"entry_receipt,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,6 +205,20 @@ func (x *Review) GetDecisionId() string {
 		return *x.DecisionId
 	}
 	return ""
+}
+
+func (x *Review) GetEntrySnapshot() *v1.EntryReviewSnapshot {
+	if x != nil {
+		return x.EntrySnapshot
+	}
+	return nil
+}
+
+func (x *Review) GetEntryReceipt() *v1.ApplyEntryReviewDecisionResponse {
+	if x != nil {
+		return x.EntryReceipt
+	}
+	return nil
 }
 
 type CreateReviewCaseRequest struct {
@@ -619,11 +637,99 @@ func (x *DecideReviewResponse) GetReview() *Review {
 	return nil
 }
 
+type CreateEntryReviewCaseRequest struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Snapshot      *v1.EntryReviewSnapshot `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateEntryReviewCaseRequest) Reset() {
+	*x = CreateEntryReviewCaseRequest{}
+	mi := &file_humanworth_moderation_v1_moderation_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateEntryReviewCaseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateEntryReviewCaseRequest) ProtoMessage() {}
+
+func (x *CreateEntryReviewCaseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_moderation_v1_moderation_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateEntryReviewCaseRequest.ProtoReflect.Descriptor instead.
+func (*CreateEntryReviewCaseRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_moderation_v1_moderation_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreateEntryReviewCaseRequest) GetSnapshot() *v1.EntryReviewSnapshot {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
+type CreateEntryReviewCaseResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Review        *Review                `protobuf:"bytes,1,opt,name=review,proto3" json:"review,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateEntryReviewCaseResponse) Reset() {
+	*x = CreateEntryReviewCaseResponse{}
+	mi := &file_humanworth_moderation_v1_moderation_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateEntryReviewCaseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateEntryReviewCaseResponse) ProtoMessage() {}
+
+func (x *CreateEntryReviewCaseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_moderation_v1_moderation_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateEntryReviewCaseResponse.ProtoReflect.Descriptor instead.
+func (*CreateEntryReviewCaseResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_moderation_v1_moderation_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CreateEntryReviewCaseResponse) GetReview() *Review {
+	if x != nil {
+		return x.Review
+	}
+	return nil
+}
+
 var File_humanworth_moderation_v1_moderation_proto protoreflect.FileDescriptor
 
 const file_humanworth_moderation_v1_moderation_proto_rawDesc = "" +
 	"\n" +
-	")humanworth/moderation/v1/moderation.proto\x12\x18humanworth.moderation.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a#humanworth/content/v1/content.proto\"\xdd\x04\n" +
+	")humanworth/moderation/v1/moderation.proto\x12\x18humanworth.moderation.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a#humanworth/content/v1/content.proto\"\x8e\x06\n" +
 	"\x06Review\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12A\n" +
 	"\bsnapshot\x18\x02 \x01(\v2%.humanworth.content.v1.ReviewSnapshotR\bsnapshot\x12\x16\n" +
@@ -640,7 +746,9 @@ const file_humanworth_moderation_v1_moderation_proto_rawDesc = "" +
 	"\areceipt\x18\n" +
 	" \x01(\v22.humanworth.content.v1.ApplyReviewDecisionResponseR\areceipt\x12$\n" +
 	"\vdecision_id\x18\v \x01(\tH\x02R\n" +
-	"decisionId\x88\x01\x01B\t\n" +
+	"decisionId\x88\x01\x01\x12Q\n" +
+	"\x0eentry_snapshot\x18\f \x01(\v2*.humanworth.content.v1.EntryReviewSnapshotR\rentrySnapshot\x12\\\n" +
+	"\rentry_receipt\x18\r \x01(\v27.humanworth.content.v1.ApplyEntryReviewDecisionResponseR\fentryReceiptB\t\n" +
 	"\a_reasonB\x0e\n" +
 	"\f_reviewer_idB\x0e\n" +
 	"\f_decision_id\"\\\n" +
@@ -669,15 +777,20 @@ const file_humanworth_moderation_v1_moderation_proto_rawDesc = "" +
 	"\x06reason\x18\x04 \x01(\tH\x00R\x06reason\x88\x01\x01B\t\n" +
 	"\a_reason\"P\n" +
 	"\x14DecideReviewResponse\x128\n" +
+	"\x06review\x18\x01 \x01(\v2 .humanworth.moderation.v1.ReviewR\x06review\"f\n" +
+	"\x1cCreateEntryReviewCaseRequest\x12F\n" +
+	"\bsnapshot\x18\x01 \x01(\v2*.humanworth.content.v1.EntryReviewSnapshotR\bsnapshot\"Y\n" +
+	"\x1dCreateEntryReviewCaseResponse\x128\n" +
 	"\x06review\x18\x01 \x01(\v2 .humanworth.moderation.v1.ReviewR\x06review*\xa1\x01\n" +
 	"\rDeliveryState\x12\x1e\n" +
 	"\x1aDELIVERY_STATE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18DELIVERY_STATE_UNDECIDED\x10\x01\x12\x1a\n" +
 	"\x16DELIVERY_STATE_PENDING\x10\x02\x12\x1a\n" +
 	"\x16DELIVERY_STATE_APPLIED\x10\x03\x12\x1a\n" +
-	"\x16DELIVERY_STATE_BLOCKED\x10\x042\xcf\x03\n" +
+	"\x16DELIVERY_STATE_BLOCKED\x10\x042\xda\x04\n" +
 	"\x11ModerationService\x12y\n" +
-	"\x10CreateReviewCase\x121.humanworth.moderation.v1.CreateReviewCaseRequest\x1a2.humanworth.moderation.v1.CreateReviewCaseResponse\x12j\n" +
+	"\x10CreateReviewCase\x121.humanworth.moderation.v1.CreateReviewCaseRequest\x1a2.humanworth.moderation.v1.CreateReviewCaseResponse\x12\x88\x01\n" +
+	"\x15CreateEntryReviewCase\x126.humanworth.moderation.v1.CreateEntryReviewCaseRequest\x1a7.humanworth.moderation.v1.CreateEntryReviewCaseResponse\x12j\n" +
 	"\vListReviews\x12,.humanworth.moderation.v1.ListReviewsRequest\x1a-.humanworth.moderation.v1.ListReviewsResponse\x12d\n" +
 	"\tGetReview\x12*.humanworth.moderation.v1.GetReviewRequest\x1a+.humanworth.moderation.v1.GetReviewResponse\x12m\n" +
 	"\fDecideReview\x12-.humanworth.moderation.v1.DecideReviewRequest\x1a..humanworth.moderation.v1.DecideReviewResponseBSZQgithub.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1;moderationv1b\x06proto3"
@@ -695,49 +808,59 @@ func file_humanworth_moderation_v1_moderation_proto_rawDescGZIP() []byte {
 }
 
 var file_humanworth_moderation_v1_moderation_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_humanworth_moderation_v1_moderation_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_humanworth_moderation_v1_moderation_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_humanworth_moderation_v1_moderation_proto_goTypes = []any{
-	(DeliveryState)(0),                     // 0: humanworth.moderation.v1.DeliveryState
-	(*Review)(nil),                         // 1: humanworth.moderation.v1.Review
-	(*CreateReviewCaseRequest)(nil),        // 2: humanworth.moderation.v1.CreateReviewCaseRequest
-	(*CreateReviewCaseResponse)(nil),       // 3: humanworth.moderation.v1.CreateReviewCaseResponse
-	(*ListReviewsRequest)(nil),             // 4: humanworth.moderation.v1.ListReviewsRequest
-	(*ListReviewsResponse)(nil),            // 5: humanworth.moderation.v1.ListReviewsResponse
-	(*GetReviewRequest)(nil),               // 6: humanworth.moderation.v1.GetReviewRequest
-	(*GetReviewResponse)(nil),              // 7: humanworth.moderation.v1.GetReviewResponse
-	(*DecideReviewRequest)(nil),            // 8: humanworth.moderation.v1.DecideReviewRequest
-	(*DecideReviewResponse)(nil),           // 9: humanworth.moderation.v1.DecideReviewResponse
-	(*v1.ReviewSnapshot)(nil),              // 10: humanworth.content.v1.ReviewSnapshot
-	(*timestamppb.Timestamp)(nil),          // 11: google.protobuf.Timestamp
-	(v1.ReviewOutcome)(0),                  // 12: humanworth.content.v1.ReviewOutcome
-	(*v1.ApplyReviewDecisionResponse)(nil), // 13: humanworth.content.v1.ApplyReviewDecisionResponse
+	(DeliveryState)(0),                          // 0: humanworth.moderation.v1.DeliveryState
+	(*Review)(nil),                              // 1: humanworth.moderation.v1.Review
+	(*CreateReviewCaseRequest)(nil),             // 2: humanworth.moderation.v1.CreateReviewCaseRequest
+	(*CreateReviewCaseResponse)(nil),            // 3: humanworth.moderation.v1.CreateReviewCaseResponse
+	(*ListReviewsRequest)(nil),                  // 4: humanworth.moderation.v1.ListReviewsRequest
+	(*ListReviewsResponse)(nil),                 // 5: humanworth.moderation.v1.ListReviewsResponse
+	(*GetReviewRequest)(nil),                    // 6: humanworth.moderation.v1.GetReviewRequest
+	(*GetReviewResponse)(nil),                   // 7: humanworth.moderation.v1.GetReviewResponse
+	(*DecideReviewRequest)(nil),                 // 8: humanworth.moderation.v1.DecideReviewRequest
+	(*DecideReviewResponse)(nil),                // 9: humanworth.moderation.v1.DecideReviewResponse
+	(*CreateEntryReviewCaseRequest)(nil),        // 10: humanworth.moderation.v1.CreateEntryReviewCaseRequest
+	(*CreateEntryReviewCaseResponse)(nil),       // 11: humanworth.moderation.v1.CreateEntryReviewCaseResponse
+	(*v1.ReviewSnapshot)(nil),                   // 12: humanworth.content.v1.ReviewSnapshot
+	(*timestamppb.Timestamp)(nil),               // 13: google.protobuf.Timestamp
+	(v1.ReviewOutcome)(0),                       // 14: humanworth.content.v1.ReviewOutcome
+	(*v1.ApplyReviewDecisionResponse)(nil),      // 15: humanworth.content.v1.ApplyReviewDecisionResponse
+	(*v1.EntryReviewSnapshot)(nil),              // 16: humanworth.content.v1.EntryReviewSnapshot
+	(*v1.ApplyEntryReviewDecisionResponse)(nil), // 17: humanworth.content.v1.ApplyEntryReviewDecisionResponse
 }
 var file_humanworth_moderation_v1_moderation_proto_depIdxs = []int32{
-	10, // 0: humanworth.moderation.v1.Review.snapshot:type_name -> humanworth.content.v1.ReviewSnapshot
-	11, // 1: humanworth.moderation.v1.Review.created_at:type_name -> google.protobuf.Timestamp
-	11, // 2: humanworth.moderation.v1.Review.decided_at:type_name -> google.protobuf.Timestamp
-	12, // 3: humanworth.moderation.v1.Review.decision:type_name -> humanworth.content.v1.ReviewOutcome
+	12, // 0: humanworth.moderation.v1.Review.snapshot:type_name -> humanworth.content.v1.ReviewSnapshot
+	13, // 1: humanworth.moderation.v1.Review.created_at:type_name -> google.protobuf.Timestamp
+	13, // 2: humanworth.moderation.v1.Review.decided_at:type_name -> google.protobuf.Timestamp
+	14, // 3: humanworth.moderation.v1.Review.decision:type_name -> humanworth.content.v1.ReviewOutcome
 	0,  // 4: humanworth.moderation.v1.Review.delivery_state:type_name -> humanworth.moderation.v1.DeliveryState
-	13, // 5: humanworth.moderation.v1.Review.receipt:type_name -> humanworth.content.v1.ApplyReviewDecisionResponse
-	10, // 6: humanworth.moderation.v1.CreateReviewCaseRequest.snapshot:type_name -> humanworth.content.v1.ReviewSnapshot
-	1,  // 7: humanworth.moderation.v1.CreateReviewCaseResponse.review:type_name -> humanworth.moderation.v1.Review
-	1,  // 8: humanworth.moderation.v1.ListReviewsResponse.items:type_name -> humanworth.moderation.v1.Review
-	1,  // 9: humanworth.moderation.v1.GetReviewResponse.review:type_name -> humanworth.moderation.v1.Review
-	12, // 10: humanworth.moderation.v1.DecideReviewRequest.decision:type_name -> humanworth.content.v1.ReviewOutcome
-	1,  // 11: humanworth.moderation.v1.DecideReviewResponse.review:type_name -> humanworth.moderation.v1.Review
-	2,  // 12: humanworth.moderation.v1.ModerationService.CreateReviewCase:input_type -> humanworth.moderation.v1.CreateReviewCaseRequest
-	4,  // 13: humanworth.moderation.v1.ModerationService.ListReviews:input_type -> humanworth.moderation.v1.ListReviewsRequest
-	6,  // 14: humanworth.moderation.v1.ModerationService.GetReview:input_type -> humanworth.moderation.v1.GetReviewRequest
-	8,  // 15: humanworth.moderation.v1.ModerationService.DecideReview:input_type -> humanworth.moderation.v1.DecideReviewRequest
-	3,  // 16: humanworth.moderation.v1.ModerationService.CreateReviewCase:output_type -> humanworth.moderation.v1.CreateReviewCaseResponse
-	5,  // 17: humanworth.moderation.v1.ModerationService.ListReviews:output_type -> humanworth.moderation.v1.ListReviewsResponse
-	7,  // 18: humanworth.moderation.v1.ModerationService.GetReview:output_type -> humanworth.moderation.v1.GetReviewResponse
-	9,  // 19: humanworth.moderation.v1.ModerationService.DecideReview:output_type -> humanworth.moderation.v1.DecideReviewResponse
-	16, // [16:20] is the sub-list for method output_type
-	12, // [12:16] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	15, // 5: humanworth.moderation.v1.Review.receipt:type_name -> humanworth.content.v1.ApplyReviewDecisionResponse
+	16, // 6: humanworth.moderation.v1.Review.entry_snapshot:type_name -> humanworth.content.v1.EntryReviewSnapshot
+	17, // 7: humanworth.moderation.v1.Review.entry_receipt:type_name -> humanworth.content.v1.ApplyEntryReviewDecisionResponse
+	12, // 8: humanworth.moderation.v1.CreateReviewCaseRequest.snapshot:type_name -> humanworth.content.v1.ReviewSnapshot
+	1,  // 9: humanworth.moderation.v1.CreateReviewCaseResponse.review:type_name -> humanworth.moderation.v1.Review
+	1,  // 10: humanworth.moderation.v1.ListReviewsResponse.items:type_name -> humanworth.moderation.v1.Review
+	1,  // 11: humanworth.moderation.v1.GetReviewResponse.review:type_name -> humanworth.moderation.v1.Review
+	14, // 12: humanworth.moderation.v1.DecideReviewRequest.decision:type_name -> humanworth.content.v1.ReviewOutcome
+	1,  // 13: humanworth.moderation.v1.DecideReviewResponse.review:type_name -> humanworth.moderation.v1.Review
+	16, // 14: humanworth.moderation.v1.CreateEntryReviewCaseRequest.snapshot:type_name -> humanworth.content.v1.EntryReviewSnapshot
+	1,  // 15: humanworth.moderation.v1.CreateEntryReviewCaseResponse.review:type_name -> humanworth.moderation.v1.Review
+	2,  // 16: humanworth.moderation.v1.ModerationService.CreateReviewCase:input_type -> humanworth.moderation.v1.CreateReviewCaseRequest
+	10, // 17: humanworth.moderation.v1.ModerationService.CreateEntryReviewCase:input_type -> humanworth.moderation.v1.CreateEntryReviewCaseRequest
+	4,  // 18: humanworth.moderation.v1.ModerationService.ListReviews:input_type -> humanworth.moderation.v1.ListReviewsRequest
+	6,  // 19: humanworth.moderation.v1.ModerationService.GetReview:input_type -> humanworth.moderation.v1.GetReviewRequest
+	8,  // 20: humanworth.moderation.v1.ModerationService.DecideReview:input_type -> humanworth.moderation.v1.DecideReviewRequest
+	3,  // 21: humanworth.moderation.v1.ModerationService.CreateReviewCase:output_type -> humanworth.moderation.v1.CreateReviewCaseResponse
+	11, // 22: humanworth.moderation.v1.ModerationService.CreateEntryReviewCase:output_type -> humanworth.moderation.v1.CreateEntryReviewCaseResponse
+	5,  // 23: humanworth.moderation.v1.ModerationService.ListReviews:output_type -> humanworth.moderation.v1.ListReviewsResponse
+	7,  // 24: humanworth.moderation.v1.ModerationService.GetReview:output_type -> humanworth.moderation.v1.GetReviewResponse
+	9,  // 25: humanworth.moderation.v1.ModerationService.DecideReview:output_type -> humanworth.moderation.v1.DecideReviewResponse
+	21, // [21:26] is the sub-list for method output_type
+	16, // [16:21] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_humanworth_moderation_v1_moderation_proto_init() }
@@ -753,7 +876,7 @@ func file_humanworth_moderation_v1_moderation_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_humanworth_moderation_v1_moderation_proto_rawDesc), len(file_humanworth_moderation_v1_moderation_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

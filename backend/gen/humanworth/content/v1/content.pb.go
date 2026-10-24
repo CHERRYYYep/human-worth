@@ -3870,6 +3870,931 @@ func (x *CheckReviewAssetAccessResponse) GetAllowed() bool {
 	return false
 }
 
+// Separate from TaskSubmission: no field/type/meaning changes to the task protocol.
+type EntrySubmission struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TaskId   string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	AuthorId string                 `protobuf:"bytes,3,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
+	Revision int64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	// Server supplied; only additional is supported by this lifecycle.
+	Origin string `protobuf:"bytes,5,opt,name=origin,proto3" json:"origin,omitempty"`
+	// pending_review, approved, rejected or approval_revoked. No draft/public switch.
+	State           string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
+	Content         *EntryInput            `protobuf:"bytes,7,opt,name=content,proto3" json:"content,omitempty"`
+	ReviewId        string                 `protobuf:"bytes,8,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	RejectionReason *string                `protobuf:"bytes,9,opt,name=rejection_reason,json=rejectionReason,proto3,oneof" json:"rejection_reason,omitempty"`
+	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	ApprovedAt      *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=approved_at,json=approvedAt,proto3" json:"approved_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *EntrySubmission) Reset() {
+	*x = EntrySubmission{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntrySubmission) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntrySubmission) ProtoMessage() {}
+
+func (x *EntrySubmission) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntrySubmission.ProtoReflect.Descriptor instead.
+func (*EntrySubmission) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *EntrySubmission) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetAuthorId() string {
+	if x != nil {
+		return x.AuthorId
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *EntrySubmission) GetOrigin() string {
+	if x != nil {
+		return x.Origin
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetContent() *EntryInput {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *EntrySubmission) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetRejectionReason() string {
+	if x != nil && x.RejectionReason != nil {
+		return *x.RejectionReason
+	}
+	return ""
+}
+
+func (x *EntrySubmission) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *EntrySubmission) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *EntrySubmission) GetApprovedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ApprovedAt
+	}
+	return nil
+}
+
+type SubmitAdditionalEntryRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion      string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId              string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	IdempotencyKey      string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Content             *EntryInput            `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	AssetActorAssertion string                 `protobuf:"bytes,5,opt,name=asset_actor_assertion,json=assetActorAssertion,proto3" json:"asset_actor_assertion,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *SubmitAdditionalEntryRequest) Reset() {
+	*x = SubmitAdditionalEntryRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitAdditionalEntryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitAdditionalEntryRequest) ProtoMessage() {}
+
+func (x *SubmitAdditionalEntryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitAdditionalEntryRequest.ProtoReflect.Descriptor instead.
+func (*SubmitAdditionalEntryRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *SubmitAdditionalEntryRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *SubmitAdditionalEntryRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *SubmitAdditionalEntryRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SubmitAdditionalEntryRequest) GetContent() *EntryInput {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *SubmitAdditionalEntryRequest) GetAssetActorAssertion() string {
+	if x != nil {
+		return x.AssetActorAssertion
+	}
+	return ""
+}
+
+type SubmitAdditionalEntryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Submission    *EntrySubmission       `protobuf:"bytes,1,opt,name=submission,proto3" json:"submission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitAdditionalEntryResponse) Reset() {
+	*x = SubmitAdditionalEntryResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitAdditionalEntryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitAdditionalEntryResponse) ProtoMessage() {}
+
+func (x *SubmitAdditionalEntryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitAdditionalEntryResponse.ProtoReflect.Descriptor instead.
+func (*SubmitAdditionalEntryResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *SubmitAdditionalEntryResponse) GetSubmission() *EntrySubmission {
+	if x != nil {
+		return x.Submission
+	}
+	return nil
+}
+
+type GetMyEntrySubmissionRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	EntryId        string                 `protobuf:"bytes,2,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetMyEntrySubmissionRequest) Reset() {
+	*x = GetMyEntrySubmissionRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMyEntrySubmissionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMyEntrySubmissionRequest) ProtoMessage() {}
+
+func (x *GetMyEntrySubmissionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMyEntrySubmissionRequest.ProtoReflect.Descriptor instead.
+func (*GetMyEntrySubmissionRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *GetMyEntrySubmissionRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *GetMyEntrySubmissionRequest) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+type GetMyEntrySubmissionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Submission    *EntrySubmission       `protobuf:"bytes,1,opt,name=submission,proto3" json:"submission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMyEntrySubmissionResponse) Reset() {
+	*x = GetMyEntrySubmissionResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMyEntrySubmissionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMyEntrySubmissionResponse) ProtoMessage() {}
+
+func (x *GetMyEntrySubmissionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMyEntrySubmissionResponse.ProtoReflect.Descriptor instead.
+func (*GetMyEntrySubmissionResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *GetMyEntrySubmissionResponse) GetSubmission() *EntrySubmission {
+	if x != nil {
+		return x.Submission
+	}
+	return nil
+}
+
+type ResubmitRejectedEntryRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion      string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	EntryId             string                 `protobuf:"bytes,2,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	ExpectedRevision    int64                  `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	Content             *EntryInput            `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	AssetActorAssertion string                 `protobuf:"bytes,5,opt,name=asset_actor_assertion,json=assetActorAssertion,proto3" json:"asset_actor_assertion,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ResubmitRejectedEntryRequest) Reset() {
+	*x = ResubmitRejectedEntryRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResubmitRejectedEntryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResubmitRejectedEntryRequest) ProtoMessage() {}
+
+func (x *ResubmitRejectedEntryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResubmitRejectedEntryRequest.ProtoReflect.Descriptor instead.
+func (*ResubmitRejectedEntryRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *ResubmitRejectedEntryRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *ResubmitRejectedEntryRequest) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *ResubmitRejectedEntryRequest) GetExpectedRevision() int64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *ResubmitRejectedEntryRequest) GetContent() *EntryInput {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *ResubmitRejectedEntryRequest) GetAssetActorAssertion() string {
+	if x != nil {
+		return x.AssetActorAssertion
+	}
+	return ""
+}
+
+type ResubmitRejectedEntryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Submission    *EntrySubmission       `protobuf:"bytes,1,opt,name=submission,proto3" json:"submission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResubmitRejectedEntryResponse) Reset() {
+	*x = ResubmitRejectedEntryResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResubmitRejectedEntryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResubmitRejectedEntryResponse) ProtoMessage() {}
+
+func (x *ResubmitRejectedEntryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResubmitRejectedEntryResponse.ProtoReflect.Descriptor instead.
+func (*ResubmitRejectedEntryResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *ResubmitRejectedEntryResponse) GetSubmission() *EntrySubmission {
+	if x != nil {
+		return x.Submission
+	}
+	return nil
+}
+
+type ListMyEntrySubmissionsRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	// Empty means all supported states; explicit draft/cloud/initial are rejected.
+	State         string  `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	Limit         int32   `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string  `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Category      *string `protobuf:"bytes,5,opt,name=category,proto3,oneof" json:"category,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyEntrySubmissionsRequest) Reset() {
+	*x = ListMyEntrySubmissionsRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyEntrySubmissionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyEntrySubmissionsRequest) ProtoMessage() {}
+
+func (x *ListMyEntrySubmissionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyEntrySubmissionsRequest.ProtoReflect.Descriptor instead.
+func (*ListMyEntrySubmissionsRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *ListMyEntrySubmissionsRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *ListMyEntrySubmissionsRequest) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *ListMyEntrySubmissionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListMyEntrySubmissionsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ListMyEntrySubmissionsRequest) GetCategory() string {
+	if x != nil && x.Category != nil {
+		return *x.Category
+	}
+	return ""
+}
+
+type ListMyEntrySubmissionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*EntrySubmission     `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyEntrySubmissionsResponse) Reset() {
+	*x = ListMyEntrySubmissionsResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[68]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyEntrySubmissionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyEntrySubmissionsResponse) ProtoMessage() {}
+
+func (x *ListMyEntrySubmissionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[68]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyEntrySubmissionsResponse.ProtoReflect.Descriptor instead.
+func (*ListMyEntrySubmissionsResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{68}
+}
+
+func (x *ListMyEntrySubmissionsResponse) GetItems() []*EntrySubmission {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *ListMyEntrySubmissionsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type EntryReviewSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReviewId      string                 `protobuf:"bytes,1,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	Submission    *EntrySubmission       `protobuf:"bytes,2,opt,name=submission,proto3" json:"submission,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntryReviewSnapshot) Reset() {
+	*x = EntryReviewSnapshot{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntryReviewSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntryReviewSnapshot) ProtoMessage() {}
+
+func (x *EntryReviewSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntryReviewSnapshot.ProtoReflect.Descriptor instead.
+func (*EntryReviewSnapshot) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{69}
+}
+
+func (x *EntryReviewSnapshot) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *EntryReviewSnapshot) GetSubmission() *EntrySubmission {
+	if x != nil {
+		return x.Submission
+	}
+	return nil
+}
+
+func (x *EntryReviewSnapshot) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+type GetEntryReviewSnapshotRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReviewId      string                 `protobuf:"bytes,1,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetEntryReviewSnapshotRequest) Reset() {
+	*x = GetEntryReviewSnapshotRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetEntryReviewSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetEntryReviewSnapshotRequest) ProtoMessage() {}
+
+func (x *GetEntryReviewSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetEntryReviewSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*GetEntryReviewSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{70}
+}
+
+func (x *GetEntryReviewSnapshotRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+type GetEntryReviewSnapshotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Snapshot      *EntryReviewSnapshot   `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetEntryReviewSnapshotResponse) Reset() {
+	*x = GetEntryReviewSnapshotResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[71]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetEntryReviewSnapshotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetEntryReviewSnapshotResponse) ProtoMessage() {}
+
+func (x *GetEntryReviewSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[71]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetEntryReviewSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*GetEntryReviewSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{71}
+}
+
+func (x *GetEntryReviewSnapshotResponse) GetSnapshot() *EntryReviewSnapshot {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
+type ApplyEntryReviewDecisionRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	DecisionId         string                 `protobuf:"bytes,1,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
+	ReviewId           string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	TaskId             string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	EntryId            string                 `protobuf:"bytes,4,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	SubmissionRevision int64                  `protobuf:"varint,5,opt,name=submission_revision,json=submissionRevision,proto3" json:"submission_revision,omitempty"`
+	Outcome            ReviewOutcome          `protobuf:"varint,6,opt,name=outcome,proto3,enum=humanworth.content.v1.ReviewOutcome" json:"outcome,omitempty"`
+	Reason             *string                `protobuf:"bytes,7,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
+	// Lowercase hex SHA-256 of deterministic protobuf EntryReviewSnapshot bytes.
+	SnapshotSha256 string `protobuf:"bytes,8,opt,name=snapshot_sha256,json=snapshotSha256,proto3" json:"snapshot_sha256,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ApplyEntryReviewDecisionRequest) Reset() {
+	*x = ApplyEntryReviewDecisionRequest{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[72]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyEntryReviewDecisionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyEntryReviewDecisionRequest) ProtoMessage() {}
+
+func (x *ApplyEntryReviewDecisionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[72]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyEntryReviewDecisionRequest.ProtoReflect.Descriptor instead.
+func (*ApplyEntryReviewDecisionRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{72}
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetSubmissionRevision() int64 {
+	if x != nil {
+		return x.SubmissionRevision
+	}
+	return 0
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetOutcome() ReviewOutcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return ReviewOutcome_REVIEW_OUTCOME_UNSPECIFIED
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetReason() string {
+	if x != nil && x.Reason != nil {
+		return *x.Reason
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionRequest) GetSnapshotSha256() string {
+	if x != nil {
+		return x.SnapshotSha256
+	}
+	return ""
+}
+
+type ApplyEntryReviewDecisionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DecisionId    string                 `protobuf:"bytes,1,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
+	ReviewId      string                 `protobuf:"bytes,2,opt,name=review_id,json=reviewId,proto3" json:"review_id,omitempty"`
+	EntryId       string                 `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	Revision      int64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	State         string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyEntryReviewDecisionResponse) Reset() {
+	*x = ApplyEntryReviewDecisionResponse{}
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyEntryReviewDecisionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyEntryReviewDecisionResponse) ProtoMessage() {}
+
+func (x *ApplyEntryReviewDecisionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_content_v1_content_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyEntryReviewDecisionResponse.ProtoReflect.Descriptor instead.
+func (*ApplyEntryReviewDecisionResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_content_v1_content_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *ApplyEntryReviewDecisionResponse) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionResponse) GetReviewId() string {
+	if x != nil {
+		return x.ReviewId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionResponse) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *ApplyEntryReviewDecisionResponse) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ApplyEntryReviewDecisionResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
 var File_humanworth_content_v1_content_proto protoreflect.FileDescriptor
 
 const file_humanworth_content_v1_content_proto_rawDesc = "" +
@@ -4164,7 +5089,92 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\treview_id\x18\x02 \x01(\tR\breviewId\x12\x19\n" +
 	"\basset_id\x18\x03 \x01(\tR\aassetId\":\n" +
 	"\x1eCheckReviewAssetAccessResponse\x12\x18\n" +
-	"\aallowed\x18\x01 \x01(\bR\aallowed*\x7f\n" +
+	"\aallowed\x18\x01 \x01(\bR\aallowed\"\xf3\x03\n" +
+	"\x0fEntrySubmission\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1b\n" +
+	"\tauthor_id\x18\x03 \x01(\tR\bauthorId\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\x03R\brevision\x12\x16\n" +
+	"\x06origin\x18\x05 \x01(\tR\x06origin\x12\x14\n" +
+	"\x05state\x18\x06 \x01(\tR\x05state\x12;\n" +
+	"\acontent\x18\a \x01(\v2!.humanworth.content.v1.EntryInputR\acontent\x12\x1b\n" +
+	"\treview_id\x18\b \x01(\tR\breviewId\x12.\n" +
+	"\x10rejection_reason\x18\t \x01(\tH\x00R\x0frejectionReason\x88\x01\x01\x129\n" +
+	"\n" +
+	"created_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12;\n" +
+	"\vapproved_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"approvedAtB\x13\n" +
+	"\x11_rejection_reason\"\xfa\x01\n" +
+	"\x1cSubmitAdditionalEntryRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12'\n" +
+	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\x12;\n" +
+	"\acontent\x18\x04 \x01(\v2!.humanworth.content.v1.EntryInputR\acontent\x122\n" +
+	"\x15asset_actor_assertion\x18\x05 \x01(\tR\x13assetActorAssertion\"g\n" +
+	"\x1dSubmitAdditionalEntryResponse\x12F\n" +
+	"\n" +
+	"submission\x18\x01 \x01(\v2&.humanworth.content.v1.EntrySubmissionR\n" +
+	"submission\"a\n" +
+	"\x1bGetMyEntrySubmissionRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x19\n" +
+	"\bentry_id\x18\x02 \x01(\tR\aentryId\"f\n" +
+	"\x1cGetMyEntrySubmissionResponse\x12F\n" +
+	"\n" +
+	"submission\x18\x01 \x01(\v2&.humanworth.content.v1.EntrySubmissionR\n" +
+	"submission\"\x80\x02\n" +
+	"\x1cResubmitRejectedEntryRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x19\n" +
+	"\bentry_id\x18\x02 \x01(\tR\aentryId\x12+\n" +
+	"\x11expected_revision\x18\x03 \x01(\x03R\x10expectedRevision\x12;\n" +
+	"\acontent\x18\x04 \x01(\v2!.humanworth.content.v1.EntryInputR\acontent\x122\n" +
+	"\x15asset_actor_assertion\x18\x05 \x01(\tR\x13assetActorAssertion\"g\n" +
+	"\x1dResubmitRejectedEntryResponse\x12F\n" +
+	"\n" +
+	"submission\x18\x01 \x01(\v2&.humanworth.content.v1.EntrySubmissionR\n" +
+	"submission\"\xba\x01\n" +
+	"\x1dListMyEntrySubmissionsRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x14\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1f\n" +
+	"\bcategory\x18\x05 \x01(\tH\x00R\bcategory\x88\x01\x01B\v\n" +
+	"\t_category\"\x7f\n" +
+	"\x1eListMyEntrySubmissionsResponse\x12<\n" +
+	"\x05items\x18\x01 \x03(\v2&.humanworth.content.v1.EntrySubmissionR\x05items\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xb5\x01\n" +
+	"\x13EntryReviewSnapshot\x12\x1b\n" +
+	"\treview_id\x18\x01 \x01(\tR\breviewId\x12F\n" +
+	"\n" +
+	"submission\x18\x02 \x01(\v2&.humanworth.content.v1.EntrySubmissionR\n" +
+	"submission\x129\n" +
+	"\n" +
+	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"<\n" +
+	"\x1dGetEntryReviewSnapshotRequest\x12\x1b\n" +
+	"\treview_id\x18\x01 \x01(\tR\breviewId\"h\n" +
+	"\x1eGetEntryReviewSnapshotResponse\x12F\n" +
+	"\bsnapshot\x18\x01 \x01(\v2*.humanworth.content.v1.EntryReviewSnapshotR\bsnapshot\"\xd5\x02\n" +
+	"\x1fApplyEntryReviewDecisionRequest\x12\x1f\n" +
+	"\vdecision_id\x18\x01 \x01(\tR\n" +
+	"decisionId\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x19\n" +
+	"\bentry_id\x18\x04 \x01(\tR\aentryId\x12/\n" +
+	"\x13submission_revision\x18\x05 \x01(\x03R\x12submissionRevision\x12>\n" +
+	"\aoutcome\x18\x06 \x01(\x0e2$.humanworth.content.v1.ReviewOutcomeR\aoutcome\x12\x1b\n" +
+	"\x06reason\x18\a \x01(\tH\x00R\x06reason\x88\x01\x01\x12'\n" +
+	"\x0fsnapshot_sha256\x18\b \x01(\tR\x0esnapshotSha256B\t\n" +
+	"\a_reason\"\xad\x01\n" +
+	" ApplyEntryReviewDecisionResponse\x12\x1f\n" +
+	"\vdecision_id\x18\x01 \x01(\tR\n" +
+	"decisionId\x12\x1b\n" +
+	"\treview_id\x18\x02 \x01(\tR\breviewId\x12\x19\n" +
+	"\bentry_id\x18\x03 \x01(\tR\aentryId\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\x03R\brevision\x12\x14\n" +
+	"\x05state\x18\x05 \x01(\tR\x05state*\x7f\n" +
 	"\x11ReviewedTaskState\x12#\n" +
 	"\x1fREVIEWED_TASK_STATE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dREVIEWED_TASK_STATE_PUBLISHED\x10\x01\x12\"\n" +
@@ -4176,10 +5186,16 @@ const file_humanworth_content_v1_content_proto_rawDesc = "" +
 	"\rReviewOutcome\x12\x1e\n" +
 	"\x1aREVIEW_OUTCOME_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16REVIEW_OUTCOME_APPROVE\x10\x01\x12\x19\n" +
-	"\x15REVIEW_OUTCOME_REJECT\x10\x022\xe8\x13\n" +
+	"\x15REVIEW_OUTCOME_REJECT\x10\x022\x91\x1a\n" +
 	"\x0eContentService\x12X\n" +
 	"\aGetTask\x12%.humanworth.content.v1.GetTaskRequest\x1a&.humanworth.content.v1.GetTaskResponse\x12|\n" +
-	"\x13ListApprovedEntries\x121.humanworth.content.v1.ListApprovedEntriesRequest\x1a2.humanworth.content.v1.ListApprovedEntriesResponse\x12p\n" +
+	"\x13ListApprovedEntries\x121.humanworth.content.v1.ListApprovedEntriesRequest\x1a2.humanworth.content.v1.ListApprovedEntriesResponse\x12\x82\x01\n" +
+	"\x15SubmitAdditionalEntry\x123.humanworth.content.v1.SubmitAdditionalEntryRequest\x1a4.humanworth.content.v1.SubmitAdditionalEntryResponse\x12\x7f\n" +
+	"\x14GetMyEntrySubmission\x122.humanworth.content.v1.GetMyEntrySubmissionRequest\x1a3.humanworth.content.v1.GetMyEntrySubmissionResponse\x12\x82\x01\n" +
+	"\x15ResubmitRejectedEntry\x123.humanworth.content.v1.ResubmitRejectedEntryRequest\x1a4.humanworth.content.v1.ResubmitRejectedEntryResponse\x12\x85\x01\n" +
+	"\x16ListMyEntrySubmissions\x124.humanworth.content.v1.ListMyEntrySubmissionsRequest\x1a5.humanworth.content.v1.ListMyEntrySubmissionsResponse\x12\x85\x01\n" +
+	"\x16GetEntryReviewSnapshot\x124.humanworth.content.v1.GetEntryReviewSnapshotRequest\x1a5.humanworth.content.v1.GetEntryReviewSnapshotResponse\x12\x8b\x01\n" +
+	"\x18ApplyEntryReviewDecision\x126.humanworth.content.v1.ApplyEntryReviewDecisionRequest\x1a7.humanworth.content.v1.ApplyEntryReviewDecisionResponse\x12p\n" +
 	"\x0fCreateTaskDraft\x12-.humanworth.content.v1.CreateTaskDraftRequest\x1a..humanworth.content.v1.CreateTaskDraftResponse\x12|\n" +
 	"\x13GetMyTaskSubmission\x121.humanworth.content.v1.GetMyTaskSubmissionRequest\x1a2.humanworth.content.v1.GetMyTaskSubmissionResponse\x12v\n" +
 	"\x11ListMySubmissions\x12/.humanworth.content.v1.ListMySubmissionsRequest\x1a0.humanworth.content.v1.ListMySubmissionsResponse\x12s\n" +
@@ -4212,7 +5228,7 @@ func file_humanworth_content_v1_content_proto_rawDescGZIP() []byte {
 }
 
 var file_humanworth_content_v1_content_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_humanworth_content_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 60)
+var file_humanworth_content_v1_content_proto_msgTypes = make([]protoimpl.MessageInfo, 74)
 var file_humanworth_content_v1_content_proto_goTypes = []any{
 	(ReviewedTaskState)(0),                      // 0: humanworth.content.v1.ReviewedTaskState
 	(ReviewedEntryState)(0),                     // 1: humanworth.content.v1.ReviewedEntryState
@@ -4277,21 +5293,35 @@ var file_humanworth_content_v1_content_proto_goTypes = []any{
 	(*ApplyReviewDecisionResponse)(nil),         // 60: humanworth.content.v1.ApplyReviewDecisionResponse
 	(*CheckReviewAssetAccessRequest)(nil),       // 61: humanworth.content.v1.CheckReviewAssetAccessRequest
 	(*CheckReviewAssetAccessResponse)(nil),      // 62: humanworth.content.v1.CheckReviewAssetAccessResponse
-	(*timestamppb.Timestamp)(nil),               // 63: google.protobuf.Timestamp
-	(*v1.Asset)(nil),                            // 64: humanworth.asset.v1.Asset
-	(*structpb.Struct)(nil),                     // 65: google.protobuf.Struct
-	(*v1.PublicAssetReference)(nil),             // 66: humanworth.asset.v1.PublicAssetReference
+	(*EntrySubmission)(nil),                     // 63: humanworth.content.v1.EntrySubmission
+	(*SubmitAdditionalEntryRequest)(nil),        // 64: humanworth.content.v1.SubmitAdditionalEntryRequest
+	(*SubmitAdditionalEntryResponse)(nil),       // 65: humanworth.content.v1.SubmitAdditionalEntryResponse
+	(*GetMyEntrySubmissionRequest)(nil),         // 66: humanworth.content.v1.GetMyEntrySubmissionRequest
+	(*GetMyEntrySubmissionResponse)(nil),        // 67: humanworth.content.v1.GetMyEntrySubmissionResponse
+	(*ResubmitRejectedEntryRequest)(nil),        // 68: humanworth.content.v1.ResubmitRejectedEntryRequest
+	(*ResubmitRejectedEntryResponse)(nil),       // 69: humanworth.content.v1.ResubmitRejectedEntryResponse
+	(*ListMyEntrySubmissionsRequest)(nil),       // 70: humanworth.content.v1.ListMyEntrySubmissionsRequest
+	(*ListMyEntrySubmissionsResponse)(nil),      // 71: humanworth.content.v1.ListMyEntrySubmissionsResponse
+	(*EntryReviewSnapshot)(nil),                 // 72: humanworth.content.v1.EntryReviewSnapshot
+	(*GetEntryReviewSnapshotRequest)(nil),       // 73: humanworth.content.v1.GetEntryReviewSnapshotRequest
+	(*GetEntryReviewSnapshotResponse)(nil),      // 74: humanworth.content.v1.GetEntryReviewSnapshotResponse
+	(*ApplyEntryReviewDecisionRequest)(nil),     // 75: humanworth.content.v1.ApplyEntryReviewDecisionRequest
+	(*ApplyEntryReviewDecisionResponse)(nil),    // 76: humanworth.content.v1.ApplyEntryReviewDecisionResponse
+	(*timestamppb.Timestamp)(nil),               // 77: google.protobuf.Timestamp
+	(*v1.Asset)(nil),                            // 78: humanworth.asset.v1.Asset
+	(*structpb.Struct)(nil),                     // 79: google.protobuf.Struct
+	(*v1.PublicAssetReference)(nil),             // 80: humanworth.asset.v1.PublicAssetReference
 }
 var file_humanworth_content_v1_content_proto_depIdxs = []int32{
 	3,  // 0: humanworth.content.v1.PublicTask.author:type_name -> humanworth.content.v1.PublicAuthor
-	63, // 1: humanworth.content.v1.PublicTask.published_at:type_name -> google.protobuf.Timestamp
-	64, // 2: humanworth.content.v1.PublicTask.task_attachments:type_name -> humanworth.asset.v1.Asset
+	77, // 1: humanworth.content.v1.PublicTask.published_at:type_name -> google.protobuf.Timestamp
+	78, // 2: humanworth.content.v1.PublicTask.task_attachments:type_name -> humanworth.asset.v1.Asset
 	10, // 3: humanworth.content.v1.ApprovedEntry.artifacts:type_name -> humanworth.content.v1.ArtifactInput
 	3,  // 4: humanworth.content.v1.ApprovedEntry.author:type_name -> humanworth.content.v1.PublicAuthor
-	63, // 5: humanworth.content.v1.ApprovedEntry.approved_at:type_name -> google.protobuf.Timestamp
+	77, // 5: humanworth.content.v1.ApprovedEntry.approved_at:type_name -> google.protobuf.Timestamp
 	4,  // 6: humanworth.content.v1.GetTaskResponse.task:type_name -> humanworth.content.v1.PublicTask
 	5,  // 7: humanworth.content.v1.ListApprovedEntriesResponse.items:type_name -> humanworth.content.v1.ApprovedEntry
-	65, // 8: humanworth.content.v1.AgentConfigurationInput.parameters:type_name -> google.protobuf.Struct
+	79, // 8: humanworth.content.v1.AgentConfigurationInput.parameters:type_name -> google.protobuf.Struct
 	10, // 9: humanworth.content.v1.EntryInput.artifacts:type_name -> humanworth.content.v1.ArtifactInput
 	11, // 10: humanworth.content.v1.EntryInput.permissions:type_name -> humanworth.content.v1.PermissionsInput
 	12, // 11: humanworth.content.v1.EntryInput.agent_configuration:type_name -> humanworth.content.v1.AgentConfigurationInput
@@ -4303,18 +5333,18 @@ var file_humanworth_content_v1_content_proto_depIdxs = []int32{
 	15, // 17: humanworth.content.v1.ListMySubmissionsResponse.items:type_name -> humanworth.content.v1.TaskSubmission
 	14, // 18: humanworth.content.v1.ReplaceTaskDraftRequest.content:type_name -> humanworth.content.v1.TaskDraftInput
 	15, // 19: humanworth.content.v1.ReplaceTaskDraftResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
-	64, // 20: humanworth.content.v1.Artifact.file:type_name -> humanworth.asset.v1.Asset
+	78, // 20: humanworth.content.v1.Artifact.file:type_name -> humanworth.asset.v1.Asset
 	24, // 21: humanworth.content.v1.Work.artifacts:type_name -> humanworth.content.v1.Artifact
-	64, // 22: humanworth.content.v1.TaskAttachment.asset:type_name -> humanworth.asset.v1.Asset
+	78, // 22: humanworth.content.v1.TaskAttachment.asset:type_name -> humanworth.asset.v1.Asset
 	26, // 23: humanworth.content.v1.TaskDescription.attachments:type_name -> humanworth.content.v1.TaskAttachment
-	63, // 24: humanworth.content.v1.SnapshotRef.comment_cutoff:type_name -> google.protobuf.Timestamp
+	77, // 24: humanworth.content.v1.SnapshotRef.comment_cutoff:type_name -> google.protobuf.Timestamp
 	29, // 25: humanworth.content.v1.GetChallengeTaskDescriptionRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
 	27, // 26: humanworth.content.v1.GetChallengeTaskDescriptionResponse.task:type_name -> humanworth.content.v1.TaskDescription
 	29, // 27: humanworth.content.v1.ListChallengeWorksRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
 	25, // 28: humanworth.content.v1.ListChallengeWorksResponse.works:type_name -> humanworth.content.v1.Work
 	29, // 29: humanworth.content.v1.ListChallengeCommentsRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
 	28, // 30: humanworth.content.v1.ListChallengeCommentsResponse.comments:type_name -> humanworth.content.v1.Comment
-	63, // 31: humanworth.content.v1.ListChallengeCommentsResponse.cutoff_at:type_name -> google.protobuf.Timestamp
+	77, // 31: humanworth.content.v1.ListChallengeCommentsResponse.cutoff_at:type_name -> google.protobuf.Timestamp
 	29, // 32: humanworth.content.v1.CheckChallengeMaterialsRequest.snapshot:type_name -> humanworth.content.v1.SnapshotRef
 	36, // 33: humanworth.content.v1.CheckChallengeMaterialsRequest.materials:type_name -> humanworth.content.v1.MaterialRef
 	25, // 34: humanworth.content.v1.RegisterChallengeCandidateRequest.work:type_name -> humanworth.content.v1.Work
@@ -4325,58 +5355,84 @@ var file_humanworth_content_v1_content_proto_depIdxs = []int32{
 	48, // 39: humanworth.content.v1.ApplyAssetReviewRequest.entry_review:type_name -> humanworth.content.v1.EntryAssetReview
 	1,  // 40: humanworth.content.v1.ReviewedEntry.state:type_name -> humanworth.content.v1.ReviewedEntryState
 	50, // 41: humanworth.content.v1.ApplyAssetReviewResponse.entries:type_name -> humanworth.content.v1.ReviewedEntry
-	66, // 42: humanworth.content.v1.CheckAssetAccessRequest.reference:type_name -> humanworth.asset.v1.PublicAssetReference
+	80, // 42: humanworth.content.v1.CheckAssetAccessRequest.reference:type_name -> humanworth.asset.v1.PublicAssetReference
 	15, // 43: humanworth.content.v1.ReviewSnapshot.submission:type_name -> humanworth.content.v1.TaskSubmission
-	63, // 44: humanworth.content.v1.ReviewSnapshot.created_at:type_name -> google.protobuf.Timestamp
+	77, // 44: humanworth.content.v1.ReviewSnapshot.created_at:type_name -> google.protobuf.Timestamp
 	15, // 45: humanworth.content.v1.RequestTaskReviewResponse.submission:type_name -> humanworth.content.v1.TaskSubmission
 	54, // 46: humanworth.content.v1.GetReviewSnapshotResponse.snapshot:type_name -> humanworth.content.v1.ReviewSnapshot
 	2,  // 47: humanworth.content.v1.ApplyReviewDecisionRequest.outcome:type_name -> humanworth.content.v1.ReviewOutcome
 	50, // 48: humanworth.content.v1.ApplyReviewDecisionResponse.entries:type_name -> humanworth.content.v1.ReviewedEntry
-	6,  // 49: humanworth.content.v1.ContentService.GetTask:input_type -> humanworth.content.v1.GetTaskRequest
-	8,  // 50: humanworth.content.v1.ContentService.ListApprovedEntries:input_type -> humanworth.content.v1.ListApprovedEntriesRequest
-	16, // 51: humanworth.content.v1.ContentService.CreateTaskDraft:input_type -> humanworth.content.v1.CreateTaskDraftRequest
-	18, // 52: humanworth.content.v1.ContentService.GetMyTaskSubmission:input_type -> humanworth.content.v1.GetMyTaskSubmissionRequest
-	20, // 53: humanworth.content.v1.ContentService.ListMySubmissions:input_type -> humanworth.content.v1.ListMySubmissionsRequest
-	22, // 54: humanworth.content.v1.ContentService.ReplaceTaskDraft:input_type -> humanworth.content.v1.ReplaceTaskDraftRequest
-	55, // 55: humanworth.content.v1.ContentService.RequestTaskReview:input_type -> humanworth.content.v1.RequestTaskReviewRequest
-	57, // 56: humanworth.content.v1.ContentService.GetReviewSnapshot:input_type -> humanworth.content.v1.GetReviewSnapshotRequest
-	59, // 57: humanworth.content.v1.ContentService.ApplyReviewDecision:input_type -> humanworth.content.v1.ApplyReviewDecisionRequest
-	61, // 58: humanworth.content.v1.ContentService.CheckReviewAssetAccess:input_type -> humanworth.content.v1.CheckReviewAssetAccessRequest
-	52, // 59: humanworth.content.v1.ContentService.CheckAssetAccess:input_type -> humanworth.content.v1.CheckAssetAccessRequest
-	49, // 60: humanworth.content.v1.ContentService.ApplyAssetReview:input_type -> humanworth.content.v1.ApplyAssetReviewRequest
-	30, // 61: humanworth.content.v1.ContentService.GetChallengeTaskDescription:input_type -> humanworth.content.v1.GetChallengeTaskDescriptionRequest
-	32, // 62: humanworth.content.v1.ContentService.ListChallengeWorks:input_type -> humanworth.content.v1.ListChallengeWorksRequest
-	34, // 63: humanworth.content.v1.ContentService.ListChallengeComments:input_type -> humanworth.content.v1.ListChallengeCommentsRequest
-	37, // 64: humanworth.content.v1.ContentService.CheckChallengeMaterials:input_type -> humanworth.content.v1.CheckChallengeMaterialsRequest
-	39, // 65: humanworth.content.v1.ContentService.OpenRunRegistration:input_type -> humanworth.content.v1.OpenRunRegistrationRequest
-	41, // 66: humanworth.content.v1.ContentService.CloseRunRegistration:input_type -> humanworth.content.v1.CloseRunRegistrationRequest
-	44, // 67: humanworth.content.v1.ContentService.RegisterChallengeCandidate:input_type -> humanworth.content.v1.RegisterChallengeCandidateRequest
-	46, // 68: humanworth.content.v1.ContentService.GetChallengeRegistration:input_type -> humanworth.content.v1.GetChallengeRegistrationRequest
-	7,  // 69: humanworth.content.v1.ContentService.GetTask:output_type -> humanworth.content.v1.GetTaskResponse
-	9,  // 70: humanworth.content.v1.ContentService.ListApprovedEntries:output_type -> humanworth.content.v1.ListApprovedEntriesResponse
-	17, // 71: humanworth.content.v1.ContentService.CreateTaskDraft:output_type -> humanworth.content.v1.CreateTaskDraftResponse
-	19, // 72: humanworth.content.v1.ContentService.GetMyTaskSubmission:output_type -> humanworth.content.v1.GetMyTaskSubmissionResponse
-	21, // 73: humanworth.content.v1.ContentService.ListMySubmissions:output_type -> humanworth.content.v1.ListMySubmissionsResponse
-	23, // 74: humanworth.content.v1.ContentService.ReplaceTaskDraft:output_type -> humanworth.content.v1.ReplaceTaskDraftResponse
-	56, // 75: humanworth.content.v1.ContentService.RequestTaskReview:output_type -> humanworth.content.v1.RequestTaskReviewResponse
-	58, // 76: humanworth.content.v1.ContentService.GetReviewSnapshot:output_type -> humanworth.content.v1.GetReviewSnapshotResponse
-	60, // 77: humanworth.content.v1.ContentService.ApplyReviewDecision:output_type -> humanworth.content.v1.ApplyReviewDecisionResponse
-	62, // 78: humanworth.content.v1.ContentService.CheckReviewAssetAccess:output_type -> humanworth.content.v1.CheckReviewAssetAccessResponse
-	53, // 79: humanworth.content.v1.ContentService.CheckAssetAccess:output_type -> humanworth.content.v1.CheckAssetAccessResponse
-	51, // 80: humanworth.content.v1.ContentService.ApplyAssetReview:output_type -> humanworth.content.v1.ApplyAssetReviewResponse
-	31, // 81: humanworth.content.v1.ContentService.GetChallengeTaskDescription:output_type -> humanworth.content.v1.GetChallengeTaskDescriptionResponse
-	33, // 82: humanworth.content.v1.ContentService.ListChallengeWorks:output_type -> humanworth.content.v1.ListChallengeWorksResponse
-	35, // 83: humanworth.content.v1.ContentService.ListChallengeComments:output_type -> humanworth.content.v1.ListChallengeCommentsResponse
-	38, // 84: humanworth.content.v1.ContentService.CheckChallengeMaterials:output_type -> humanworth.content.v1.CheckChallengeMaterialsResponse
-	40, // 85: humanworth.content.v1.ContentService.OpenRunRegistration:output_type -> humanworth.content.v1.OpenRunRegistrationResponse
-	42, // 86: humanworth.content.v1.ContentService.CloseRunRegistration:output_type -> humanworth.content.v1.CloseRunRegistrationResponse
-	45, // 87: humanworth.content.v1.ContentService.RegisterChallengeCandidate:output_type -> humanworth.content.v1.RegisterChallengeCandidateResponse
-	47, // 88: humanworth.content.v1.ContentService.GetChallengeRegistration:output_type -> humanworth.content.v1.GetChallengeRegistrationResponse
-	69, // [69:89] is the sub-list for method output_type
-	49, // [49:69] is the sub-list for method input_type
-	49, // [49:49] is the sub-list for extension type_name
-	49, // [49:49] is the sub-list for extension extendee
-	0,  // [0:49] is the sub-list for field type_name
+	13, // 49: humanworth.content.v1.EntrySubmission.content:type_name -> humanworth.content.v1.EntryInput
+	77, // 50: humanworth.content.v1.EntrySubmission.created_at:type_name -> google.protobuf.Timestamp
+	77, // 51: humanworth.content.v1.EntrySubmission.updated_at:type_name -> google.protobuf.Timestamp
+	77, // 52: humanworth.content.v1.EntrySubmission.approved_at:type_name -> google.protobuf.Timestamp
+	13, // 53: humanworth.content.v1.SubmitAdditionalEntryRequest.content:type_name -> humanworth.content.v1.EntryInput
+	63, // 54: humanworth.content.v1.SubmitAdditionalEntryResponse.submission:type_name -> humanworth.content.v1.EntrySubmission
+	63, // 55: humanworth.content.v1.GetMyEntrySubmissionResponse.submission:type_name -> humanworth.content.v1.EntrySubmission
+	13, // 56: humanworth.content.v1.ResubmitRejectedEntryRequest.content:type_name -> humanworth.content.v1.EntryInput
+	63, // 57: humanworth.content.v1.ResubmitRejectedEntryResponse.submission:type_name -> humanworth.content.v1.EntrySubmission
+	63, // 58: humanworth.content.v1.ListMyEntrySubmissionsResponse.items:type_name -> humanworth.content.v1.EntrySubmission
+	63, // 59: humanworth.content.v1.EntryReviewSnapshot.submission:type_name -> humanworth.content.v1.EntrySubmission
+	77, // 60: humanworth.content.v1.EntryReviewSnapshot.created_at:type_name -> google.protobuf.Timestamp
+	72, // 61: humanworth.content.v1.GetEntryReviewSnapshotResponse.snapshot:type_name -> humanworth.content.v1.EntryReviewSnapshot
+	2,  // 62: humanworth.content.v1.ApplyEntryReviewDecisionRequest.outcome:type_name -> humanworth.content.v1.ReviewOutcome
+	6,  // 63: humanworth.content.v1.ContentService.GetTask:input_type -> humanworth.content.v1.GetTaskRequest
+	8,  // 64: humanworth.content.v1.ContentService.ListApprovedEntries:input_type -> humanworth.content.v1.ListApprovedEntriesRequest
+	64, // 65: humanworth.content.v1.ContentService.SubmitAdditionalEntry:input_type -> humanworth.content.v1.SubmitAdditionalEntryRequest
+	66, // 66: humanworth.content.v1.ContentService.GetMyEntrySubmission:input_type -> humanworth.content.v1.GetMyEntrySubmissionRequest
+	68, // 67: humanworth.content.v1.ContentService.ResubmitRejectedEntry:input_type -> humanworth.content.v1.ResubmitRejectedEntryRequest
+	70, // 68: humanworth.content.v1.ContentService.ListMyEntrySubmissions:input_type -> humanworth.content.v1.ListMyEntrySubmissionsRequest
+	73, // 69: humanworth.content.v1.ContentService.GetEntryReviewSnapshot:input_type -> humanworth.content.v1.GetEntryReviewSnapshotRequest
+	75, // 70: humanworth.content.v1.ContentService.ApplyEntryReviewDecision:input_type -> humanworth.content.v1.ApplyEntryReviewDecisionRequest
+	16, // 71: humanworth.content.v1.ContentService.CreateTaskDraft:input_type -> humanworth.content.v1.CreateTaskDraftRequest
+	18, // 72: humanworth.content.v1.ContentService.GetMyTaskSubmission:input_type -> humanworth.content.v1.GetMyTaskSubmissionRequest
+	20, // 73: humanworth.content.v1.ContentService.ListMySubmissions:input_type -> humanworth.content.v1.ListMySubmissionsRequest
+	22, // 74: humanworth.content.v1.ContentService.ReplaceTaskDraft:input_type -> humanworth.content.v1.ReplaceTaskDraftRequest
+	55, // 75: humanworth.content.v1.ContentService.RequestTaskReview:input_type -> humanworth.content.v1.RequestTaskReviewRequest
+	57, // 76: humanworth.content.v1.ContentService.GetReviewSnapshot:input_type -> humanworth.content.v1.GetReviewSnapshotRequest
+	59, // 77: humanworth.content.v1.ContentService.ApplyReviewDecision:input_type -> humanworth.content.v1.ApplyReviewDecisionRequest
+	61, // 78: humanworth.content.v1.ContentService.CheckReviewAssetAccess:input_type -> humanworth.content.v1.CheckReviewAssetAccessRequest
+	52, // 79: humanworth.content.v1.ContentService.CheckAssetAccess:input_type -> humanworth.content.v1.CheckAssetAccessRequest
+	49, // 80: humanworth.content.v1.ContentService.ApplyAssetReview:input_type -> humanworth.content.v1.ApplyAssetReviewRequest
+	30, // 81: humanworth.content.v1.ContentService.GetChallengeTaskDescription:input_type -> humanworth.content.v1.GetChallengeTaskDescriptionRequest
+	32, // 82: humanworth.content.v1.ContentService.ListChallengeWorks:input_type -> humanworth.content.v1.ListChallengeWorksRequest
+	34, // 83: humanworth.content.v1.ContentService.ListChallengeComments:input_type -> humanworth.content.v1.ListChallengeCommentsRequest
+	37, // 84: humanworth.content.v1.ContentService.CheckChallengeMaterials:input_type -> humanworth.content.v1.CheckChallengeMaterialsRequest
+	39, // 85: humanworth.content.v1.ContentService.OpenRunRegistration:input_type -> humanworth.content.v1.OpenRunRegistrationRequest
+	41, // 86: humanworth.content.v1.ContentService.CloseRunRegistration:input_type -> humanworth.content.v1.CloseRunRegistrationRequest
+	44, // 87: humanworth.content.v1.ContentService.RegisterChallengeCandidate:input_type -> humanworth.content.v1.RegisterChallengeCandidateRequest
+	46, // 88: humanworth.content.v1.ContentService.GetChallengeRegistration:input_type -> humanworth.content.v1.GetChallengeRegistrationRequest
+	7,  // 89: humanworth.content.v1.ContentService.GetTask:output_type -> humanworth.content.v1.GetTaskResponse
+	9,  // 90: humanworth.content.v1.ContentService.ListApprovedEntries:output_type -> humanworth.content.v1.ListApprovedEntriesResponse
+	65, // 91: humanworth.content.v1.ContentService.SubmitAdditionalEntry:output_type -> humanworth.content.v1.SubmitAdditionalEntryResponse
+	67, // 92: humanworth.content.v1.ContentService.GetMyEntrySubmission:output_type -> humanworth.content.v1.GetMyEntrySubmissionResponse
+	69, // 93: humanworth.content.v1.ContentService.ResubmitRejectedEntry:output_type -> humanworth.content.v1.ResubmitRejectedEntryResponse
+	71, // 94: humanworth.content.v1.ContentService.ListMyEntrySubmissions:output_type -> humanworth.content.v1.ListMyEntrySubmissionsResponse
+	74, // 95: humanworth.content.v1.ContentService.GetEntryReviewSnapshot:output_type -> humanworth.content.v1.GetEntryReviewSnapshotResponse
+	76, // 96: humanworth.content.v1.ContentService.ApplyEntryReviewDecision:output_type -> humanworth.content.v1.ApplyEntryReviewDecisionResponse
+	17, // 97: humanworth.content.v1.ContentService.CreateTaskDraft:output_type -> humanworth.content.v1.CreateTaskDraftResponse
+	19, // 98: humanworth.content.v1.ContentService.GetMyTaskSubmission:output_type -> humanworth.content.v1.GetMyTaskSubmissionResponse
+	21, // 99: humanworth.content.v1.ContentService.ListMySubmissions:output_type -> humanworth.content.v1.ListMySubmissionsResponse
+	23, // 100: humanworth.content.v1.ContentService.ReplaceTaskDraft:output_type -> humanworth.content.v1.ReplaceTaskDraftResponse
+	56, // 101: humanworth.content.v1.ContentService.RequestTaskReview:output_type -> humanworth.content.v1.RequestTaskReviewResponse
+	58, // 102: humanworth.content.v1.ContentService.GetReviewSnapshot:output_type -> humanworth.content.v1.GetReviewSnapshotResponse
+	60, // 103: humanworth.content.v1.ContentService.ApplyReviewDecision:output_type -> humanworth.content.v1.ApplyReviewDecisionResponse
+	62, // 104: humanworth.content.v1.ContentService.CheckReviewAssetAccess:output_type -> humanworth.content.v1.CheckReviewAssetAccessResponse
+	53, // 105: humanworth.content.v1.ContentService.CheckAssetAccess:output_type -> humanworth.content.v1.CheckAssetAccessResponse
+	51, // 106: humanworth.content.v1.ContentService.ApplyAssetReview:output_type -> humanworth.content.v1.ApplyAssetReviewResponse
+	31, // 107: humanworth.content.v1.ContentService.GetChallengeTaskDescription:output_type -> humanworth.content.v1.GetChallengeTaskDescriptionResponse
+	33, // 108: humanworth.content.v1.ContentService.ListChallengeWorks:output_type -> humanworth.content.v1.ListChallengeWorksResponse
+	35, // 109: humanworth.content.v1.ContentService.ListChallengeComments:output_type -> humanworth.content.v1.ListChallengeCommentsResponse
+	38, // 110: humanworth.content.v1.ContentService.CheckChallengeMaterials:output_type -> humanworth.content.v1.CheckChallengeMaterialsResponse
+	40, // 111: humanworth.content.v1.ContentService.OpenRunRegistration:output_type -> humanworth.content.v1.OpenRunRegistrationResponse
+	42, // 112: humanworth.content.v1.ContentService.CloseRunRegistration:output_type -> humanworth.content.v1.CloseRunRegistrationResponse
+	45, // 113: humanworth.content.v1.ContentService.RegisterChallengeCandidate:output_type -> humanworth.content.v1.RegisterChallengeCandidateResponse
+	47, // 114: humanworth.content.v1.ContentService.GetChallengeRegistration:output_type -> humanworth.content.v1.GetChallengeRegistrationResponse
+	89, // [89:115] is the sub-list for method output_type
+	63, // [63:89] is the sub-list for method input_type
+	63, // [63:63] is the sub-list for extension type_name
+	63, // [63:63] is the sub-list for extension extendee
+	0,  // [0:63] is the sub-list for field type_name
 }
 
 func init() { file_humanworth_content_v1_content_proto_init() }
@@ -4403,13 +5459,16 @@ func file_humanworth_content_v1_content_proto_init() {
 		(*ApplyAssetReviewRequest_EntryReview)(nil),
 	}
 	file_humanworth_content_v1_content_proto_msgTypes[56].OneofWrappers = []any{}
+	file_humanworth_content_v1_content_proto_msgTypes[60].OneofWrappers = []any{}
+	file_humanworth_content_v1_content_proto_msgTypes[67].OneofWrappers = []any{}
+	file_humanworth_content_v1_content_proto_msgTypes[72].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_humanworth_content_v1_content_proto_rawDesc), len(file_humanworth_content_v1_content_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   60,
+			NumMessages:   74,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

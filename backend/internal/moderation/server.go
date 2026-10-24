@@ -54,7 +54,7 @@ func peer(ctx context.Context, expected string) error {
 }
 func Authorization(ctx context.Context, r any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
 	expected := "gateway"
-	if info.FullMethod == pb.ModerationService_CreateReviewCase_FullMethodName {
+	if info.FullMethod == pb.ModerationService_CreateReviewCase_FullMethodName || info.FullMethod == pb.ModerationService_CreateEntryReviewCase_FullMethodName {
 		expected = "content"
 	}
 	if err := peer(ctx, expected); err != nil {
@@ -87,25 +87,41 @@ func (s *Server) admin(ctx context.Context, assertion, method string) (string, e
 	return p.AccountId, nil
 }
 
-const reviewSelect = `SELECT id,snapshot,status,reason,reviewer_id,created_at,decided_at,decision,delivery_state,receipt,decision_id FROM moderation.reviews`
+const reviewSelect = `SELECT id,snapshot,status,reason,reviewer_id,created_at,decided_at,decision,delivery_state,receipt,decision_id,object_kind,snapshot_hash FROM moderation.reviews`
 
 type scanner interface{ Scan(...any) error }
 
-func readReview(row scanner) (*pb.Review, error) {
-	r := &pb.Review{Snapshot: &contentpb.ReviewSnapshot{}}
+type storedReview struct {
+	*pb.Review
+	snapshotHash []byte
+}
+
+func readReview(row scanner) (*storedReview, error) {
+	r := &storedReview{Review: &pb.Review{}}
 	var raw, receipt []byte
 	var created time.Time
 	var decided *time.Time
 	var decision *string
-	var delivery string
-	err := row.Scan(&r.Id, &raw, &r.Status, &r.Reason, &r.ReviewerId, &created, &decided, &decision, &delivery, &receipt, &r.DecisionId)
+	var delivery, kind string
+	err := row.Scan(&r.Id, &raw, &r.Status, &r.Reason, &r.ReviewerId, &created, &decided, &decision, &delivery, &receipt, &r.DecisionId, &kind, &r.snapshotHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.NotFound, "review_not_found")
 	}
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	if protojson.Unmarshal(raw, r.Snapshot) != nil {
+	var snapshot proto.Message
+	switch kind {
+	case "task":
+		r.Snapshot = &contentpb.ReviewSnapshot{}
+		snapshot = r.Snapshot
+	case "entry":
+		r.EntrySnapshot = &contentpb.EntryReviewSnapshot{}
+		snapshot = r.EntrySnapshot
+	default:
+		return nil, status.Error(codes.Internal, "invalid_review_snapshot")
+	}
+	if protojson.Unmarshal(raw, snapshot) != nil {
 		return nil, status.Error(codes.Internal, "invalid_review_snapshot")
 	}
 	r.CreatedAt = timestamppb.New(created)
@@ -120,8 +136,15 @@ func readReview(row scanner) (*pb.Review, error) {
 	}
 	r.DeliveryState = map[string]pb.DeliveryState{"undecided": pb.DeliveryState_DELIVERY_STATE_UNDECIDED, "pending": pb.DeliveryState_DELIVERY_STATE_PENDING, "applied": pb.DeliveryState_DELIVERY_STATE_APPLIED, "blocked": pb.DeliveryState_DELIVERY_STATE_BLOCKED}[delivery]
 	if len(receipt) > 0 {
-		r.Receipt = &contentpb.ApplyReviewDecisionResponse{}
-		if protojson.Unmarshal(receipt, r.Receipt) != nil {
+		var response proto.Message
+		if kind == "task" {
+			r.Receipt = &contentpb.ApplyReviewDecisionResponse{}
+			response = r.Receipt
+		} else {
+			r.EntryReceipt = &contentpb.ApplyEntryReviewDecisionResponse{}
+			response = r.EntryReceipt
+		}
+		if protojson.Unmarshal(receipt, response) != nil {
 			return nil, status.Error(codes.Internal, "invalid_review_receipt")
 		}
 	}
@@ -156,6 +179,14 @@ func (s *Server) CreateReviewCase(ctx context.Context, r *pb.CreateReviewCaseReq
 	if err := validateSnapshot(snap); err != nil {
 		return nil, err
 	}
+	review, err := s.createCase(ctx, "task", snap.ReviewId, snap.Submission.Id, snap.Submission.Id, snap.Submission.Revision, snap.CreatedAt, snap)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.CreateReviewCaseResponse{Review: review}, nil
+}
+
+func (s *Server) createCase(ctx context.Context, kind, id, task, object string, revision int64, created *timestamppb.Timestamp, snap proto.Message) (*pb.Review, error) {
 	wire, err := (proto.MarshalOptions{Deterministic: true}).Marshal(snap)
 	if err != nil {
 		return nil, invalid("invalid_review_snapshot")
@@ -170,26 +201,26 @@ func (s *Server) CreateReviewCase(ctx context.Context, r *pb.CreateReviewCaseReq
 		return nil, unavailable(err)
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO moderation.reviews(id,task_id,submission_revision,snapshot,snapshot_hash,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, snap.ReviewId, snap.Submission.Id, snap.Submission.Revision, raw, hash[:], snap.CreatedAt.AsTime())
+	_, err = tx.Exec(ctx, `INSERT INTO moderation.reviews(id,task_id,submission_revision,snapshot,snapshot_hash,created_at,object_kind) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, id, task, revision, raw, hash[:], created.AsTime(), kind)
 	if err != nil {
 		return nil, unavailable(err)
 	}
 	var old []byte
-	err = tx.QueryRow(ctx, `SELECT snapshot_hash FROM moderation.reviews WHERE id=$1 AND task_id=$2 AND submission_revision=$3`, snap.ReviewId, snap.Submission.Id, snap.Submission.Revision).Scan(&old)
+	err = tx.QueryRow(ctx, `SELECT snapshot_hash FROM moderation.reviews WHERE id=$1 AND object_kind=$2 AND object_id=$3 AND task_id=$4 AND submission_revision=$5`, id, kind, object, task, revision).Scan(&old)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !bytes.Equal(old, hash[:]) {
 		return nil, status.Error(codes.AlreadyExists, "idempotency_key_conflict")
 	}
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	review, err := readReview(tx.QueryRow(ctx, reviewSelect+` WHERE id=$1`, snap.ReviewId))
+	review, err := readReview(tx.QueryRow(ctx, reviewSelect+` WHERE id=$1`, id))
 	if err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, unavailable(err)
 	}
-	return &pb.CreateReviewCaseResponse{Review: review}, nil
+	return review.Review, nil
 }
 func (s *Server) GetReview(ctx context.Context, r *pb.GetReviewRequest) (*pb.GetReviewResponse, error) {
 	if _, err := s.admin(ctx, r.GetActorAssertion(), pb.ModerationService_GetReview_FullMethodName); err != nil {
@@ -199,7 +230,7 @@ func (s *Server) GetReview(ctx context.Context, r *pb.GetReviewRequest) (*pb.Get
 	if err != nil {
 		return nil, err
 	}
-	return &pb.GetReviewResponse{Review: review}, nil
+	return &pb.GetReviewResponse{Review: review.Review}, nil
 }
 func decisionInput(outcome contentpb.ReviewOutcome, reason *string) (string, *string, error) {
 	if outcome == contentpb.ReviewOutcome_REVIEW_OUTCOME_APPROVE {
@@ -245,7 +276,7 @@ func (s *Server) DecideReview(ctx context.Context, r *pb.DecideReviewRequest) (*
 		if old.Decision != r.Decision || old.GetReason() != r.GetReason() {
 			return nil, status.Error(codes.Aborted, "review_already_decided")
 		}
-		return &pb.DecideReviewResponse{Review: old}, nil
+		return &pb.DecideReviewResponse{Review: old.Review}, nil
 	}
 	id, err := randomID("dec")
 	if err != nil {
@@ -265,7 +296,7 @@ func (s *Server) DecideReview(ctx context.Context, r *pb.DecideReviewRequest) (*
 	if err = tx.Commit(ctx); err != nil {
 		return nil, unavailable(err)
 	}
-	return &pb.DecideReviewResponse{Review: result}, nil
+	return &pb.DecideReviewResponse{Review: result.Review}, nil
 }
 
 type cursor struct {
@@ -349,8 +380,8 @@ func (s *Server) ListReviews(ctx context.Context, r *pb.ListReviewsRequest) (*pb
 		if err != nil {
 			return nil, err
 		}
-		next := encodeCursor(admin, state, review)
-		entrySize := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(review))
+		next := encodeCursor(admin, state, review.Review)
+		entrySize := protowire.SizeTag(1) + protowire.SizeBytes(proto.Size(review.Review))
 		cursorSize := protowire.SizeTag(2) + protowire.SizeBytes(len(next))
 		if size+entrySize+cursorSize > 2<<20 {
 			if len(out.Items) == 0 {
@@ -359,7 +390,7 @@ func (s *Server) ListReviews(ctx context.Context, r *pb.ListReviewsRequest) (*pb
 			return out, nil
 		}
 		size += entrySize
-		out.Items = append(out.Items, review)
+		out.Items = append(out.Items, review.Review)
 		out.NextCursor = next
 	}
 	if err = rows.Err(); err != nil {
@@ -398,10 +429,9 @@ func (s *Server) deliverDecision(ctx context.Context) (platform.OutboxResult, er
 		result.Cause = err
 		return result, err
 	}
-	request := &contentpb.ApplyReviewDecisionRequest{DecisionId: r.GetDecisionId(), ReviewId: r.Id, TaskId: r.Snapshot.Submission.Id, SubmissionRevision: r.Snapshot.Submission.Revision, Outcome: r.Decision, Reason: r.Reason}
 	result.Stage = "call_content"
 	call, cancel := context.WithTimeout(ctx, 5*time.Second)
-	receipt, err := s.Content.ApplyReviewDecision(call, request)
+	receipt, err := s.applyDecision(call, r)
 	cancel()
 	blocked := false
 	if err != nil {
@@ -410,15 +440,12 @@ func (s *Server) deliverDecision(ctx context.Context) (platform.OutboxResult, er
 			blocked = true
 			result.Reason = status.Convert(err).Message()
 		default:
+			if status.Convert(err).Message() == "invalid_review_receipt" {
+				result.Stage = "validate_receipt"
+			}
 			result.Cause = err
 			return result, err
 		}
-	}
-	if !blocked && (receipt.GetDecisionId() != request.DecisionId || receipt.GetReviewId() != r.Id || receipt.GetRevision() != request.SubmissionRevision || ((r.Decision == contentpb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && receipt.GetState() != "published") || (r.Decision == contentpb.ReviewOutcome_REVIEW_OUTCOME_REJECT && receipt.GetState() != "rejected"))) {
-		err = status.Error(codes.Unavailable, "invalid_review_receipt")
-		result.Cause = err
-		result.Stage = "validate_receipt"
-		return result, err
 	}
 	result.Stage = "confirm_lease"
 	tx, e := s.DB.Begin(ctx)

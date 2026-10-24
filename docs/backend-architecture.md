@@ -210,3 +210,7 @@ Content 新增受信 `ApplyAssetReview` 审核决定应用端及 `CheckAssetAcce
 ### 阶段4审核闭环增量（2026-10-16，Agent Self-Claimed）
 
 [Moderation设计与验收](backend-moderation.md)正式划分送审快照/投稿状态（Content）、案件/管理员决定/投递和回执（Moderation）、文件及可用性（Asset）。新流程用两端PostgreSQL outbox＋租约worker＋mTLS gRPC，事务内不等待外部RPC；待审冻结，不留可编辑工作副本，驳回后新revision重提保留旧历史。管理员待审文件采用专用断言和Content确切快照授权，不增Asset审核状态。旧ApplyAssetReview仅保留历史回执/收紧和既有旧快照兼容，不能绕过新送审批准。本轮不建设举报审计平台，也不声明公开任务/作品浏览已完成；实际验证见专门文档。
+
+### 第六阶段独立追加作品（2026-10-23，未发布）
+
+**Human Design**：网站用户向任何公开任务单方追加，单件审核通过即展示，不重审原任务，不影响投票资格。**Agent Self-Claimed**：Content独立保存追加投稿/不可变版本快照、双方服务复用既有outbox runner/租约/回执。新增EntrySubmission与单件RPC，旧TaskSubmission字段类型不变；Moderation仍负责案件/决定，Asset仍只负责文件。公开投影及文件授权由Content本地冻结数据和当前状态统一判断，无逐作品跨服务查询、无事务内RPC、无新服务/消息组件。数据/版本/锁序/升级/失败与验收见 [Content第12节](backend-content.md#12-第六阶段独立追加作品2026-10-23本地开发中未发布)。本地实现与验收不代表生产发布，也不提供Voting完整候选接口。

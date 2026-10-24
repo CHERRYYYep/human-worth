@@ -115,7 +115,7 @@ def main():
                         time.sleep(2)
                     print('PASS: completion marker appears only after all modules pass',flush=True)
                     env={**os.environ,'HUMAN_WORTH_VERIFY_NAMESPACE':namespace,'HUMAN_WORTH_VERIFY_STATE':str(state),'HUMAN_WORTH_VERIFY_KUBECONFIG':str(infra.KUBECONFIG),'HUMAN_WORTH_VERIFY_PORT':str(port),'HUMAN_WORTH_VERIFY_GATEWAY_ADDRESS':node_ip+':'+node_port}
-                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset|Moderation)Deployment$','-count=1','-timeout=720s','-v'],cwd=source/'backend',env=env,check=True)
+                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset|Moderation|AdditionalEntry)Deployment$','-count=1','-timeout=720s','-v'],cwd=source/'backend',env=env,check=True)
                     import check_network
                     with patch.object(check_network,'kube',kube):check_network.main()
                     previous=release.snapshot()

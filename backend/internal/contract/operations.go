@@ -21,6 +21,13 @@ const (
 	ReadOwnSubmission        OperationID = "read_own_submission"
 	ListOwnSubmissions       OperationID = "list_own_submissions"
 	ReplaceDraft             OperationID = "replace_draft"
+	SubmitAdditionalEntry    OperationID = "submit_additional_entry"
+	ReadOwnEntrySubmission   OperationID = "read_own_entry_submission"
+	ResubmitRejectedEntry    OperationID = "resubmit_rejected_entry"
+	ListOwnEntrySubmissions  OperationID = "list_own_entry_submissions"
+	GetEntryReviewSnapshot   OperationID = "get_entry_review_snapshot"
+	ApplyEntryReviewDecision OperationID = "apply_entry_review_decision"
+	CreateEntryReviewCase    OperationID = "create_entry_review_case"
 	CurrentSession           OperationID = "current_session"
 	Logout                   OperationID = "logout"
 	CreateMCPToken           OperationID = "create_mcp_token"
@@ -103,6 +110,13 @@ var operations = [...]Operation{
 	{ID: ReadOwnSubmission, FullMethod: "/humanworth.content.v1.ContentService/GetMyTaskSubmission", Policy: IdentityPolicy{Audience: "content"}, HasPolicy: true},
 	{ID: ListOwnSubmissions, FullMethod: "/humanworth.content.v1.ContentService/ListMySubmissions", Policy: IdentityPolicy{Audience: "content"}, HasPolicy: true, RPCTimeout: 5 * time.Second},
 	{ID: ReplaceDraft, FullMethod: "/humanworth.content.v1.ContentService/ReplaceTaskDraft", Policy: IdentityPolicy{Audience: "content", Write: true}, HasPolicy: true},
+	{ID: SubmitAdditionalEntry, FullMethod: "/humanworth.content.v1.ContentService/SubmitAdditionalEntry", Policy: IdentityPolicy{Audience: "content", Write: true}, HasPolicy: true, RPCTimeout: 5 * time.Second},
+	{ID: ReadOwnEntrySubmission, FullMethod: "/humanworth.content.v1.ContentService/GetMyEntrySubmission", Policy: IdentityPolicy{Audience: "content"}, HasPolicy: true},
+	{ID: ResubmitRejectedEntry, FullMethod: "/humanworth.content.v1.ContentService/ResubmitRejectedEntry", Policy: IdentityPolicy{Audience: "content", Write: true}, HasPolicy: true, RPCTimeout: 5 * time.Second},
+	{ID: ListOwnEntrySubmissions, FullMethod: "/humanworth.content.v1.ContentService/ListMyEntrySubmissions", Policy: IdentityPolicy{Audience: "content"}, HasPolicy: true, RPCTimeout: 5 * time.Second},
+	{ID: GetEntryReviewSnapshot, FullMethod: "/humanworth.content.v1.ContentService/GetEntryReviewSnapshot"},
+	{ID: ApplyEntryReviewDecision, FullMethod: "/humanworth.content.v1.ContentService/ApplyEntryReviewDecision", RPCTimeout: 5 * time.Second},
+	{ID: CreateEntryReviewCase, FullMethod: "/humanworth.moderation.v1.ModerationService/CreateEntryReviewCase", RPCTimeout: 5 * time.Second},
 	{ID: CurrentSession, FullMethod: "/humanworth.identity.v1.IdentityService/GetCurrentSession", Policy: IdentityPolicy{Audience: "identity"}, HasPolicy: true},
 	{ID: Logout, FullMethod: "/humanworth.identity.v1.IdentityService/LogoutCurrentSession", Policy: IdentityPolicy{Audience: "identity", Write: true}, HasPolicy: true},
 	{ID: CreateMCPToken, FullMethod: "/humanworth.identity.v1.IdentityService/CreateMcpToken", Policy: IdentityPolicy{Audience: "identity", Write: true}, HasPolicy: true},
@@ -139,6 +153,9 @@ var operations = [...]Operation{
 var httpRoutes = [...]HTTPRoute{
 	{Name: "getTask", Method: "GET", Path: "/api/tasks/{taskId}", Target: ReadTask},
 	{Name: "listApprovedEntries", Method: "GET", Path: "/api/tasks/{taskId}/entries", Target: ListApprovedEntries, Timeout: 5 * time.Second},
+	{Name: "submitAdditionalEntry", Method: "POST", Path: "/api/tasks/{taskId}/entries", Target: SubmitAdditionalEntry, Timeout: 5 * time.Second},
+	{Name: "getMyEntrySubmission", Method: "GET", Path: "/api/me/entries/{entryId}", Target: ReadOwnEntrySubmission},
+	{Name: "resubmitRejectedEntry", Method: "PUT", Path: "/api/me/entries/{entryId}", Target: ResubmitRejectedEntry, Timeout: 5 * time.Second},
 	{Name: "requestTaskReview", Method: "POST", Path: "/api/me/tasks/{taskId}/review-requests", Target: RequestTaskReview, Timeout: 5 * time.Second},
 	{Name: "listReviews", Method: "GET", Path: "/api/admin/reviews", Target: ListReviews, Timeout: 5 * time.Second},
 	{Name: "getReview", Method: "GET", Path: "/api/admin/reviews/{reviewId}", Target: GetReview},

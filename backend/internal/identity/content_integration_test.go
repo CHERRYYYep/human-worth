@@ -123,7 +123,7 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 	var migrationCount, indexCount int
 	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM content.schema_migrations`).Scan(&migrationCount))
 	must(t, ownerDB.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='content' AND indexname='task_drafts_author_created_id'`).Scan(&indexCount))
-	if migrationCount != 5 || indexCount != 1 {
+	if migrationCount != 6 || indexCount != 1 {
 		t.Fatalf("Content list migration missing: migrations=%d indexes=%d", migrationCount, indexCount)
 	}
 	for _, row := range legacyRows {
@@ -310,7 +310,7 @@ func TestContentDraftHTTPGRPCPersistence(t *testing.T) {
 		t.Fatalf("non-empty initial list: %+v", emptyPage)
 	}
 	for _, path := range []string{
-		"/api/me/submissions?kind=entry",
+		"/api/me/submissions?kind=cloud",
 		"/api/me/submissions?kind=",
 		"/api/me/submissions?state=unsupported",
 		"/api/me/submissions?state=",

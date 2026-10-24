@@ -227,3 +227,16 @@ DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate
 
 
 本次重新验收（2026-10-22）：普通及race各220测试/子测试、公开专项三轮24、真实专用PG/S3全量race集成411，均退出0且无失败/跳过；完整kind validator退出0（678.82秒，4项真实业务测试及网络/恢复/重复部署通过），隔离namespace已清理。独立Proto重生成一致，breaking对比本次dev `665bf4d`，根目录CI为5个Node/28个Python通过。必要本地验收PASS，可提交独立审查；原第五阶段/Issue/第四阶段分支不变，未commit/push/PR/公网发布。完整命令、证据与后续追加作品边界见上述恢复整合记录，不使用历史测试数量替代本次结果。
+
+## 第六阶段：向公开任务独立追加作品（本地验收完成，未发布）
+
+**Human Design**：任何网站用户可向公开任务单方追加，只审核追加作品，驳回可按版本重提；不改变原任务/初始包或投票资格。**Agent Self-Claimed**：基线 `dc8e5758926b685e8bc4152190ddf82fce7abbbd`（PR #31，已包含第五阶段），任务分支 `backend/feat-additional-entry-review`；独立投稿/快照/单件决定回执、兼容RPC及迁移方案见 [Content第12节](../docs/backend-content.md#12-第六阶段独立追加作品2026-10-23本地实现与验收未发布)。
+
+新增 `POST /api/tasks/{taskId}/entries`（单件EntryInput＋Idempotency-Key）、`GET/PUT /api/me/entries/{entryId}`（PUT expectedRevision＋content）、`GET /api/me/submissions?kind=entry`。POST 201只表示本地接受，Moderation停机仍保留pending/outbox；不是远端案件确认。仅本人网站会话、写操作CSRF，MCP不能写。默认kind=task及其draft筛选保持；kind=entry默认全部追加作品审核状态，初始/cloud不通过此入口返回。
+
+先执行Content006和Moderation003 owner迁移与各自grants，再全部滚动Content/Moderation，最后开放新Gateway入口。旧实例不能解释单件案件，不能仅凭Proto兼容就在混合版本中开放。公开列表保留初始顺序并按实际作者合并追加冻结作品；旧v1游标仍可继续，追加位置使用v2；每页重查当前展示资格和2MiB字节预算。Asset协议/存储/持锁上传不重构，不新增审核状态。
+
+验收要求：专用PG/S3＋真实HTTPS/mTLS身份链路，再隔离kind namespace的真实Moderation/双Content与正常Service链路。实际命令/退出码和未覆盖范围见Content记录；本地通过不等于远端CI、公网发布、生产HA或Voting完成。无自动commit/push/PR权限。
+
+
+2026-10-23本轮最终验收：普通/race各322测试/子测试PASS；配齐专用PG/S3的全量race integration命令556项PASS（包含322常规＋234标签新增项，组件fake与真实链路边界见Content记录），无测试失败/跳过。完整kind validator退出0（730.31秒），5项真实业务、网络隔离、正常Service/NodePort故障、失败rollout/迁移重试及重复部署通过，临时namespace、独立PG/S3和凭据已清理。Buf正式生成/独立比较及相对开发基线breaking、各vet/build、根CI（5Node/28Python）均0。修复了并发重提版本查询窗口的幂等误冲突，保留修复前证据。可提交独立审查，当前50个文件未暂存/未提交；未push/PR/合并/公网发布，生产容量/HA及Voting不在本轮验收内。

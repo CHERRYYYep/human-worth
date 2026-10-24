@@ -14,6 +14,18 @@ service ContentService {
   rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
   // Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
   rpc ListApprovedEntries(ListApprovedEntriesRequest) returns (ListApprovedEntriesResponse);
+  // Web-only additional work; durable local acceptance, not remote case acknowledgement.
+  // Create idempotency: owner + task + key; normalized content SHA-256. 5s.
+  rpc SubmitAdditionalEntry(SubmitAdditionalEntryRequest) returns (SubmitAdditionalEntryResponse);
+  rpc GetMyEntrySubmission(GetMyEntrySubmissionRequest) returns (GetMyEntrySubmissionResponse);
+  // Rejected only; expected_revision identifies the immutable retry result. 5s.
+  rpc ResubmitRejectedEntry(ResubmitRejectedEntryRequest) returns (ResubmitRejectedEntryResponse);
+  // Web-only; default all additional-entry states, never initial/cloud. 5s.
+  rpc ListMyEntrySubmissions(ListMyEntrySubmissionsRequest) returns (ListMyEntrySubmissionsResponse);
+  // Moderation mTLS only. No user assertion or Asset callback.
+  rpc GetEntryReviewSnapshot(GetEntryReviewSnapshotRequest) returns (GetEntryReviewSnapshotResponse);
+  // Exact decision + snapshot digest; persistent receipt; safe identical retry, 5s.
+  rpc ApplyEntryReviewDecision(ApplyEntryReviewDecisionRequest) returns (ApplyEntryReviewDecisionResponse);
   rpc CreateTaskDraft(CreateTaskDraftRequest) returns (CreateTaskDraftResponse);
   rpc GetMyTaskSubmission(GetMyTaskSubmissionRequest) returns (GetMyTaskSubmissionResponse);
   rpc ListMySubmissions(ListMySubmissionsRequest) returns (ListMySubmissionsResponse);
@@ -374,3 +386,79 @@ message CheckReviewAssetAccessRequest {
   string asset_id = 3;
 }
 message CheckReviewAssetAccessResponse { bool allowed = 1; }
+
+// Separate from TaskSubmission: no field/type/meaning changes to the task protocol.
+message EntrySubmission {
+  string id = 1;
+  string task_id = 2;
+  string author_id = 3;
+  int64 revision = 4;
+  // Server supplied; only additional is supported by this lifecycle.
+  string origin = 5;
+  // pending_review, approved, rejected or approval_revoked. No draft/public switch.
+  string state = 6;
+  EntryInput content = 7;
+  string review_id = 8;
+  optional string rejection_reason = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  google.protobuf.Timestamp approved_at = 12;
+}
+message SubmitAdditionalEntryRequest {
+  string actor_assertion = 1;
+  string task_id = 2;
+  string idempotency_key = 3;
+  EntryInput content = 4;
+  string asset_actor_assertion = 5;
+}
+message SubmitAdditionalEntryResponse { EntrySubmission submission = 1; }
+message GetMyEntrySubmissionRequest {
+  string actor_assertion = 1;
+  string entry_id = 2;
+}
+message GetMyEntrySubmissionResponse { EntrySubmission submission = 1; }
+message ResubmitRejectedEntryRequest {
+  string actor_assertion = 1;
+  string entry_id = 2;
+  int64 expected_revision = 3;
+  EntryInput content = 4;
+  string asset_actor_assertion = 5;
+}
+message ResubmitRejectedEntryResponse { EntrySubmission submission = 1; }
+message ListMyEntrySubmissionsRequest {
+  string actor_assertion = 1;
+  // Empty means all supported states; explicit draft/cloud/initial are rejected.
+  string state = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  optional string category = 5;
+}
+message ListMyEntrySubmissionsResponse {
+  repeated EntrySubmission items = 1;
+  string next_cursor = 2;
+}
+message EntryReviewSnapshot {
+  string review_id = 1;
+  EntrySubmission submission = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+message GetEntryReviewSnapshotRequest { string review_id = 1; }
+message GetEntryReviewSnapshotResponse { EntryReviewSnapshot snapshot = 1; }
+message ApplyEntryReviewDecisionRequest {
+  string decision_id = 1;
+  string review_id = 2;
+  string task_id = 3;
+  string entry_id = 4;
+  int64 submission_revision = 5;
+  ReviewOutcome outcome = 6;
+  optional string reason = 7;
+  // Lowercase hex SHA-256 of deterministic protobuf EntryReviewSnapshot bytes.
+  string snapshot_sha256 = 8;
+}
+message ApplyEntryReviewDecisionResponse {
+  string decision_id = 1;
+  string review_id = 2;
+  string entry_id = 3;
+  int64 revision = 4;
+  string state = 5;
+}
