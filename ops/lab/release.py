@@ -56,7 +56,17 @@ def publish_status(sha, services):
     kube('apply','--server-side','--field-manager=human-worth-release','-f','-',input=json.dumps(marker))
 
 
+def require_catalog_rollback(deployments):
+    by_name={p['metadata']['name']:p for p in deployments if p.get('kind','Deployment')=='Deployment'}
+    # Existing Voting also fences installations upgraded before the durable
+    # marker was introduced. Unknown capability always fails closed.
+    if app.catalog_enabled(STATE) or 'voting' in by_name:
+        if 'voting' not in by_name or not app.catalog_capable(by_name.get('content',{})):
+            raise RuntimeError('Catalog-v1 rollback refused; current Content/Voting retained; forward recovery required')
+
+
 def restore(deployments,previous_build):
+    require_catalog_rollback(deployments)
     # Restore former pod templates and Secret references; do not undo SQL migrations.
     for deployment in deployments:
         field='data' if deployment.get('kind')=='ConfigMap' else 'spec'
@@ -85,6 +95,8 @@ def reconcile(check_only=False):
     checks=[check for spec in services.values() for check in spec['checks']]
     if check_only:
         print('Eligible immutable application release: '+sha+' ('+', '.join(services)+')');return
+    if 'voting' not in services and app.catalog_enabled(STATE):
+        raise RuntimeError('Catalog-v1 enabled; refusing activation without Voting')
     state_path=BASE/'state.json'
     state=json.loads(state_path.read_text()) if state_path.exists() else {}
     if state.get('failed_sha')==sha and time.time()<state.get('retry_after',0):return
@@ -103,6 +115,7 @@ def reconcile(check_only=False):
     previous=current
     previous_build=(STATE/'build.json').read_text() if (STATE/'build.json').exists() else None
     app.REPO=release
+    if 'voting' in services:app.enable_catalog(STATE)
     try:
         app.main(revision=sha,before_activation=lambda:require_approved(sha))
         if not wait_health(sha,checks=checks):raise RuntimeError('Activated module health or revision mismatch')
@@ -110,9 +123,15 @@ def reconcile(check_only=False):
         publish_status(sha,services)
         if not wait_health(sha,timeout=180,checks=checks,services=services):raise RuntimeError('Deployment completion marker did not reach the gateway')
     except Exception:
+        state.update(failed_sha=sha,retry_after=time.time()+180)
+        state_path.write_text(json.dumps(state,indent=2)+'\n')
+        # Check BEFORE scaling new modules, deleting markers or restoring any
+        # old policy/template. A refused rollback retains the new writers/gates.
+        require_catalog_rollback(previous)
         # A first activation of a new module must not leave its failed workload running.
         current_names={p['metadata']['name'] for p in snapshot() if p['kind']=='Deployment'}
         for name in current_names-deployments.keys():
+            if name=='voting' and app.catalog_enabled(STATE):continue
             kube('-n','human-worth','scale','deployment/'+name,'--replicas=0',capture=True)
         if not any(p['kind']=='ConfigMap' for p in previous):
             kube('-n','human-worth','delete','configmap','release-status','--ignore-not-found',capture=True)
@@ -121,8 +140,6 @@ def reconcile(check_only=False):
             if 'gateway' in deployments:
                 old_revision=deployments['gateway']['spec']['template']['spec']['containers'][0]['image'].rsplit(':',1)[1]
                 if not wait_health(old_revision):raise RuntimeError('Release failed and previous revision is not healthy') from None
-        state.update(failed_sha=sha,retry_after=time.time()+180)
-        state_path.write_text(json.dumps(state,indent=2)+'\n')
         raise RuntimeError('Application release failed; former application templates restored, database migrations retained') from None
     state.update(deployed_sha=sha,services=list(services),failed_sha=None,retry_after=0,deployed_at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()))
     tmp=state_path.with_suffix('.tmp');tmp.write_text(json.dumps(state,indent=2)+'\n');tmp.replace(state_path)

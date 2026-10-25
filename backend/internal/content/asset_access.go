@@ -41,7 +41,7 @@ func (s *Server) CheckAssetAccess(ctx context.Context, r *pb.CheckAssetAccessReq
 		return result, nil
 	}
 	err := s.DB.QueryRow(ctx, `SELECT t.revision,
- t.state='published' AND e.state='approved' AND
+ t.state='published' AND `+catalogPublic+` AND e.state='approved' AND
  (`+publicEntryContent+`->'artifacts') @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$3::text))
  FROM content.reviewed_tasks t JOIN content.reviewed_entries e ON e.task_id=t.task_id
  WHERE t.task_id=$1 AND e.id=$2`, ref.TaskId, ref.EntryId, ref.AssetId).Scan(&result.Revision, &result.Allowed)
@@ -57,8 +57,8 @@ func (s *Server) CheckAssetAccess(ctx context.Context, r *pb.CheckAssetAccessReq
 // Applies an already-made trusted review decision, not a review workflow. No
 // user-supplied asset IDs enter this method: all references come from the exact
 // draft revision whose ownership was validated when it was written.
-func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewRequest) (*pb.ApplyAssetReviewResponse, error) {
-	if err := requireContentCaller(ctx, "moderation"); err != nil {
+func (s *Server) localApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewRequest) (*pb.ApplyAssetReviewResponse, error) {
+	if err := decisionCaller(ctx); err != nil {
 		return nil, err
 	}
 	if !keyPattern.MatchString(r.GetDecisionId()) || !taskPattern.MatchString(r.GetTaskId()) || r.GetSubmissionRevision() < 1 || r.GetExpectedRevision() < 0 {
@@ -96,7 +96,7 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 		return nil, invalid("invalid_review_decision")
 	}
 	hash := sha256.Sum256(wire)
-	tx, err := s.DB.Begin(ctx)
+	tx, err := s.beginCatalogTx(ctx)
 	if err != nil {
 		return nil, storage(err)
 	}
@@ -142,12 +142,16 @@ func (s *Server) ApplyAssetReview(ctx context.Context, r *pb.ApplyAssetReviewReq
 		}
 	}
 	var revision, sourceRevision int64
-	err = tx.QueryRow(ctx, `SELECT revision,source_revision FROM content.reviewed_tasks WHERE task_id=$1 FOR UPDATE`, r.TaskId).Scan(&revision, &sourceRevision)
+	var currentState string
+	err = tx.QueryRow(ctx, `SELECT revision,source_revision,state FROM content.reviewed_tasks WHERE task_id=$1 FOR UPDATE`, r.TaskId).Scan(&revision, &sourceRevision, &currentState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.FailedPrecondition, "formal_review_required")
 	} else {
 		if err != nil {
 			return nil, storage(err)
+		}
+		if s.Voting != nil && currentState == "taken_down" && taskState == "published" {
+			return nil, status.Error(codes.FailedPrecondition, "task_permanently_taken_down")
 		}
 		if revision != r.ExpectedRevision || sourceRevision != r.SubmissionRevision {
 			return nil, status.Error(codes.Aborted, "revision_conflict")

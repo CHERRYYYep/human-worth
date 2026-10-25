@@ -14,7 +14,8 @@
   "content": {
     "dependencies": [
       "identity",
-      "asset"
+      "asset",
+      "voting"
     ],
     "database": true,
     "grants": "ops/content/grants.sql",
@@ -51,7 +52,8 @@
       "identity",
       "content",
       "asset",
-      "moderation"
+      "moderation",
+      "voting"
     ],
     "database": false,
     "checks": []
@@ -85,6 +87,20 @@
     "checks": [
       {
         "path": "/api/admin/reviews",
+        "status": 401,
+        "code": "unauthenticated"
+      }
+    ]
+  },
+  "voting": {
+    "dependencies": [
+      "identity"
+    ],
+    "database": true,
+    "grants": "ops/voting/grants.sql",
+    "checks": [
+      {
+        "path": "/api/tasks/tsk_00000000000000000000000000000000/voting-eligibility",
         "status": 401,
         "code": "unauthenticated"
       }

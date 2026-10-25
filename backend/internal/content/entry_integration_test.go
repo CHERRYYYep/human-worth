@@ -258,7 +258,7 @@ func TestEntryIntegrationUpgrade005(t *testing.T) {
 	}
 	entryBool(t, l.owner, `SELECT count(*)=2 AND bool_and(next_entry_position=32 AND catalog_revision=1) FROM content.reviewed_tasks`)
 	entryBool(t, l.owner, `SELECT count(*)=2 AND bool_and(origin='initial' AND author_id IS NULL AND content IS NULL) FROM content.reviewed_entries`)
-	entryBool(t, l.owner, `SELECT count(*)=6 FROM content.schema_migrations`)
+	entryBool(t, l.owner, `SELECT count(*)=7 FROM content.schema_migrations`)
 	for _, name := range []string{"005_public_browse.sql", "006_additional_entries.sql"} {
 		entryExec(t, l.owner, `UPDATE content.schema_migrations SET checksum='tampered' WHERE version=$1`, name)
 		if err := Migrate(t.Context(), l.owner); err == nil || err.Error() != "applied migration changed" {

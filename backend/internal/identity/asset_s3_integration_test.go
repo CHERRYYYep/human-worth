@@ -24,6 +24,7 @@ import (
 	"github.com/KDZZZZZZ/human-worth/backend/internal/content"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/voting"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -215,6 +216,9 @@ func serviceTestGRPC(t *testing.T, lab *identityLab, name, caller string, author
 	streamAuthorize := asset.AuthorizationStream
 	if name == "content" {
 		streamAuthorize = content.AuthorizationStream
+	}
+	if name == "voting" {
+		streamAuthorize = voting.AuthorizationStream
 	}
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.UnaryInterceptor(authorize), grpc.StreamInterceptor(streamAuthorize), grpc.MaxRecvMsgSize(platform.AssetUploadMessageBytes))
 	register(server)

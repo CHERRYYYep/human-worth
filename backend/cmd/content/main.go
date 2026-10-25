@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	votingpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/content"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +36,10 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "catalog-protocol-version" {
+		fmt.Println("voting-catalog-v1")
+		return nil
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	dsn, err := platform.Secret("CONTENT_DATABASE_URL_FILE")
@@ -97,6 +103,18 @@ func run() error {
 	runtime.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "human_worth_database_connections", Help: "Open connections in this replica's pool"}, func() float64 { return float64(db.Stat().TotalConns()) }))
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(runtime.Unary, content.Authorization), grpc.StreamInterceptor(content.AuthorizationStream), grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.MaxRecvMsgSize(65536), grpc.MaxSendMsgSize(4<<20), grpc.MaxConcurrentStreams(64))
 	app := &content.Server{DB: db, Identity: identitypb.NewIdentityServiceClient(conn), Asset: assetClient}
+	if target := os.Getenv("VOTING_TARGET"); target != "" {
+		c, e := platform.Client(target, "voting")
+		if e != nil {
+			return e
+		}
+		defer c.Close()
+		app.Voting = votingpb.NewVotingServiceClient(c)
+		if len(os.Args) > 1 && os.Args[1] == "bootstrap-voting" {
+			return app.BootstrapCatalogs(ctx)
+		}
+		go app.RunCatalogDelivery(ctx, runtime.Log)
+	}
 	pb.RegisterContentServiceServer(server, app)
 	if target := os.Getenv("MODERATION_TARGET"); target != "" {
 		c, e := platform.Client(target, "moderation")

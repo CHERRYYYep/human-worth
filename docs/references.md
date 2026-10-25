@@ -266,3 +266,17 @@ P 完全不看评论与其他作品，R 又需为 P 提供依据，因此采用�
 采用固定 5 MiB 完整块是本项目在用户方案 B 下的 Agent Self-Claimed 实施选择，文件仍限 32 MiB。已读取 AWS 官方 [multipart limits](https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html)、[UploadPart](https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html)、[AbortMultipartUpload](https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html)：非末 part 最小 5 MiB，同编号重传覆盖旧 part，未完成上传必须显式完成或中止。manifest 以数据库已确认记录为准，不靠单副本内存重建；没有采用客户端直传预签名 URL。
 
 真实兼容目标为仓库固定的 SeaweedFS 4.13 镜像 `sha256:803e0f9f4a190319e39c2b226e15e75bf0ff78d00fe3e2806c38850ca81eb8a7`，并核对 [4.13 Copy 条件校验源码](https://github.com/seaweedfs/seaweedfs/blob/4.13/weed/s3api/s3api_object_handlers_copy.go) 与 [HEAD 实现](https://github.com/seaweedfs/seaweedfs/blob/4.13/weed/s3api/s3api_object_handlers.go)。单 part multipart 的条件复制不一致由真实测试触发，采用现有锁内摘要复核兼容；生命周期 abort-only 规则未保留，不能以 AWS 文档代替兼容服务能力验收。实现、取舍与失败恢复证据见 [Asset P6.1 本地验收](backend-asset.md#p61-本地验收2026-10-20)。
+
+
+## Voting 目录一致性与永久禁投规划（2026-10-25）
+
+待解决缺口：完整候选与写票之间的跨服务竞态，以及网站/MCP统计访问与改选的本地串行化。用户要求规划Voting，不等于已批准所有技术细节或授权上线；方案见 [Voting第七阶段草案](backend-voting.md)。
+
+本轮重新核对PostgreSQL 18 Explicit Locking、Transaction Isolation与Protocol Buffers proto3官方页面（链接、采用/不采用及验收判据见草案第12节），页面HTTP均为200；原始核对结果位于 `/home/cherry/.local/state/human-worth/validation/additional-entry-closeout-20261025/voting-reference-check.json`。采用数据库锁/明确一致读/兼容新增字段；不认为单库隔离提供跨服务原子性，也不把wire兼容当混合版本业务兼容。既有Discourse参考仅沿用历史记录，本轮未复核其最新版。
+
+**Agent Self-Claimed**：建议采用持久目录变更意图、先冻结Voting写票再应用Content目录及幂等激活，配合账号×任务锁和只追加禁投事实。该方案需真实并发/崩溃/乱序验证后才可实施开放，不属于已完成的Voting功能；当前没有改动正式Proto、运行时或部署。
+
+
+### Voting 第七阶段实施增量（2026-10-25，Agent Self-Claimed）
+
+原规划记录保留。实际从包含第六阶段的dev `a1556394e6b4f27101e79327c349e6c39561ca29`开发；本轮重新HTTP读取上述PostgreSQL18锁、隔离及Proto3官方页面均200，记录位于`/home/cherry/.local/state/human-worth/validation/voting-20261025/reference-check.json`。采用gate `FOR SHARE`与目录`FOR UPDATE`串行、账号guard统一票/禁投、只追加禁投及RR同快照统计；跨服务仍需持久意图/冻结/激活/确认，不以本地隔离替代分布式协议。具体状态、预算、故障与实际证据见Voting第13节及执行记录；没有引入外部依赖或Challenge监督样本。

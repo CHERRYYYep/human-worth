@@ -35,11 +35,101 @@ def objects(raw):
     return result
 
 
+def catalog_upgrade_regression(kube, state, legacy_source, legacy_revision, revision):
+    """Real v6 Pods -> fenced v7, with real queued/applied bootstrap faults.
+
+    The historical reviewed task is an explicit SQL projection fixture. Its
+    visibility is checked through the real v6 HTTP service; formal review HTTP
+    remains covered by the existing Go lab suite below.
+    """
+    with patch.object(app,'REPO',legacy_source):app.main(revision=legacy_revision)
+    previous=release.snapshot()
+    old_content=next(p for p in previous if p['kind']=='Deployment' and p['metadata']['name']=='content')
+    old_image=old_content['spec']['template']['spec']['containers'][0]['image']
+    if app.catalog_image_supported(old_image):raise RuntimeError('Real v6 unexpectedly advertises catalog-v1')
+    primary=kube('-n','human-worth','get','cluster','database','-o','jsonpath={.status.currentPrimary}',capture=True).stdout.strip()
+    def sql(query):
+        return kube('-n','human-worth','exec',primary,'--','psql','-X','-U','postgres','-d','human_worth','-At','-v','ON_ERROR_STOP=1','-c',query,capture=True).stdout.strip()
+    task='tsk_'+'f1'*16
+    content={'title':'real v6 upgrade baseline','summary':'','description':'historical projection fixture','entries':[
+        {'side':side,'title':side,'source':'self','artifacts':[{'kind':'link','url':'https://example.test/'+side}],
+         'permissions':{'cloudUse':False}} for side in ['human','agent']]}
+    raw=json.dumps(content)
+    sql("INSERT INTO content.task_drafts(id,author_id,create_key,create_hash,state,content) VALUES('"+task+"','upgrade-fixture','upgrade-baseline-01',decode(repeat('00',32),'hex'),'published','"+raw+"');"
+        "INSERT INTO content.reviewed_tasks(task_id,source_revision,revision,state,snapshot) VALUES('"+task+"',1,1,'published','"+raw+"');"
+        "INSERT INTO content.reviewed_entries(id,task_id,position,state) VALUES('ent_"+'f2'*16+"','"+task+"',0,'approved'),('ent_"+'f3'*16+"','"+task+"',1,'approved');")
+    gateway=json.loads(kube('-n','human-worth','get','service','gateway','-o','json',capture=True).stdout)
+    port=gateway['spec']['ports'][0]['nodePort']
+    node=subprocess.check_output(['docker','inspect','lab-control-plane','--format','{{(index .NetworkSettings.Networks "kind").IPAddress}}'],text=True).strip()
+    until=time.monotonic()+60
+    while True:
+        reply=subprocess.run(['curl','--silent','--show-error','--max-time','5','--cacert',str(state/'ca.crt'),
+                              '--connect-to','worth.oopsbox.cn:443:'+node+':'+str(port),
+                              '--write-out','\n%{http_code}','https://worth.oopsbox.cn/api/tasks/'+task],text=True,capture_output=True)
+        if reply.returncode==0 and reply.stdout.endswith('\n200'):break
+        if time.monotonic()>=until:raise RuntimeError('Real v6 baseline not publicly readable')
+        time.sleep(1)
+    drained=False
+    injected=False
+    def upgrading_kube(*args,**kwargs):
+        nonlocal drained,injected
+        if args[0]=='apply' and kwargs.get('input'):
+            for obj in objects(kwargs['input']):
+                if obj['kind']=='Deployment' and obj['metadata']['name'] in ('content','voting') and not drained:
+                    raise RuntimeError('New protocol writer started before real v6 Pod drain')
+        result=kube(*args,**kwargs)
+        if '--for=delete' in args and 'app=content' in args:
+            remaining=json.loads(kube('-n','human-worth','get','pods','-l','app=content','-o','json',capture=True).stdout)['items']
+            if remaining:raise RuntimeError('Old Content Pods survived drain')
+            drained=True
+        if 'rollout' in args and 'deployment/voting' in args and not injected:
+            injected=True
+            sql("CREATE FUNCTION voting.upgrade_fail_activate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated upgrade activation fault'; END $$; CREATE TRIGGER upgrade_fail_activate BEFORE UPDATE ON voting.catalog_gates FOR EACH ROW WHEN (NEW.state <> 'frozen') EXECUTE FUNCTION voting.upgrade_fail_activate();")
+            kube('-n','human-worth','scale','deployment/voting','--replicas=0')
+            kube('-n','human-worth','wait','--for=delete','pod','-l','app=voting','--timeout=90s')
+        return result
+    try:
+        with patch.object(app,'kube',upgrading_kube):app.main(revision=revision)
+    except (subprocess.CalledProcessError,RuntimeError):
+        if not drained or not injected:raise
+    else:raise RuntimeError('Voting outage unexpectedly permitted bootstrap completion')
+    def wait_stage(stage):
+        deadline=time.monotonic()+90
+        while sql("SELECT stage FROM content.voting_catalog_changes WHERE task_id='"+task+"'")!=stage:
+            if time.monotonic()>=deadline:raise RuntimeError('Upgrade did not persist '+stage)
+            time.sleep(1)
+    def rejected_rollback(stage):
+        wait_stage(stage)
+        before=kube('-n','human-worth','get','deployments','content','voting','-o','json',capture=True).stdout
+        try:release.restore(previous,None)
+        except RuntimeError as error:
+            if 'rollback refused' not in str(error):raise
+        else:raise RuntimeError('Real v6 rollback accepted after '+stage)
+        after=kube('-n','human-worth','get','deployments','content','voting','-o','json',capture=True).stdout
+        specs=lambda raw:{p['metadata']['name']:p['spec'] for p in json.loads(raw)['items']}
+        if specs(before)!=specs(after):raise RuntimeError('Refused rollback changed live Content/Voting templates')
+        pods=json.loads(kube('-n','human-worth','get','pods','-l','app=content','-o','json',capture=True).stdout)['items']
+        if len(pods)!=2 or any(p['spec']['containers'][0]['image']!= 'human-worth/content:'+revision for p in pods):
+            raise RuntimeError('Refused rollback lost new Content replicas')
+        if sql("SELECT count(*) FROM content.voting_catalog_heads WHERE task_id='"+task+"' AND active_change IS NOT NULL")!='1':
+            raise RuntimeError('Refused rollback lost durable intent')
+    rejected_rollback('queued')
+    kube('-n','human-worth','scale','deployment/voting','--replicas=2')
+    kube('-n','human-worth','rollout','status','deployment/voting','--timeout=180s')
+    rejected_rollback('applied')
+    if sql("SELECT state FROM voting.catalog_gates WHERE task_id='"+task+"'")!='frozen':raise RuntimeError('Applied fixture lost Voting freeze')
+    sql('DROP TRIGGER upgrade_fail_activate ON voting.catalog_gates; DROP FUNCTION voting.upgrade_fail_activate()')
+    wait_stage('completed')
+    app.main(revision=revision)
+    print('PASS: real a155639 v6 Pods and historical SQL fixture; old Pods deleted before new writers; queued/applied persist and reject v6 rollback; forward bootstrap recovery',flush=True)
+
+
 def main():
     if shutil.which('kubectl') is None or shutil.which('kind') is None or not infra.KUBECONFIG.is_file():
         raise RuntimeError('INCONCLUSIVE: kubectl, kind and the isolated lab kubeconfig are required')
     namespace='human-worth-verify-'+secrets.token_hex(4)
     original=infra.kube
+    repository=app.REPO
     port=18444
     checks=[check for spec in app.load_services(app.REPO).values() for check in spec['checks']]
 
@@ -85,6 +175,9 @@ def main():
         for path in filter(None,paths):
             if (app.REPO/path).is_file():
                 target=source/path;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(app.REPO/path,target)
+        legacy_revision=subprocess.check_output(['git','rev-parse','a155639^{commit}'],cwd=repository,text=True).strip()
+        legacy_source=Path(directory)/'v6';legacy_source.mkdir()
+        release.extract_release(subprocess.check_output(['git','archive',legacy_revision],cwd=repository),legacy_source)
         parent=infra.STATE/'egress-parent.json'
         if parent.exists():shutil.copyfile(parent,state/'egress-parent.json')
         curl_options=['--cacert',str(state/'ca.crt'),'--connect-to','worth.oopsbox.cn:443:127.0.0.1:'+str(port)]
@@ -92,11 +185,11 @@ def main():
         print('Disposable namespace: '+namespace,flush=True)
         try:
             kube('apply','--server-side','-f','-',input=(infra.HERE/'namespace.yaml').read_text())
-            with patch.dict(os.environ,{'GOOGLE_OAUTH_FILE':str(oauth)}),patch.object(app,'REPO',source),patch.object(app,'STATE',state),patch.object(app,'kube',kube),patch.object(infra,'kube',kube),patch.object(release,'kube',kube),patch.object(object_store,'apply',lambda text:kube('apply','--server-side','-f','-',input=text)),patch.object(object_store,'kube',kube),patch.object(object_store,'STATE',state),patch.object(object_store,'HERE',source/'ops/lab'):
+            with patch.dict(os.environ,{'GOOGLE_OAUTH_FILE':str(oauth)}),patch.object(app,'REPO',source),patch.object(app,'STATE',state),patch.object(release,'STATE',state),patch.object(app,'kube',kube),patch.object(infra,'kube',kube),patch.object(release,'kube',kube),patch.object(object_store,'apply',lambda text:kube('apply','--server-side','-f','-',input=text)),patch.object(object_store,'kube',kube),patch.object(object_store,'STATE',state),patch.object(object_store,'HERE',source/'ops/lab'):
                 revision=hashlib.sha256((app.source_hash()+(source/'ops/lab/app.py').read_text()).encode()).hexdigest()[:40]
                 modules=app.load_services(source)
                 # app.main reconciles the private Asset store before Asset itself.
-                app.main(revision=revision)
+                catalog_upgrade_regression(kube,state,legacy_source,legacy_revision,revision)
                 node_port=kube('-n',namespace,'get','service','gateway','-o','jsonpath={.spec.ports[0].nodePort}',capture=True).stdout.strip()
                 node_ip=subprocess.check_output(['docker','inspect','lab-control-plane','--format','{{(index .NetworkSettings.Networks "kind").IPAddress}}'],text=True).strip()
                 if not node_ip or not node_port.isdigit():raise RuntimeError('Private validation NodePort unavailable')
@@ -115,7 +208,7 @@ def main():
                         time.sleep(2)
                     print('PASS: completion marker appears only after all modules pass',flush=True)
                     env={**os.environ,'HUMAN_WORTH_VERIFY_NAMESPACE':namespace,'HUMAN_WORTH_VERIFY_STATE':str(state),'HUMAN_WORTH_VERIFY_KUBECONFIG':str(infra.KUBECONFIG),'HUMAN_WORTH_VERIFY_PORT':str(port),'HUMAN_WORTH_VERIFY_GATEWAY_ADDRESS':node_ip+':'+node_port}
-                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset|Moderation|AdditionalEntry)Deployment$','-count=1','-timeout=720s','-v'],cwd=source/'backend',env=env,check=True)
+                    subprocess.run(['go','test','-race','-tags=lab','./internal/identity','-run','^TestKind(Content|Asset|PublicAsset|Moderation|AdditionalEntry|Voting|FileAuthorizationRecovery)Deployment$|^TestKindRecovery','-count=1','-timeout=900s','-v'],cwd=source/'backend',env=env,check=True)
                     import check_network
                     with patch.object(check_network,'kube',kube):check_network.main()
                     previous=release.snapshot()

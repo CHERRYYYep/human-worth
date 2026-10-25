@@ -182,28 +182,19 @@ func (s *Server) GetReviewSnapshot(ctx context.Context, r *pb.GetReviewSnapshotR
 	}
 	return &pb.GetReviewSnapshotResponse{Snapshot: snap}, nil
 }
-func (s *Server) ApplyReviewDecision(ctx context.Context, r *pb.ApplyReviewDecisionRequest) (*pb.ApplyReviewDecisionResponse, error) {
-	if err := requireContentCaller(ctx, "moderation"); err != nil {
+func (s *Server) localApplyReviewDecision(ctx context.Context, r *pb.ApplyReviewDecisionRequest) (*pb.ApplyReviewDecisionResponse, error) {
+	if err := decisionCaller(ctx); err != nil {
 		return nil, err
 	}
-	if !keyPattern.MatchString(r.GetDecisionId()) || !taskPattern.MatchString(r.GetTaskId()) || r.GetSubmissionRevision() < 1 {
-		return nil, invalid("invalid_review_decision")
-	}
-	if r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_REJECT {
-		return nil, invalid("invalid_review_decision")
-	}
-	if r.Outcome == pb.ReviewOutcome_REVIEW_OUTCOME_REJECT && (strings.TrimSpace(r.GetReason()) == "" || len(r.GetReason()) > 4000 || !utf8.ValidString(r.GetReason()) || strings.ContainsRune(r.GetReason(), 0)) {
-		return nil, invalid("rejection_reason_required")
-	}
-	if r.Outcome == pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && (len(r.GetReason()) > 4000 || !utf8.ValidString(r.GetReason()) || strings.ContainsRune(r.GetReason(), 0)) {
-		return nil, invalid("invalid_review_decision")
+	if err := validateApplyReviewDecision(r); err != nil {
+		return nil, err
 	}
 	wire, err := (proto.MarshalOptions{Deterministic: true}).Marshal(r)
 	if err != nil {
 		return nil, invalid("invalid_review_decision")
 	}
 	hash := sha256.Sum256(wire)
-	tx, err := s.DB.Begin(ctx)
+	tx, err := s.beginCatalogTx(ctx)
 	if err != nil {
 		return nil, storage(err)
 	}
@@ -326,7 +317,7 @@ func (s *Server) CheckReviewAssetAccess(ctx context.Context, r *pb.CheckReviewAs
 	var allowed bool
 	err = s.DB.QueryRow(ctx, `SELECT
  EXISTS(SELECT 1 FROM content.review_requests r JOIN content.task_drafts d ON d.id=r.task_id AND d.review_id=r.id WHERE r.id=$1 AND r.state='pending_review' AND d.state='pending_review' AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.snapshot->'submission'->'content'->'entries') e WHERE e->'artifacts' @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$2::text))))
- OR EXISTS(SELECT 1 FROM content.entry_review_requests r JOIN content.entry_submissions s ON s.id=r.entry_id AND s.review_id=r.id AND s.revision=r.submission_revision JOIN content.reviewed_tasks t ON t.task_id=s.task_id WHERE r.id=$1 AND r.state='pending_review' AND s.state='pending_review' AND t.state='published' AND r.snapshot->'submission'->'content'->'artifacts' @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$2::text)))`, r.ReviewId, r.AssetId).Scan(&allowed)
+ OR EXISTS(SELECT 1 FROM content.entry_review_requests r JOIN content.entry_submissions s ON s.id=r.entry_id AND s.review_id=r.id AND s.revision=r.submission_revision JOIN content.reviewed_tasks t ON t.task_id=s.task_id WHERE r.id=$1 AND r.state='pending_review' AND s.state='pending_review' AND t.state='published' AND `+catalogPublic+` AND r.snapshot->'submission'->'content'->'artifacts' @> jsonb_build_array(jsonb_build_object('kind','file','assetId',$2::text)))`, r.ReviewId, r.AssetId).Scan(&allowed)
 	if err != nil {
 		return nil, storage(err)
 	}
@@ -402,4 +393,20 @@ func (s *Server) RunReviewDelivery(ctx context.Context, client moderationpb.Mode
 	platform.RunOutbox(ctx, logger, "content_to_moderation", func(call context.Context) (platform.OutboxResult, error) {
 		return s.deliverReview(call, client)
 	})
+}
+
+func validateApplyReviewDecision(r *pb.ApplyReviewDecisionRequest) error {
+	if !keyPattern.MatchString(r.GetDecisionId()) || !taskPattern.MatchString(r.GetTaskId()) || r.GetSubmissionRevision() < 1 {
+		return invalid("invalid_review_decision")
+	}
+	if r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_REJECT {
+		return invalid("invalid_review_decision")
+	}
+	if r.Outcome == pb.ReviewOutcome_REVIEW_OUTCOME_REJECT && (strings.TrimSpace(r.GetReason()) == "" || len(r.GetReason()) > 4000 || !utf8.ValidString(r.GetReason()) || strings.ContainsRune(r.GetReason(), 0)) {
+		return invalid("rejection_reason_required")
+	}
+	if r.Outcome == pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && (len(r.GetReason()) > 4000 || !utf8.ValidString(r.GetReason()) || strings.ContainsRune(r.GetReason(), 0)) {
+		return invalid("invalid_review_decision")
+	}
+	return nil
 }

@@ -240,3 +240,28 @@ DOCKER_CONFIG="$HOME/.config/human-worth/lab/docker" python3 -u ops/lab/validate
 
 
 2026-10-23本轮最终验收：普通/race各322测试/子测试PASS；配齐专用PG/S3的全量race integration命令556项PASS（包含322常规＋234标签新增项，组件fake与真实链路边界见Content记录），无测试失败/跳过。完整kind validator退出0（730.31秒），5项真实业务、网络隔离、正常Service/NodePort故障、失败rollout/迁移重试及重复部署通过，临时namespace、独立PG/S3和凭据已清理。Buf正式生成/独立比较及相对开发基线breaking、各vet/build、根CI（5Node/28Python）均0。修复了并发重提版本查询窗口的幂等误冲突，保留修复前证据。可提交独立审查，当前50个文件未暂存/未提交；未push/PR/合并/公网发布，生产容量/HA及Voting不在本轮验收内。
+
+## Voting 第七阶段（2026-10-25，本地实现；未发布）
+
+**最新补验状态：第七阶段完整本地验收通过，可进入提交与独立审查。** 已复现Asset→Content连接恢复窗口，补逐调用方checkpoint、确定性回归与真实Pod故障恢复；原两项文件断言仍严格要求404。正式完整kind退出0（965.685秒），常规race323项、PG/S3全量integration604项、checkpoint连续10轮30项均通过。历史失败、修复、实际证据与未覆盖范围见[Voting文件503补验](../docs/backend-voting.md#16-文件503定位与逐调用方恢复回归2026-10-25)；未commit/push/PR/合并/公网发布。
+
+[完整设计、锁序与验收矩阵](../docs/backend-voting.md#voting-stage7)。原1～12节为保留的规划历史；当前实现以第13节及后续实际执行记录为准。Human Design为完整过审集合单选、显式统计先永久禁投、网站/MCP同账号与管理员无豁免；改选、ballot期限、目录协议、预算及DDL属于Agent Self-Claimed。
+
+| HTTP | 正式Voting RPC | 用途 |
+| --- | --- | --- |
+| `GET /api/tasks/{taskId}/voting-eligibility` | GetVotingEligibility | 网站/MCP本人资格；不返回统计 |
+| `GET /api/tasks/{taskId}/ballot` | GetBallot | 网站；一次全部过审作品及本人当前票 |
+| `PUT /api/tasks/{taskId}/vote` | CastVote | 网站+CSRF；ballotId/entryId/expectedVoteRevision |
+| `POST /api/tasks/{taskId}/statistics-access` | ViewTaskStatistics | 网站+CSRF或MCP；明确true后先持久禁投再统计 |
+
+`cmd/voting`独立进程，`VOTING_DATABASE_URL_FILE`、`IDENTITY_TARGET`、`CONTENT_TARGET`及统一`SERVICE_CERT_FILE/SERVICE_KEY_FILE/SERVICE_CA_FILE`。`voting migrate`只由owner执行；随后应用`ops/voting/grants.sql`。Content/Gateway增加`VOTING_TARGET`，但不把它加入全局readiness；Voting就绪只依赖本schema和Identity连接，避免Content↔Voting递归探针。缺配置不能伪装业务成功。
+
+升级必须先Content新增007迁移、Voting001及最小grants，再滚动所有支持目录栅栏的Content/Voting实例；运行`content bootstrap-voting`完成旧公开任务目录引导，最后开放Gateway。引导失败返回非零，重跑找回持久意图；blocked需查明原因，不能通过清空gate/删除关闭事实恢复。`services.json`登记Voting双副本与网络；部署排序为Identity→Asset/Voting→Content→Moderation→Gateway，不等于请求期readiness依赖。回滚先停止投票写入并处理在途/冻结，禁止直接恢复无栅栏旧Content。
+
+首次六→七升级由可信控制器排空旧Content，接受一次短暂中断；后续兼容实例才滚动更新。`content catalog-protocol-version`无数据库/密钥依赖，用于核验实际镜像是否支持目录栅栏。持久启用标记后不兼容回滚直接拒绝，保留当前Content/Voting前向恢复；先更新仓库外安装的控制器，不能只更新业务镜像。具体探针、状态备份与恢复约束见[部署边界](../docs/deployment.md#voting-第七阶段滚动与回滚边界2026-10-25agent-self-claimed)。
+
+ballot有效期15分钟，最多4096项且完整Proto/HTTP响应各限2MiB（预留逐项null/default envelope）；不分页、不截断。候选只用冻结白名单，目录hash绑定控制generation与各业务版本。Voting每进程限制同时处理两个目录业务，额外调用在方法deadline内等候，不在等候时加载完整目录；这不是宿主机/生产容量基准。关闭事实只允许INSERT/SELECT，不授予runtime更新/删除；选票改选只更新一条，统计用同一RR只读快照，含0票项，conclusion=undetermined。旧Challenge两个RPC继续Unimplemented且只允许Challenge身份，不提供监督数据或统计旁路。
+
+专用PG/S3配置方式沿用既有测试；Voting跨服务专项位于Identity integration包，使用真实HTTPS/mTLS与两个独立服务实例，非多进程Pod。kind的`TestKindVotingDeployment`另由完整`ops/lab/validate_modules.py`执行，使用独立namespace和正常NodePort/Service；不要单独运行常驻namespace测试。实际退出码、失败和未覆盖范围见Voting执行记录，不复用阶段六数量。本轮不实现MCP工具传输、Discovery、前端、生产HA或公网部署。
+
+首次实施验收（历史，第14节）：常规race323项，全量integration576项（323常规＋253标签新增，混合包含组件fake；Voting真实链路专项19测试/子测试），均退出0、无失败/跳过。完整kind联合validator退出0，866.524秒；六项真实Pod业务、正常Service/NodePort故障隔离、网络允许/拒绝、失败rollout恢复、同SHA迁移重试及重复部署通过。前两轮kind失败及修复保留在Voting第14节，不以单项成功替代最终完整重跑。隔离namespace、独立PG/S3及临时凭据已清理；可提交独立审查，未commit/push/PR/合并/公网发布。

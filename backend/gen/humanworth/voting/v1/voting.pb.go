@@ -340,6 +340,1238 @@ func (x *CheckHumanPreferenceSnapshotResponse) GetValid() bool {
 	return false
 }
 
+type VotingEligibility struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TaskId            string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CanVote           bool                   `protobuf:"varint,2,opt,name=can_vote,json=canVote,proto3" json:"can_vote,omitempty"`
+	PermanentlyClosed bool                   `protobuf:"varint,3,opt,name=permanently_closed,json=permanentlyClosed,proto3" json:"permanently_closed,omitempty"`
+	ClosedAt          *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=closed_at,json=closedAt,proto3" json:"closed_at,omitempty"`
+	Reason            *string                `protobuf:"bytes,5,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *VotingEligibility) Reset() {
+	*x = VotingEligibility{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VotingEligibility) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VotingEligibility) ProtoMessage() {}
+
+func (x *VotingEligibility) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VotingEligibility.ProtoReflect.Descriptor instead.
+func (*VotingEligibility) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *VotingEligibility) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *VotingEligibility) GetCanVote() bool {
+	if x != nil {
+		return x.CanVote
+	}
+	return false
+}
+
+func (x *VotingEligibility) GetPermanentlyClosed() bool {
+	if x != nil {
+		return x.PermanentlyClosed
+	}
+	return false
+}
+
+func (x *VotingEligibility) GetClosedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ClosedAt
+	}
+	return nil
+}
+
+func (x *VotingEligibility) GetReason() string {
+	if x != nil && x.Reason != nil {
+		return *x.Reason
+	}
+	return ""
+}
+
+type Vote struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	EntryId       string                 `protobuf:"bytes,3,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	Revision      int64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Vote) Reset() {
+	*x = Vote{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Vote) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Vote) ProtoMessage() {}
+
+func (x *Vote) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Vote.ProtoReflect.Descriptor instead.
+func (*Vote) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *Vote) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Vote) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *Vote) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *Vote) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *Vote) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Vote) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+type Ballot struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TaskId          string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	CatalogRevision int64                  `protobuf:"varint,3,opt,name=catalog_revision,json=catalogRevision,proto3" json:"catalog_revision,omitempty"`
+	Entries         []*v1.ApprovedEntry    `protobuf:"bytes,4,rep,name=entries,proto3" json:"entries,omitempty"`
+	CurrentVote     *Vote                  `protobuf:"bytes,5,opt,name=current_vote,json=currentVote,proto3" json:"current_vote,omitempty"`
+	Generation      int64                  `protobuf:"varint,6,opt,name=generation,proto3" json:"generation,omitempty"`
+	ExpiresAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Ballot) Reset() {
+	*x = Ballot{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Ballot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Ballot) ProtoMessage() {}
+
+func (x *Ballot) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Ballot.ProtoReflect.Descriptor instead.
+func (*Ballot) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *Ballot) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Ballot) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *Ballot) GetCatalogRevision() int64 {
+	if x != nil {
+		return x.CatalogRevision
+	}
+	return 0
+}
+
+func (x *Ballot) GetEntries() []*v1.ApprovedEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *Ballot) GetCurrentVote() *Vote {
+	if x != nil {
+		return x.CurrentVote
+	}
+	return nil
+}
+
+func (x *Ballot) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *Ballot) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+type GetVotingEligibilityRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId         string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetVotingEligibilityRequest) Reset() {
+	*x = GetVotingEligibilityRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVotingEligibilityRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVotingEligibilityRequest) ProtoMessage() {}
+
+func (x *GetVotingEligibilityRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVotingEligibilityRequest.ProtoReflect.Descriptor instead.
+func (*GetVotingEligibilityRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetVotingEligibilityRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *GetVotingEligibilityRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type GetVotingEligibilityResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Eligibility   *VotingEligibility     `protobuf:"bytes,1,opt,name=eligibility,proto3" json:"eligibility,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVotingEligibilityResponse) Reset() {
+	*x = GetVotingEligibilityResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVotingEligibilityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVotingEligibilityResponse) ProtoMessage() {}
+
+func (x *GetVotingEligibilityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVotingEligibilityResponse.ProtoReflect.Descriptor instead.
+func (*GetVotingEligibilityResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetVotingEligibilityResponse) GetEligibility() *VotingEligibility {
+	if x != nil {
+		return x.Eligibility
+	}
+	return nil
+}
+
+type GetBallotRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId         string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetBallotRequest) Reset() {
+	*x = GetBallotRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBallotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBallotRequest) ProtoMessage() {}
+
+func (x *GetBallotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBallotRequest.ProtoReflect.Descriptor instead.
+func (*GetBallotRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetBallotRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *GetBallotRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type GetBallotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ballot        *Ballot                `protobuf:"bytes,1,opt,name=ballot,proto3" json:"ballot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBallotResponse) Reset() {
+	*x = GetBallotResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBallotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBallotResponse) ProtoMessage() {}
+
+func (x *GetBallotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBallotResponse.ProtoReflect.Descriptor instead.
+func (*GetBallotResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetBallotResponse) GetBallot() *Ballot {
+	if x != nil {
+		return x.Ballot
+	}
+	return nil
+}
+
+type CastVoteRequest struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion       string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId               string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	BallotId             string                 `protobuf:"bytes,3,opt,name=ballot_id,json=ballotId,proto3" json:"ballot_id,omitempty"`
+	EntryId              string                 `protobuf:"bytes,4,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	ExpectedVoteRevision int64                  `protobuf:"varint,5,opt,name=expected_vote_revision,json=expectedVoteRevision,proto3" json:"expected_vote_revision,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *CastVoteRequest) Reset() {
+	*x = CastVoteRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CastVoteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CastVoteRequest) ProtoMessage() {}
+
+func (x *CastVoteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CastVoteRequest.ProtoReflect.Descriptor instead.
+func (*CastVoteRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CastVoteRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *CastVoteRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *CastVoteRequest) GetBallotId() string {
+	if x != nil {
+		return x.BallotId
+	}
+	return ""
+}
+
+func (x *CastVoteRequest) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *CastVoteRequest) GetExpectedVoteRevision() int64 {
+	if x != nil {
+		return x.ExpectedVoteRevision
+	}
+	return 0
+}
+
+type CastVoteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Vote          *Vote                  `protobuf:"bytes,1,opt,name=vote,proto3" json:"vote,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CastVoteResponse) Reset() {
+	*x = CastVoteResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CastVoteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CastVoteResponse) ProtoMessage() {}
+
+func (x *CastVoteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CastVoteResponse.ProtoReflect.Descriptor instead.
+func (*CastVoteResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CastVoteResponse) GetVote() *Vote {
+	if x != nil {
+		return x.Vote
+	}
+	return nil
+}
+
+type ViewTaskStatisticsRequest struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	ActorAssertion         string                 `protobuf:"bytes,1,opt,name=actor_assertion,json=actorAssertion,proto3" json:"actor_assertion,omitempty"`
+	TaskId                 string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	PermanentlyCloseVoting bool                   `protobuf:"varint,3,opt,name=permanently_close_voting,json=permanentlyCloseVoting,proto3" json:"permanently_close_voting,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *ViewTaskStatisticsRequest) Reset() {
+	*x = ViewTaskStatisticsRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ViewTaskStatisticsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ViewTaskStatisticsRequest) ProtoMessage() {}
+
+func (x *ViewTaskStatisticsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ViewTaskStatisticsRequest.ProtoReflect.Descriptor instead.
+func (*ViewTaskStatisticsRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ViewTaskStatisticsRequest) GetActorAssertion() string {
+	if x != nil {
+		return x.ActorAssertion
+	}
+	return ""
+}
+
+func (x *ViewTaskStatisticsRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ViewTaskStatisticsRequest) GetPermanentlyCloseVoting() bool {
+	if x != nil {
+		return x.PermanentlyCloseVoting
+	}
+	return false
+}
+
+type EntryVoteCount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EntryId       string                 `protobuf:"bytes,1,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	Side          string                 `protobuf:"bytes,2,opt,name=side,proto3" json:"side,omitempty"`
+	Votes         int64                  `protobuf:"varint,3,opt,name=votes,proto3" json:"votes,omitempty"`
+	VoteShare     *float64               `protobuf:"fixed64,4,opt,name=vote_share,json=voteShare,proto3,oneof" json:"vote_share,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntryVoteCount) Reset() {
+	*x = EntryVoteCount{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntryVoteCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntryVoteCount) ProtoMessage() {}
+
+func (x *EntryVoteCount) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntryVoteCount.ProtoReflect.Descriptor instead.
+func (*EntryVoteCount) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *EntryVoteCount) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *EntryVoteCount) GetSide() string {
+	if x != nil {
+		return x.Side
+	}
+	return ""
+}
+
+func (x *EntryVoteCount) GetVotes() int64 {
+	if x != nil {
+		return x.Votes
+	}
+	return 0
+}
+
+func (x *EntryVoteCount) GetVoteShare() float64 {
+	if x != nil && x.VoteShare != nil {
+		return *x.VoteShare
+	}
+	return 0
+}
+
+type TaskStatistics struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Eligibility     *VotingEligibility     `protobuf:"bytes,2,opt,name=eligibility,proto3" json:"eligibility,omitempty"`
+	TotalVotes      int64                  `protobuf:"varint,3,opt,name=total_votes,json=totalVotes,proto3" json:"total_votes,omitempty"`
+	HumanVotes      int64                  `protobuf:"varint,4,opt,name=human_votes,json=humanVotes,proto3" json:"human_votes,omitempty"`
+	AgentVotes      int64                  `protobuf:"varint,5,opt,name=agent_votes,json=agentVotes,proto3" json:"agent_votes,omitempty"`
+	HumanVoteShare  *float64               `protobuf:"fixed64,6,opt,name=human_vote_share,json=humanVoteShare,proto3,oneof" json:"human_vote_share,omitempty"`
+	AgentVoteShare  *float64               `protobuf:"fixed64,7,opt,name=agent_vote_share,json=agentVoteShare,proto3,oneof" json:"agent_vote_share,omitempty"`
+	EntryVotes      []*EntryVoteCount      `protobuf:"bytes,8,rep,name=entry_votes,json=entryVotes,proto3" json:"entry_votes,omitempty"`
+	CatalogRevision int64                  `protobuf:"varint,9,opt,name=catalog_revision,json=catalogRevision,proto3" json:"catalog_revision,omitempty"`
+	Conclusion      string                 `protobuf:"bytes,10,opt,name=conclusion,proto3" json:"conclusion,omitempty"`
+	ComputedAt      *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=computed_at,json=computedAt,proto3" json:"computed_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TaskStatistics) Reset() {
+	*x = TaskStatistics{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStatistics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStatistics) ProtoMessage() {}
+
+func (x *TaskStatistics) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStatistics.ProtoReflect.Descriptor instead.
+func (*TaskStatistics) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *TaskStatistics) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskStatistics) GetEligibility() *VotingEligibility {
+	if x != nil {
+		return x.Eligibility
+	}
+	return nil
+}
+
+func (x *TaskStatistics) GetTotalVotes() int64 {
+	if x != nil {
+		return x.TotalVotes
+	}
+	return 0
+}
+
+func (x *TaskStatistics) GetHumanVotes() int64 {
+	if x != nil {
+		return x.HumanVotes
+	}
+	return 0
+}
+
+func (x *TaskStatistics) GetAgentVotes() int64 {
+	if x != nil {
+		return x.AgentVotes
+	}
+	return 0
+}
+
+func (x *TaskStatistics) GetHumanVoteShare() float64 {
+	if x != nil && x.HumanVoteShare != nil {
+		return *x.HumanVoteShare
+	}
+	return 0
+}
+
+func (x *TaskStatistics) GetAgentVoteShare() float64 {
+	if x != nil && x.AgentVoteShare != nil {
+		return *x.AgentVoteShare
+	}
+	return 0
+}
+
+func (x *TaskStatistics) GetEntryVotes() []*EntryVoteCount {
+	if x != nil {
+		return x.EntryVotes
+	}
+	return nil
+}
+
+func (x *TaskStatistics) GetCatalogRevision() int64 {
+	if x != nil {
+		return x.CatalogRevision
+	}
+	return 0
+}
+
+func (x *TaskStatistics) GetConclusion() string {
+	if x != nil {
+		return x.Conclusion
+	}
+	return ""
+}
+
+func (x *TaskStatistics) GetComputedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ComputedAt
+	}
+	return nil
+}
+
+type ViewTaskStatisticsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Statistics    *TaskStatistics        `protobuf:"bytes,1,opt,name=statistics,proto3" json:"statistics,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ViewTaskStatisticsResponse) Reset() {
+	*x = ViewTaskStatisticsResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ViewTaskStatisticsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ViewTaskStatisticsResponse) ProtoMessage() {}
+
+func (x *ViewTaskStatisticsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ViewTaskStatisticsResponse.ProtoReflect.Descriptor instead.
+func (*ViewTaskStatisticsResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ViewTaskStatisticsResponse) GetStatistics() *TaskStatistics {
+	if x != nil {
+		return x.Statistics
+	}
+	return nil
+}
+
+type PrepareCatalogChangeRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ChangeId           string                 `protobuf:"bytes,1,opt,name=change_id,json=changeId,proto3" json:"change_id,omitempty"`
+	TaskId             string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ExpectedGeneration int64                  `protobuf:"varint,3,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
+	Generation         int64                  `protobuf:"varint,4,opt,name=generation,proto3" json:"generation,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *PrepareCatalogChangeRequest) Reset() {
+	*x = PrepareCatalogChangeRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareCatalogChangeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareCatalogChangeRequest) ProtoMessage() {}
+
+func (x *PrepareCatalogChangeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareCatalogChangeRequest.ProtoReflect.Descriptor instead.
+func (*PrepareCatalogChangeRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *PrepareCatalogChangeRequest) GetChangeId() string {
+	if x != nil {
+		return x.ChangeId
+	}
+	return ""
+}
+
+func (x *PrepareCatalogChangeRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *PrepareCatalogChangeRequest) GetExpectedGeneration() int64 {
+	if x != nil {
+		return x.ExpectedGeneration
+	}
+	return 0
+}
+
+func (x *PrepareCatalogChangeRequest) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+type CatalogTransition struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChangeId      string                 `protobuf:"bytes,1,opt,name=change_id,json=changeId,proto3" json:"change_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Generation    int64                  `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
+	Phase         string                 `protobuf:"bytes,4,opt,name=phase,proto3" json:"phase,omitempty"`
+	Sha256        string                 `protobuf:"bytes,5,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CatalogTransition) Reset() {
+	*x = CatalogTransition{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CatalogTransition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CatalogTransition) ProtoMessage() {}
+
+func (x *CatalogTransition) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CatalogTransition.ProtoReflect.Descriptor instead.
+func (*CatalogTransition) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CatalogTransition) GetChangeId() string {
+	if x != nil {
+		return x.ChangeId
+	}
+	return ""
+}
+
+func (x *CatalogTransition) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *CatalogTransition) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *CatalogTransition) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *CatalogTransition) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+type PrepareCatalogChangeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Transition    *CatalogTransition     `protobuf:"bytes,1,opt,name=transition,proto3" json:"transition,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrepareCatalogChangeResponse) Reset() {
+	*x = PrepareCatalogChangeResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareCatalogChangeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareCatalogChangeResponse) ProtoMessage() {}
+
+func (x *PrepareCatalogChangeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareCatalogChangeResponse.ProtoReflect.Descriptor instead.
+func (*PrepareCatalogChangeResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *PrepareCatalogChangeResponse) GetTransition() *CatalogTransition {
+	if x != nil {
+		return x.Transition
+	}
+	return nil
+}
+
+type ActivateCatalogSnapshotRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	ChangeId      string                    `protobuf:"bytes,1,opt,name=change_id,json=changeId,proto3" json:"change_id,omitempty"`
+	Catalog       *v1.VotingCatalogSnapshot `protobuf:"bytes,2,opt,name=catalog,proto3" json:"catalog,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivateCatalogSnapshotRequest) Reset() {
+	*x = ActivateCatalogSnapshotRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivateCatalogSnapshotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivateCatalogSnapshotRequest) ProtoMessage() {}
+
+func (x *ActivateCatalogSnapshotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivateCatalogSnapshotRequest.ProtoReflect.Descriptor instead.
+func (*ActivateCatalogSnapshotRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ActivateCatalogSnapshotRequest) GetChangeId() string {
+	if x != nil {
+		return x.ChangeId
+	}
+	return ""
+}
+
+func (x *ActivateCatalogSnapshotRequest) GetCatalog() *v1.VotingCatalogSnapshot {
+	if x != nil {
+		return x.Catalog
+	}
+	return nil
+}
+
+type ActivateCatalogSnapshotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Transition    *CatalogTransition     `protobuf:"bytes,1,opt,name=transition,proto3" json:"transition,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivateCatalogSnapshotResponse) Reset() {
+	*x = ActivateCatalogSnapshotResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivateCatalogSnapshotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivateCatalogSnapshotResponse) ProtoMessage() {}
+
+func (x *ActivateCatalogSnapshotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivateCatalogSnapshotResponse.ProtoReflect.Descriptor instead.
+func (*ActivateCatalogSnapshotResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ActivateCatalogSnapshotResponse) GetTransition() *CatalogTransition {
+	if x != nil {
+		return x.Transition
+	}
+	return nil
+}
+
+type GetCatalogTransitionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChangeId      string                 `protobuf:"bytes,1,opt,name=change_id,json=changeId,proto3" json:"change_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCatalogTransitionRequest) Reset() {
+	*x = GetCatalogTransitionRequest{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCatalogTransitionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCatalogTransitionRequest) ProtoMessage() {}
+
+func (x *GetCatalogTransitionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCatalogTransitionRequest.ProtoReflect.Descriptor instead.
+func (*GetCatalogTransitionRequest) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *GetCatalogTransitionRequest) GetChangeId() string {
+	if x != nil {
+		return x.ChangeId
+	}
+	return ""
+}
+
+type GetCatalogTransitionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Transition    *CatalogTransition     `protobuf:"bytes,1,opt,name=transition,proto3" json:"transition,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCatalogTransitionResponse) Reset() {
+	*x = GetCatalogTransitionResponse{}
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCatalogTransitionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCatalogTransitionResponse) ProtoMessage() {}
+
+func (x *GetCatalogTransitionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_humanworth_voting_v1_voting_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCatalogTransitionResponse.ProtoReflect.Descriptor instead.
+func (*GetCatalogTransitionResponse) Descriptor() ([]byte, []int) {
+	return file_humanworth_voting_v1_voting_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *GetCatalogTransitionResponse) GetTransition() *CatalogTransition {
+	if x != nil {
+		return x.Transition
+	}
+	return nil
+}
+
 var File_humanworth_voting_v1_voting_proto protoreflect.FileDescriptor
 
 const file_humanworth_voting_v1_voting_proto_rawDesc = "" +
@@ -374,8 +1606,129 @@ const file_humanworth_voting_v1_voting_proto_rawDesc = "" +
 	"snapshotId\x12%\n" +
 	"\x0epolicy_version\x18\x02 \x01(\tR\rpolicyVersion\"<\n" +
 	"$CheckHumanPreferenceSnapshotResponse\x12\x14\n" +
-	"\x05valid\x18\x01 \x01(\bR\x05valid2\xb9\x02\n" +
-	"\rVotingService\x12\x8f\x01\n" +
+	"\x05valid\x18\x01 \x01(\bR\x05valid\"\xd7\x01\n" +
+	"\x11VotingEligibility\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x19\n" +
+	"\bcan_vote\x18\x02 \x01(\bR\acanVote\x12-\n" +
+	"\x12permanently_closed\x18\x03 \x01(\bR\x11permanentlyClosed\x127\n" +
+	"\tclosed_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bclosedAt\x12\x1b\n" +
+	"\x06reason\x18\x05 \x01(\tH\x00R\x06reason\x88\x01\x01B\t\n" +
+	"\a_reason\"\xdc\x01\n" +
+	"\x04Vote\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x19\n" +
+	"\bentry_id\x18\x03 \x01(\tR\aentryId\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\x03R\brevision\x129\n" +
+	"\n" +
+	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xb6\x02\n" +
+	"\x06Ballot\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12)\n" +
+	"\x10catalog_revision\x18\x03 \x01(\x03R\x0fcatalogRevision\x12>\n" +
+	"\aentries\x18\x04 \x03(\v2$.humanworth.content.v1.ApprovedEntryR\aentries\x12=\n" +
+	"\fcurrent_vote\x18\x05 \x01(\v2\x1a.humanworth.voting.v1.VoteR\vcurrentVote\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x06 \x01(\x03R\n" +
+	"generation\x129\n" +
+	"\n" +
+	"expires_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"_\n" +
+	"\x1bGetVotingEligibilityRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"i\n" +
+	"\x1cGetVotingEligibilityResponse\x12I\n" +
+	"\veligibility\x18\x01 \x01(\v2'.humanworth.voting.v1.VotingEligibilityR\veligibility\"T\n" +
+	"\x10GetBallotRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"I\n" +
+	"\x11GetBallotResponse\x124\n" +
+	"\x06ballot\x18\x01 \x01(\v2\x1c.humanworth.voting.v1.BallotR\x06ballot\"\xc1\x01\n" +
+	"\x0fCastVoteRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1b\n" +
+	"\tballot_id\x18\x03 \x01(\tR\bballotId\x12\x19\n" +
+	"\bentry_id\x18\x04 \x01(\tR\aentryId\x124\n" +
+	"\x16expected_vote_revision\x18\x05 \x01(\x03R\x14expectedVoteRevision\"B\n" +
+	"\x10CastVoteResponse\x12.\n" +
+	"\x04vote\x18\x01 \x01(\v2\x1a.humanworth.voting.v1.VoteR\x04vote\"\x97\x01\n" +
+	"\x19ViewTaskStatisticsRequest\x12'\n" +
+	"\x0factor_assertion\x18\x01 \x01(\tR\x0eactorAssertion\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x128\n" +
+	"\x18permanently_close_voting\x18\x03 \x01(\bR\x16permanentlyCloseVoting\"\x88\x01\n" +
+	"\x0eEntryVoteCount\x12\x19\n" +
+	"\bentry_id\x18\x01 \x01(\tR\aentryId\x12\x12\n" +
+	"\x04side\x18\x02 \x01(\tR\x04side\x12\x14\n" +
+	"\x05votes\x18\x03 \x01(\x03R\x05votes\x12\"\n" +
+	"\n" +
+	"vote_share\x18\x04 \x01(\x01H\x00R\tvoteShare\x88\x01\x01B\r\n" +
+	"\v_vote_share\"\xae\x04\n" +
+	"\x0eTaskStatistics\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12I\n" +
+	"\veligibility\x18\x02 \x01(\v2'.humanworth.voting.v1.VotingEligibilityR\veligibility\x12\x1f\n" +
+	"\vtotal_votes\x18\x03 \x01(\x03R\n" +
+	"totalVotes\x12\x1f\n" +
+	"\vhuman_votes\x18\x04 \x01(\x03R\n" +
+	"humanVotes\x12\x1f\n" +
+	"\vagent_votes\x18\x05 \x01(\x03R\n" +
+	"agentVotes\x12-\n" +
+	"\x10human_vote_share\x18\x06 \x01(\x01H\x00R\x0ehumanVoteShare\x88\x01\x01\x12-\n" +
+	"\x10agent_vote_share\x18\a \x01(\x01H\x01R\x0eagentVoteShare\x88\x01\x01\x12E\n" +
+	"\ventry_votes\x18\b \x03(\v2$.humanworth.voting.v1.EntryVoteCountR\n" +
+	"entryVotes\x12)\n" +
+	"\x10catalog_revision\x18\t \x01(\x03R\x0fcatalogRevision\x12\x1e\n" +
+	"\n" +
+	"conclusion\x18\n" +
+	" \x01(\tR\n" +
+	"conclusion\x12;\n" +
+	"\vcomputed_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"computedAtB\x13\n" +
+	"\x11_human_vote_shareB\x13\n" +
+	"\x11_agent_vote_share\"b\n" +
+	"\x1aViewTaskStatisticsResponse\x12D\n" +
+	"\n" +
+	"statistics\x18\x01 \x01(\v2$.humanworth.voting.v1.TaskStatisticsR\n" +
+	"statistics\"\xa4\x01\n" +
+	"\x1bPrepareCatalogChangeRequest\x12\x1b\n" +
+	"\tchange_id\x18\x01 \x01(\tR\bchangeId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12/\n" +
+	"\x13expected_generation\x18\x03 \x01(\x03R\x12expectedGeneration\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x04 \x01(\x03R\n" +
+	"generation\"\x97\x01\n" +
+	"\x11CatalogTransition\x12\x1b\n" +
+	"\tchange_id\x18\x01 \x01(\tR\bchangeId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x03 \x01(\x03R\n" +
+	"generation\x12\x14\n" +
+	"\x05phase\x18\x04 \x01(\tR\x05phase\x12\x16\n" +
+	"\x06sha256\x18\x05 \x01(\tR\x06sha256\"g\n" +
+	"\x1cPrepareCatalogChangeResponse\x12G\n" +
+	"\n" +
+	"transition\x18\x01 \x01(\v2'.humanworth.voting.v1.CatalogTransitionR\n" +
+	"transition\"\x85\x01\n" +
+	"\x1eActivateCatalogSnapshotRequest\x12\x1b\n" +
+	"\tchange_id\x18\x01 \x01(\tR\bchangeId\x12F\n" +
+	"\acatalog\x18\x02 \x01(\v2,.humanworth.content.v1.VotingCatalogSnapshotR\acatalog\"j\n" +
+	"\x1fActivateCatalogSnapshotResponse\x12G\n" +
+	"\n" +
+	"transition\x18\x01 \x01(\v2'.humanworth.voting.v1.CatalogTransitionR\n" +
+	"transition\":\n" +
+	"\x1bGetCatalogTransitionRequest\x12\x1b\n" +
+	"\tchange_id\x18\x01 \x01(\tR\bchangeId\"g\n" +
+	"\x1cGetCatalogTransitionResponse\x12G\n" +
+	"\n" +
+	"transition\x18\x01 \x01(\v2'.humanworth.voting.v1.CatalogTransitionR\n" +
+	"transition2\xf1\b\n" +
+	"\rVotingService\x12}\n" +
+	"\x14GetVotingEligibility\x121.humanworth.voting.v1.GetVotingEligibilityRequest\x1a2.humanworth.voting.v1.GetVotingEligibilityResponse\x12\\\n" +
+	"\tGetBallot\x12&.humanworth.voting.v1.GetBallotRequest\x1a'.humanworth.voting.v1.GetBallotResponse\x12Y\n" +
+	"\bCastVote\x12%.humanworth.voting.v1.CastVoteRequest\x1a&.humanworth.voting.v1.CastVoteResponse\x12w\n" +
+	"\x12ViewTaskStatistics\x12/.humanworth.voting.v1.ViewTaskStatisticsRequest\x1a0.humanworth.voting.v1.ViewTaskStatisticsResponse\x12}\n" +
+	"\x14PrepareCatalogChange\x121.humanworth.voting.v1.PrepareCatalogChangeRequest\x1a2.humanworth.voting.v1.PrepareCatalogChangeResponse\x12\x86\x01\n" +
+	"\x17ActivateCatalogSnapshot\x124.humanworth.voting.v1.ActivateCatalogSnapshotRequest\x1a5.humanworth.voting.v1.ActivateCatalogSnapshotResponse\x12}\n" +
+	"\x14GetCatalogTransition\x121.humanworth.voting.v1.GetCatalogTransitionRequest\x1a2.humanworth.voting.v1.GetCatalogTransitionResponse\x12\x8f\x01\n" +
 	"\x1aGetHumanPreferenceSnapshot\x127.humanworth.voting.v1.GetHumanPreferenceSnapshotRequest\x1a8.humanworth.voting.v1.GetHumanPreferenceSnapshotResponse\x12\x95\x01\n" +
 	"\x1cCheckHumanPreferenceSnapshot\x129.humanworth.voting.v1.CheckHumanPreferenceSnapshotRequest\x1a:.humanworth.voting.v1.CheckHumanPreferenceSnapshotResponseBKZIgithub.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1;votingv1b\x06proto3"
 
@@ -391,33 +1744,86 @@ func file_humanworth_voting_v1_voting_proto_rawDescGZIP() []byte {
 	return file_humanworth_voting_v1_voting_proto_rawDescData
 }
 
-var file_humanworth_voting_v1_voting_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_humanworth_voting_v1_voting_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_humanworth_voting_v1_voting_proto_goTypes = []any{
 	(*HumanPreference)(nil),                      // 0: humanworth.voting.v1.HumanPreference
 	(*GetHumanPreferenceSnapshotRequest)(nil),    // 1: humanworth.voting.v1.GetHumanPreferenceSnapshotRequest
 	(*GetHumanPreferenceSnapshotResponse)(nil),   // 2: humanworth.voting.v1.GetHumanPreferenceSnapshotResponse
 	(*CheckHumanPreferenceSnapshotRequest)(nil),  // 3: humanworth.voting.v1.CheckHumanPreferenceSnapshotRequest
 	(*CheckHumanPreferenceSnapshotResponse)(nil), // 4: humanworth.voting.v1.CheckHumanPreferenceSnapshotResponse
-	nil,                           // 5: humanworth.voting.v1.HumanPreference.CountsByWorkEntry
-	(*v1.SnapshotRef)(nil),        // 6: humanworth.content.v1.SnapshotRef
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*VotingEligibility)(nil),                    // 5: humanworth.voting.v1.VotingEligibility
+	(*Vote)(nil),                                 // 6: humanworth.voting.v1.Vote
+	(*Ballot)(nil),                               // 7: humanworth.voting.v1.Ballot
+	(*GetVotingEligibilityRequest)(nil),          // 8: humanworth.voting.v1.GetVotingEligibilityRequest
+	(*GetVotingEligibilityResponse)(nil),         // 9: humanworth.voting.v1.GetVotingEligibilityResponse
+	(*GetBallotRequest)(nil),                     // 10: humanworth.voting.v1.GetBallotRequest
+	(*GetBallotResponse)(nil),                    // 11: humanworth.voting.v1.GetBallotResponse
+	(*CastVoteRequest)(nil),                      // 12: humanworth.voting.v1.CastVoteRequest
+	(*CastVoteResponse)(nil),                     // 13: humanworth.voting.v1.CastVoteResponse
+	(*ViewTaskStatisticsRequest)(nil),            // 14: humanworth.voting.v1.ViewTaskStatisticsRequest
+	(*EntryVoteCount)(nil),                       // 15: humanworth.voting.v1.EntryVoteCount
+	(*TaskStatistics)(nil),                       // 16: humanworth.voting.v1.TaskStatistics
+	(*ViewTaskStatisticsResponse)(nil),           // 17: humanworth.voting.v1.ViewTaskStatisticsResponse
+	(*PrepareCatalogChangeRequest)(nil),          // 18: humanworth.voting.v1.PrepareCatalogChangeRequest
+	(*CatalogTransition)(nil),                    // 19: humanworth.voting.v1.CatalogTransition
+	(*PrepareCatalogChangeResponse)(nil),         // 20: humanworth.voting.v1.PrepareCatalogChangeResponse
+	(*ActivateCatalogSnapshotRequest)(nil),       // 21: humanworth.voting.v1.ActivateCatalogSnapshotRequest
+	(*ActivateCatalogSnapshotResponse)(nil),      // 22: humanworth.voting.v1.ActivateCatalogSnapshotResponse
+	(*GetCatalogTransitionRequest)(nil),          // 23: humanworth.voting.v1.GetCatalogTransitionRequest
+	(*GetCatalogTransitionResponse)(nil),         // 24: humanworth.voting.v1.GetCatalogTransitionResponse
+	nil,                                          // 25: humanworth.voting.v1.HumanPreference.CountsByWorkEntry
+	(*v1.SnapshotRef)(nil),                       // 26: humanworth.content.v1.SnapshotRef
+	(*timestamppb.Timestamp)(nil),                // 27: google.protobuf.Timestamp
+	(*v1.ApprovedEntry)(nil),                     // 28: humanworth.content.v1.ApprovedEntry
+	(*v1.VotingCatalogSnapshot)(nil),             // 29: humanworth.content.v1.VotingCatalogSnapshot
 }
 var file_humanworth_voting_v1_voting_proto_depIdxs = []int32{
-	6, // 0: humanworth.voting.v1.HumanPreference.snapshot:type_name -> humanworth.content.v1.SnapshotRef
-	7, // 1: humanworth.voting.v1.HumanPreference.window_start:type_name -> google.protobuf.Timestamp
-	7, // 2: humanworth.voting.v1.HumanPreference.window_end:type_name -> google.protobuf.Timestamp
-	5, // 3: humanworth.voting.v1.HumanPreference.counts_by_work:type_name -> humanworth.voting.v1.HumanPreference.CountsByWorkEntry
-	7, // 4: humanworth.voting.v1.GetHumanPreferenceSnapshotResponse.valid_until:type_name -> google.protobuf.Timestamp
-	0, // 5: humanworth.voting.v1.GetHumanPreferenceSnapshotResponse.samples:type_name -> humanworth.voting.v1.HumanPreference
-	1, // 6: humanworth.voting.v1.VotingService.GetHumanPreferenceSnapshot:input_type -> humanworth.voting.v1.GetHumanPreferenceSnapshotRequest
-	3, // 7: humanworth.voting.v1.VotingService.CheckHumanPreferenceSnapshot:input_type -> humanworth.voting.v1.CheckHumanPreferenceSnapshotRequest
-	2, // 8: humanworth.voting.v1.VotingService.GetHumanPreferenceSnapshot:output_type -> humanworth.voting.v1.GetHumanPreferenceSnapshotResponse
-	4, // 9: humanworth.voting.v1.VotingService.CheckHumanPreferenceSnapshot:output_type -> humanworth.voting.v1.CheckHumanPreferenceSnapshotResponse
-	8, // [8:10] is the sub-list for method output_type
-	6, // [6:8] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	26, // 0: humanworth.voting.v1.HumanPreference.snapshot:type_name -> humanworth.content.v1.SnapshotRef
+	27, // 1: humanworth.voting.v1.HumanPreference.window_start:type_name -> google.protobuf.Timestamp
+	27, // 2: humanworth.voting.v1.HumanPreference.window_end:type_name -> google.protobuf.Timestamp
+	25, // 3: humanworth.voting.v1.HumanPreference.counts_by_work:type_name -> humanworth.voting.v1.HumanPreference.CountsByWorkEntry
+	27, // 4: humanworth.voting.v1.GetHumanPreferenceSnapshotResponse.valid_until:type_name -> google.protobuf.Timestamp
+	0,  // 5: humanworth.voting.v1.GetHumanPreferenceSnapshotResponse.samples:type_name -> humanworth.voting.v1.HumanPreference
+	27, // 6: humanworth.voting.v1.VotingEligibility.closed_at:type_name -> google.protobuf.Timestamp
+	27, // 7: humanworth.voting.v1.Vote.created_at:type_name -> google.protobuf.Timestamp
+	27, // 8: humanworth.voting.v1.Vote.updated_at:type_name -> google.protobuf.Timestamp
+	28, // 9: humanworth.voting.v1.Ballot.entries:type_name -> humanworth.content.v1.ApprovedEntry
+	6,  // 10: humanworth.voting.v1.Ballot.current_vote:type_name -> humanworth.voting.v1.Vote
+	27, // 11: humanworth.voting.v1.Ballot.expires_at:type_name -> google.protobuf.Timestamp
+	5,  // 12: humanworth.voting.v1.GetVotingEligibilityResponse.eligibility:type_name -> humanworth.voting.v1.VotingEligibility
+	7,  // 13: humanworth.voting.v1.GetBallotResponse.ballot:type_name -> humanworth.voting.v1.Ballot
+	6,  // 14: humanworth.voting.v1.CastVoteResponse.vote:type_name -> humanworth.voting.v1.Vote
+	5,  // 15: humanworth.voting.v1.TaskStatistics.eligibility:type_name -> humanworth.voting.v1.VotingEligibility
+	15, // 16: humanworth.voting.v1.TaskStatistics.entry_votes:type_name -> humanworth.voting.v1.EntryVoteCount
+	27, // 17: humanworth.voting.v1.TaskStatistics.computed_at:type_name -> google.protobuf.Timestamp
+	16, // 18: humanworth.voting.v1.ViewTaskStatisticsResponse.statistics:type_name -> humanworth.voting.v1.TaskStatistics
+	19, // 19: humanworth.voting.v1.PrepareCatalogChangeResponse.transition:type_name -> humanworth.voting.v1.CatalogTransition
+	29, // 20: humanworth.voting.v1.ActivateCatalogSnapshotRequest.catalog:type_name -> humanworth.content.v1.VotingCatalogSnapshot
+	19, // 21: humanworth.voting.v1.ActivateCatalogSnapshotResponse.transition:type_name -> humanworth.voting.v1.CatalogTransition
+	19, // 22: humanworth.voting.v1.GetCatalogTransitionResponse.transition:type_name -> humanworth.voting.v1.CatalogTransition
+	8,  // 23: humanworth.voting.v1.VotingService.GetVotingEligibility:input_type -> humanworth.voting.v1.GetVotingEligibilityRequest
+	10, // 24: humanworth.voting.v1.VotingService.GetBallot:input_type -> humanworth.voting.v1.GetBallotRequest
+	12, // 25: humanworth.voting.v1.VotingService.CastVote:input_type -> humanworth.voting.v1.CastVoteRequest
+	14, // 26: humanworth.voting.v1.VotingService.ViewTaskStatistics:input_type -> humanworth.voting.v1.ViewTaskStatisticsRequest
+	18, // 27: humanworth.voting.v1.VotingService.PrepareCatalogChange:input_type -> humanworth.voting.v1.PrepareCatalogChangeRequest
+	21, // 28: humanworth.voting.v1.VotingService.ActivateCatalogSnapshot:input_type -> humanworth.voting.v1.ActivateCatalogSnapshotRequest
+	23, // 29: humanworth.voting.v1.VotingService.GetCatalogTransition:input_type -> humanworth.voting.v1.GetCatalogTransitionRequest
+	1,  // 30: humanworth.voting.v1.VotingService.GetHumanPreferenceSnapshot:input_type -> humanworth.voting.v1.GetHumanPreferenceSnapshotRequest
+	3,  // 31: humanworth.voting.v1.VotingService.CheckHumanPreferenceSnapshot:input_type -> humanworth.voting.v1.CheckHumanPreferenceSnapshotRequest
+	9,  // 32: humanworth.voting.v1.VotingService.GetVotingEligibility:output_type -> humanworth.voting.v1.GetVotingEligibilityResponse
+	11, // 33: humanworth.voting.v1.VotingService.GetBallot:output_type -> humanworth.voting.v1.GetBallotResponse
+	13, // 34: humanworth.voting.v1.VotingService.CastVote:output_type -> humanworth.voting.v1.CastVoteResponse
+	17, // 35: humanworth.voting.v1.VotingService.ViewTaskStatistics:output_type -> humanworth.voting.v1.ViewTaskStatisticsResponse
+	20, // 36: humanworth.voting.v1.VotingService.PrepareCatalogChange:output_type -> humanworth.voting.v1.PrepareCatalogChangeResponse
+	22, // 37: humanworth.voting.v1.VotingService.ActivateCatalogSnapshot:output_type -> humanworth.voting.v1.ActivateCatalogSnapshotResponse
+	24, // 38: humanworth.voting.v1.VotingService.GetCatalogTransition:output_type -> humanworth.voting.v1.GetCatalogTransitionResponse
+	2,  // 39: humanworth.voting.v1.VotingService.GetHumanPreferenceSnapshot:output_type -> humanworth.voting.v1.GetHumanPreferenceSnapshotResponse
+	4,  // 40: humanworth.voting.v1.VotingService.CheckHumanPreferenceSnapshot:output_type -> humanworth.voting.v1.CheckHumanPreferenceSnapshotResponse
+	32, // [32:41] is the sub-list for method output_type
+	23, // [23:32] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_humanworth_voting_v1_voting_proto_init() }
@@ -425,13 +1831,16 @@ func file_humanworth_voting_v1_voting_proto_init() {
 	if File_humanworth_voting_v1_voting_proto != nil {
 		return
 	}
+	file_humanworth_voting_v1_voting_proto_msgTypes[5].OneofWrappers = []any{}
+	file_humanworth_voting_v1_voting_proto_msgTypes[15].OneofWrappers = []any{}
+	file_humanworth_voting_v1_voting_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_humanworth_voting_v1_voting_proto_rawDesc), len(file_humanworth_voting_v1_voting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

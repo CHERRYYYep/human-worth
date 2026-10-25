@@ -138,7 +138,7 @@ Challenge 的两个副本均可参与调度，通过数据库工作项领取和�
 
 该目录只保存跨边界静态元数据，不做用户授权决策，也不代替各模块的动态主体、凭据、账号和资源状态检查。HTTP handler 仍显式绑定，避免把安全敏感行为变成隐式注册。HTTP 与 RPC deadline 分开配置；未单独指定时分别使用各自默认值。目录中出现未来 RPC 不表示对应服务已实现或已发布。
 
-目录与 Proto 还通过独立 descriptor 测试核对：目录中的每个 RPC 必须能在生成的服务 descriptor 中精确找到。当前仅有尚未新增 Discovery Proto 的 `DiscoveryService/ListTasks`，以及 Voting Proto 尚未声明的 `ViewTaskStatistics`、`CastVote` 被列为 planned 例外；每条例外记录 operation ID、完整 method 和原因。测试会在方法进入 descriptor、目录项被删除、例外拼错或新增未声明方法时失败，要求同步清理例外。核对方向是“目录中的方法必须已声明或明确 planned”，Proto 中的内部方法不要求都进入目录。Descriptor 仅证明 RPC 合同存在，不证明服务端已实现、运行或部署。
+目录与 Proto 还通过独立 descriptor 测试核对：目录中的每个 RPC 必须能在生成的服务 descriptor 中精确找到。当前仅有尚未新增 Discovery Proto 的 `DiscoveryService/ListTasks` 被列为 planned 例外；第七阶段正式加入Voting方法后已移除相应两条例外；每条例外记录 operation ID、完整 method 和原因。测试会在方法进入 descriptor、目录项被删除、例外拼错或新增未声明方法时失败，要求同步清理例外。核对方向是“目录中的方法必须已声明或明确 planned”，Proto 中的内部方法不要求都进入目录。Descriptor 仅证明 RPC 合同存在，不证明服务端已实现、运行或部署。
 
 本次验收范围：`go test ./internal/contract ./internal/identity/... ./internal/gateway ./internal/platform`，以及这些包的 race 测试、静态检查和根目录 CI；该验证覆盖本地目录一致性，不代表公网部署验收。
 
@@ -214,3 +214,8 @@ Content 新增受信 `ApplyAssetReview` 审核决定应用端及 `CheckAssetAcce
 ### 第六阶段独立追加作品（2026-10-23，未发布）
 
 **Human Design**：网站用户向任何公开任务单方追加，单件审核通过即展示，不重审原任务，不影响投票资格。**Agent Self-Claimed**：Content独立保存追加投稿/不可变版本快照、双方服务复用既有outbox runner/租约/回执。新增EntrySubmission与单件RPC，旧TaskSubmission字段类型不变；Moderation仍负责案件/决定，Asset仍只负责文件。公开投影及文件授权由Content本地冻结数据和当前状态统一判断，无逐作品跨服务查询、无事务内RPC、无新服务/消息组件。数据/版本/锁序/升级/失败与验收见 [Content第12节](backend-content.md#12-第六阶段独立追加作品2026-10-23本地开发中未发布)。本地实现与验收不代表生产发布，也不提供Voting完整候选接口。
+
+
+### 第七阶段 Voting 实现边界（2026-10-25，Agent Self-Claimed）
+
+Voting独立服务拥有完整目录副本、gate、ballot、当前票与永久禁投；Content是唯一目录权威。目录写入使用持久意图/冻结/本地应用/完整快照激活/确认，用户写票在gate共享锁与账号guard下提交，目录变更用冲突独占锁；外部RPC不在数据库事务内。统计关闭先提交、结果未知独立确认，再用RR同快照计票。没有跨schema SQL/FK、逐作品RPC或递归探针。全量目录/HTTP各2MiB、最多4096项，超限拒绝；Challenge监督RPC仍未实现，不返回伪样本。设计、升级和本轮证据见[Voting](backend-voting.md)，历史Challenge Proto或fake结果不等于真实Voting协作验收。

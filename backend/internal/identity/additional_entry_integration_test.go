@@ -22,6 +22,7 @@ import (
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	votingpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/asset"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/content"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
@@ -30,6 +31,7 @@ import (
 	"github.com/KDZZZZZZ/human-worth/backend/internal/identity/repo/postgres"
 	identitygrpc "github.com/KDZZZZZZ/human-worth/backend/internal/identity/transport/grpc"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/moderation"
+	"github.com/KDZZZZZZ/human-worth/backend/internal/voting"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -50,6 +52,10 @@ type additionalActor struct {
 }
 
 type additionalEntryLab struct {
+	votingDB            *pgxpool.Pool
+	votes               [2]*voting.Server
+	voteClients         [2]votingpb.VotingServiceClient
+	catalogs            [2]contentpb.ContentServiceClient
 	identity            *identityLab
 	contentDB, reviewDB *pgxpool.Pool
 	contents            [2]*content.Server
@@ -62,7 +68,7 @@ type additionalEntryLab struct {
 
 // Independent service instances share real PostgreSQL and S3, not application
 // memory. All user commands and initial publication use HTTPS and real mTLS.
-func newAdditionalEntryLab(t *testing.T) *additionalEntryLab {
+func newAdditionalEntryLab(t *testing.T, enableVoting ...bool) *additionalEntryLab {
 	t.Helper()
 	cfg := sharedS3TestConfig(t)
 	l := newIdentityLab(t)
@@ -78,7 +84,21 @@ func newAdditionalEntryLab(t *testing.T) *additionalEntryLab {
 			contentpb.RegisterContentServiceServer(s, f.contents[i])
 		}))
 	}
+	if len(enableVoting) > 0 && enableVoting[0] {
+		f.votingDB = serviceTestDatabase(t, l, "voting", voting.Migrate, "../../../ops/voting/grants.sql")
+	}
 	for i := range f.contents {
+		var vc votingpb.VotingServiceClient
+		if f.votingDB != nil {
+			f.catalogs[i] = cc(i, "voting")
+			f.votes[i] = &voting.Server{DB: f.votingDB, Identity: l.client(t, i, "voting", l.pki), Content: f.catalogs[i]}
+			rpc := func(caller string) votingpb.VotingServiceClient {
+				return votingpb.NewVotingServiceClient(serviceTestGRPC(t, l, "voting", caller, voting.Authorization, func(s *grpc.Server) { votingpb.RegisterVotingServiceServer(s, f.votes[i]) }))
+			}
+			f.contents[i].Voting = rpc("content")
+			vc = rpc("gateway")
+			f.voteClients[i] = vc
+		}
 		store, err := asset.NewS3Storage(cfg)
 		must(t, err)
 		as := layeredAssetServer(adb, store, l.client(t, i, "asset", l.pki), cc(i, "asset"))
@@ -96,7 +116,7 @@ func newAdditionalEntryLab(t *testing.T) *additionalEntryLab {
 			}))
 		}
 		f.senders[i] = mc("content")
-		h, err := gateway.New(l.clients[i], gateway.Options{Origin: l.origin, Content: f.gateways[i], Asset: ac("gateway"), Moderation: mc("gateway"), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		h, err := gateway.New(l.clients[i], gateway.Options{Voting: vc, Origin: l.origin, Content: f.gateways[i], Asset: ac("gateway"), Moderation: mc("gateway"), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 		must(t, err)
 		l.web[i].Config.Handler = h
 	}

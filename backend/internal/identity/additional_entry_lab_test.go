@@ -186,6 +186,7 @@ func TestKindAdditionalEntryDeployment(t *testing.T) {
 		t.Fatal("restore Moderation replicas")
 	}
 	l.kube("", "rollout", "status", "deployment/moderation", "--timeout=120s")
+	l.waitModerationRecovery(admin)
 	if review := waitReview(entry.ReviewID, "pending"); review.DeliveryState != "undecided" {
 		t.Fatal("entry case arrived already decided")
 	}

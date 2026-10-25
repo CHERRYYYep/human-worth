@@ -38,28 +38,19 @@ func (s *Server) GetEntryReviewSnapshot(ctx context.Context, r *pb.GetEntryRevie
 	}
 	return &pb.GetEntryReviewSnapshotResponse{Snapshot: snap}, nil
 }
-func (s *Server) ApplyEntryReviewDecision(ctx context.Context, r *pb.ApplyEntryReviewDecisionRequest) (*pb.ApplyEntryReviewDecisionResponse, error) {
-	if err := requireContentCaller(ctx, "moderation"); err != nil {
+func (s *Server) localApplyEntryReviewDecision(ctx context.Context, r *pb.ApplyEntryReviewDecisionRequest) (*pb.ApplyEntryReviewDecisionResponse, error) {
+	if err := decisionCaller(ctx); err != nil {
 		return nil, err
 	}
-	if !keyPattern.MatchString(r.GetDecisionId()) || !taskPattern.MatchString(r.GetTaskId()) || !reviewedEntryPattern.MatchString(r.GetEntryId()) || r.GetSubmissionRevision() < 1 || len(r.GetSnapshotSha256()) != 64 {
-		return nil, invalid("invalid_review_decision")
-	}
-	if r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_REJECT {
-		return nil, invalid("invalid_review_decision")
-	}
-	if !utf8.ValidString(r.GetReason()) || strings.ContainsRune(r.GetReason(), 0) || len(r.GetReason()) > 4000 {
-		return nil, invalid("invalid_review_decision")
-	}
-	if r.Outcome == pb.ReviewOutcome_REVIEW_OUTCOME_REJECT && strings.TrimSpace(r.GetReason()) == "" {
-		return nil, invalid("rejection_reason_required")
+	if err := validateApplyEntryReviewDecision(r); err != nil {
+		return nil, err
 	}
 	wire, err := (proto.MarshalOptions{Deterministic: true}).Marshal(r)
 	if err != nil {
 		return nil, invalid("invalid_review_decision")
 	}
 	hash := sha256.Sum256(wire)
-	tx, err := s.DB.Begin(ctx)
+	tx, err := s.beginCatalogTx(ctx)
 	if err != nil {
 		return nil, storage(err)
 	}
@@ -258,4 +249,20 @@ func entrySnapshotDigest(snap *pb.EntryReviewSnapshot) string {
 	wire, _ := (proto.MarshalOptions{Deterministic: true}).Marshal(snap)
 	h := sha256.Sum256(wire)
 	return fmt.Sprintf("%x", h)
+}
+
+func validateApplyEntryReviewDecision(r *pb.ApplyEntryReviewDecisionRequest) error {
+	if !keyPattern.MatchString(r.GetDecisionId()) || !taskPattern.MatchString(r.GetTaskId()) || !reviewedEntryPattern.MatchString(r.GetEntryId()) || r.GetSubmissionRevision() < 1 || len(r.GetSnapshotSha256()) != 64 {
+		return invalid("invalid_review_decision")
+	}
+	if r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_APPROVE && r.Outcome != pb.ReviewOutcome_REVIEW_OUTCOME_REJECT {
+		return invalid("invalid_review_decision")
+	}
+	if !utf8.ValidString(r.GetReason()) || strings.ContainsRune(r.GetReason(), 0) || len(r.GetReason()) > 4000 {
+		return invalid("invalid_review_decision")
+	}
+	if r.Outcome == pb.ReviewOutcome_REVIEW_OUTCOME_REJECT && strings.TrimSpace(r.GetReason()) == "" {
+		return invalid("rejection_reason_required")
+	}
+	return nil
 }

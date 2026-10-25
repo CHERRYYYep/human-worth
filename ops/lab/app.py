@@ -16,6 +16,73 @@ from services import load_services, validate_manifest
 REPO = HERE.parent.parent
 
 
+def catalog_image_supported(image, expected_id=None):
+    # Execute the actual local image by immutable ID, without secrets/network.
+    # Candidate annotations/env and the mere presence of Voting prove nothing.
+    probe='human-worth-catalog-probe-'+secrets.token_hex(8)
+    try:
+        image_id=run('docker','image','inspect',image,'--format','{{.Id}}',capture=True).stdout.strip()
+        if not re.fullmatch(r'sha256:[a-f0-9]{64}',image_id) or expected_id is not None and image_id!=expected_id:
+            return False
+        result=subprocess.run(['docker','run','--name',probe,'--rm','--network=none','--read-only','--cap-drop=ALL',
+                               '--pids-limit=16','--cpus=0.25','--memory=64m','--memory-swap=64m',
+                               '--security-opt=no-new-privileges','--entrypoint','/service',image_id,
+                               'catalog-protocol-version'],text=True,capture_output=True,timeout=15)
+        if result.returncode or result.stdout.strip()!='voting-catalog-v1':return False
+        if run('docker','image','inspect',image,'--format','{{.Id}}',capture=True).stdout.strip()!=image_id:return False
+        evidence=STATE/'catalog-capabilities.json'
+        known=json.loads(evidence.read_text()) if evidence.exists() else {}
+        known[image]={'imageId':image_id,'protocol':'voting-catalog-v1'}
+        temp=evidence.with_suffix('.tmp');temp.write_text(json.dumps(known,sort_keys=True)+'\n');temp.replace(evidence)
+        return True
+    except (subprocess.SubprocessError,OSError,ValueError):
+        return False
+    finally:
+        # Killing a timed-out Docker CLI does not kill its container.
+        subprocess.run(['docker','rm','-f',probe],text=True,capture_output=True,timeout=15,check=False)
+
+
+def catalog_enabled(state=None):
+    return ((state or STATE)/'voting-catalog-v1.enabled').exists()
+
+
+def enable_catalog(state=None):
+    # Conservatively persist BEFORE activation/draining, including failed first
+    # attempts. Never remove this marker during rollback or process restart.
+    state=state or STATE
+    with (state/'voting-catalog-v1.enabled').open('w') as marker:
+        marker.write('voting-catalog-v1\n');marker.flush();os.fsync(marker.fileno())
+    fd=os.open(state,os.O_RDONLY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+
+
+def catalog_capable(deployment):
+    containers=deployment.get('spec',{}).get('template',{}).get('spec',{}).get('containers',[])
+    return len(containers)==1 and any(item.get('name')=='VOTING_TARGET' and item.get('value')
+        for item in containers[0].get('env',[])) and catalog_image_supported(containers[0].get('image',''))
+
+
+def prepare_catalog_activation(workloads):
+    if 'voting' not in workloads:
+        if catalog_enabled():raise RuntimeError('Catalog-v1 enabled; refusing activation without Voting')
+        return
+    content=next(obj for obj in workloads['content'] if obj['kind']=='Deployment')
+    if not catalog_capable(content):
+        raise RuntimeError('Content image lacks verified catalog-v1 capability')
+    first=not catalog_enabled()
+    enable_catalog()
+    current=json.loads(kube('-n','human-worth','get','deployment','content','--ignore-not-found','-o','json',capture=True).stdout or '{}')
+    pods=json.loads(kube('-n','human-worth','get','pods','-l','app=content','-o','json',capture=True).stdout)['items']
+    if first or (current and not catalog_capable(current)) or any(
+            len(pod['spec']['containers'])!=1 or not catalog_image_supported(pod['spec']['containers'][0]['image']) for pod in pods):
+        if current:kube('-n','human-worth','scale','deployment/content','--replicas=0')
+        # Wait through graceful termination/in-flight decisions. Never overlap
+        # an unguarded writer with new Voting/Content workers on first upgrade.
+        if current or pods:
+            kube('-n','human-worth','wait','--for=delete','pod','-l','app=content','--timeout=120s')
+
+
 def private_file(path, value):
     if not path.exists():
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -209,6 +276,8 @@ def main(revision=None, before_activation=None):
     if REPO in STATE.resolve().parents: raise RuntimeError('Lab secrets must be outside the repository')
     if not KUBECONFIG.exists(): raise RuntimeError('Run infra.py first')
     services=load_services(REPO)
+    if catalog_enabled() and 'voting' not in services:
+        raise RuntimeError('Catalog-v1 enabled; refusing activation without Voting')
     # Asset's private lab store is an explicit module dependency. It creates no
     # public endpoint and has no filesystem fallback; installation is idempotent.
     storage=None
@@ -219,6 +288,10 @@ def main(revision=None, before_activation=None):
         install_asset_storage=lambda: install(storage)
     images=build_images(revision,services)
     workloads={name:manifests(name,images['images'][name]['tag']) for name in services}
+    if 'voting' in services:
+        content=next(obj for obj in workloads['content'] if obj['kind']=='Deployment')
+        if not catalog_capable(content) or not catalog_image_supported(images['images']['content']['tag'],images['images']['content']['id']):
+            raise RuntimeError('Content image lacks verified catalog-v1 capability')
     if before_activation: before_activation()
     if install_asset_storage: install_asset_storage()
     database_secrets(services,storage)
@@ -257,12 +330,15 @@ def main(revision=None, before_activation=None):
     egress=egress.replace('metadata: {labels: {app: google-egress}}','metadata: {labels: {app: google-egress}, annotations: {human-worth.io/config: "'+egress_hash+'"}}')
     apply(egress)
     kube('-n','human-worth','rollout','status','deployment/google-egress','--timeout=180s')
+    prepare_catalog_activation(workloads)
     # Install all peer policies before waiting for a newly added dependency.
     for objects in workloads.values():
         for obj in objects:
             if obj['kind'] != 'Deployment':
                 kube('apply','--server-side','--field-manager=human-worth-release','--force-conflicts','-f','-',input=json.dumps(obj))
     for name, spec in services.items():
+        if name=='gateway' and 'voting' in services:
+            kube('-n','human-worth','exec','deployment/content','--','/service','bootstrap-voting')
         obj=next(obj for obj in workloads[name] if obj['kind']=='Deployment')
         # Environment and TLS credentials are read on process startup; secret changes require a rollout.
         fingerprint=hashlib.sha256((STATE/(name+'.crt')).read_bytes())
