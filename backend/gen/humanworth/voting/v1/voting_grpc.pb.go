@@ -19,6 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	VotingService_GetVotingEligibility_FullMethodName         = "/humanworth.voting.v1.VotingService/GetVotingEligibility"
+	VotingService_GetBallot_FullMethodName                    = "/humanworth.voting.v1.VotingService/GetBallot"
+	VotingService_CastVote_FullMethodName                     = "/humanworth.voting.v1.VotingService/CastVote"
+	VotingService_ViewTaskStatistics_FullMethodName           = "/humanworth.voting.v1.VotingService/ViewTaskStatistics"
+	VotingService_PrepareCatalogChange_FullMethodName         = "/humanworth.voting.v1.VotingService/PrepareCatalogChange"
+	VotingService_ActivateCatalogSnapshot_FullMethodName      = "/humanworth.voting.v1.VotingService/ActivateCatalogSnapshot"
+	VotingService_GetCatalogTransition_FullMethodName         = "/humanworth.voting.v1.VotingService/GetCatalogTransition"
 	VotingService_GetHumanPreferenceSnapshot_FullMethodName   = "/humanworth.voting.v1.VotingService/GetHumanPreferenceSnapshot"
 	VotingService_CheckHumanPreferenceSnapshot_FullMethodName = "/humanworth.voting.v1.VotingService/CheckHumanPreferenceSnapshot"
 )
@@ -29,6 +36,16 @@ const (
 //
 // VotingService 的机器监督接口仅允许 Challenge，不能映射为网站或 MCP 统计旁路。
 type VotingServiceClient interface {
+	// Gateway mTLS + current method-bound assertion. No anonymous callers.
+	GetVotingEligibility(ctx context.Context, in *GetVotingEligibilityRequest, opts ...grpc.CallOption) (*GetVotingEligibilityResponse, error)
+	GetBallot(ctx context.Context, in *GetBallotRequest, opts ...grpc.CallOption) (*GetBallotResponse, error)
+	CastVote(ctx context.Context, in *CastVoteRequest, opts ...grpc.CallOption) (*CastVoteResponse, error)
+	// Explicit true only; commits permanent closure BEFORE generating statistics.
+	ViewTaskStatistics(ctx context.Context, in *ViewTaskStatisticsRequest, opts ...grpc.CallOption) (*ViewTaskStatisticsResponse, error)
+	// Content mTLS only. Persisted per-task fence; no automatic timeout reopening.
+	PrepareCatalogChange(ctx context.Context, in *PrepareCatalogChangeRequest, opts ...grpc.CallOption) (*PrepareCatalogChangeResponse, error)
+	ActivateCatalogSnapshot(ctx context.Context, in *ActivateCatalogSnapshotRequest, opts ...grpc.CallOption) (*ActivateCatalogSnapshotResponse, error)
+	GetCatalogTransition(ctx context.Context, in *GetCatalogTransitionRequest, opts ...grpc.CallOption) (*GetCatalogTransitionResponse, error)
 	GetHumanPreferenceSnapshot(ctx context.Context, in *GetHumanPreferenceSnapshotRequest, opts ...grpc.CallOption) (*GetHumanPreferenceSnapshotResponse, error)
 	CheckHumanPreferenceSnapshot(ctx context.Context, in *CheckHumanPreferenceSnapshotRequest, opts ...grpc.CallOption) (*CheckHumanPreferenceSnapshotResponse, error)
 }
@@ -39,6 +56,76 @@ type votingServiceClient struct {
 
 func NewVotingServiceClient(cc grpc.ClientConnInterface) VotingServiceClient {
 	return &votingServiceClient{cc}
+}
+
+func (c *votingServiceClient) GetVotingEligibility(ctx context.Context, in *GetVotingEligibilityRequest, opts ...grpc.CallOption) (*GetVotingEligibilityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVotingEligibilityResponse)
+	err := c.cc.Invoke(ctx, VotingService_GetVotingEligibility_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *votingServiceClient) GetBallot(ctx context.Context, in *GetBallotRequest, opts ...grpc.CallOption) (*GetBallotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBallotResponse)
+	err := c.cc.Invoke(ctx, VotingService_GetBallot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *votingServiceClient) CastVote(ctx context.Context, in *CastVoteRequest, opts ...grpc.CallOption) (*CastVoteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CastVoteResponse)
+	err := c.cc.Invoke(ctx, VotingService_CastVote_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *votingServiceClient) ViewTaskStatistics(ctx context.Context, in *ViewTaskStatisticsRequest, opts ...grpc.CallOption) (*ViewTaskStatisticsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ViewTaskStatisticsResponse)
+	err := c.cc.Invoke(ctx, VotingService_ViewTaskStatistics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *votingServiceClient) PrepareCatalogChange(ctx context.Context, in *PrepareCatalogChangeRequest, opts ...grpc.CallOption) (*PrepareCatalogChangeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrepareCatalogChangeResponse)
+	err := c.cc.Invoke(ctx, VotingService_PrepareCatalogChange_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *votingServiceClient) ActivateCatalogSnapshot(ctx context.Context, in *ActivateCatalogSnapshotRequest, opts ...grpc.CallOption) (*ActivateCatalogSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ActivateCatalogSnapshotResponse)
+	err := c.cc.Invoke(ctx, VotingService_ActivateCatalogSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *votingServiceClient) GetCatalogTransition(ctx context.Context, in *GetCatalogTransitionRequest, opts ...grpc.CallOption) (*GetCatalogTransitionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCatalogTransitionResponse)
+	err := c.cc.Invoke(ctx, VotingService_GetCatalogTransition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *votingServiceClient) GetHumanPreferenceSnapshot(ctx context.Context, in *GetHumanPreferenceSnapshotRequest, opts ...grpc.CallOption) (*GetHumanPreferenceSnapshotResponse, error) {
@@ -67,6 +154,16 @@ func (c *votingServiceClient) CheckHumanPreferenceSnapshot(ctx context.Context, 
 //
 // VotingService 的机器监督接口仅允许 Challenge，不能映射为网站或 MCP 统计旁路。
 type VotingServiceServer interface {
+	// Gateway mTLS + current method-bound assertion. No anonymous callers.
+	GetVotingEligibility(context.Context, *GetVotingEligibilityRequest) (*GetVotingEligibilityResponse, error)
+	GetBallot(context.Context, *GetBallotRequest) (*GetBallotResponse, error)
+	CastVote(context.Context, *CastVoteRequest) (*CastVoteResponse, error)
+	// Explicit true only; commits permanent closure BEFORE generating statistics.
+	ViewTaskStatistics(context.Context, *ViewTaskStatisticsRequest) (*ViewTaskStatisticsResponse, error)
+	// Content mTLS only. Persisted per-task fence; no automatic timeout reopening.
+	PrepareCatalogChange(context.Context, *PrepareCatalogChangeRequest) (*PrepareCatalogChangeResponse, error)
+	ActivateCatalogSnapshot(context.Context, *ActivateCatalogSnapshotRequest) (*ActivateCatalogSnapshotResponse, error)
+	GetCatalogTransition(context.Context, *GetCatalogTransitionRequest) (*GetCatalogTransitionResponse, error)
 	GetHumanPreferenceSnapshot(context.Context, *GetHumanPreferenceSnapshotRequest) (*GetHumanPreferenceSnapshotResponse, error)
 	CheckHumanPreferenceSnapshot(context.Context, *CheckHumanPreferenceSnapshotRequest) (*CheckHumanPreferenceSnapshotResponse, error)
 	mustEmbedUnimplementedVotingServiceServer()
@@ -79,6 +176,27 @@ type VotingServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedVotingServiceServer struct{}
 
+func (UnimplementedVotingServiceServer) GetVotingEligibility(context.Context, *GetVotingEligibilityRequest) (*GetVotingEligibilityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetVotingEligibility not implemented")
+}
+func (UnimplementedVotingServiceServer) GetBallot(context.Context, *GetBallotRequest) (*GetBallotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetBallot not implemented")
+}
+func (UnimplementedVotingServiceServer) CastVote(context.Context, *CastVoteRequest) (*CastVoteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CastVote not implemented")
+}
+func (UnimplementedVotingServiceServer) ViewTaskStatistics(context.Context, *ViewTaskStatisticsRequest) (*ViewTaskStatisticsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ViewTaskStatistics not implemented")
+}
+func (UnimplementedVotingServiceServer) PrepareCatalogChange(context.Context, *PrepareCatalogChangeRequest) (*PrepareCatalogChangeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrepareCatalogChange not implemented")
+}
+func (UnimplementedVotingServiceServer) ActivateCatalogSnapshot(context.Context, *ActivateCatalogSnapshotRequest) (*ActivateCatalogSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ActivateCatalogSnapshot not implemented")
+}
+func (UnimplementedVotingServiceServer) GetCatalogTransition(context.Context, *GetCatalogTransitionRequest) (*GetCatalogTransitionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCatalogTransition not implemented")
+}
 func (UnimplementedVotingServiceServer) GetHumanPreferenceSnapshot(context.Context, *GetHumanPreferenceSnapshotRequest) (*GetHumanPreferenceSnapshotResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetHumanPreferenceSnapshot not implemented")
 }
@@ -104,6 +222,132 @@ func RegisterVotingServiceServer(s grpc.ServiceRegistrar, srv VotingServiceServe
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&VotingService_ServiceDesc, srv)
+}
+
+func _VotingService_GetVotingEligibility_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVotingEligibilityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).GetVotingEligibility(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_GetVotingEligibility_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).GetVotingEligibility(ctx, req.(*GetVotingEligibilityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VotingService_GetBallot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBallotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).GetBallot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_GetBallot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).GetBallot(ctx, req.(*GetBallotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VotingService_CastVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CastVoteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).CastVote(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_CastVote_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).CastVote(ctx, req.(*CastVoteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VotingService_ViewTaskStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ViewTaskStatisticsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).ViewTaskStatistics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_ViewTaskStatistics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).ViewTaskStatistics(ctx, req.(*ViewTaskStatisticsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VotingService_PrepareCatalogChange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrepareCatalogChangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).PrepareCatalogChange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_PrepareCatalogChange_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).PrepareCatalogChange(ctx, req.(*PrepareCatalogChangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VotingService_ActivateCatalogSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ActivateCatalogSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).ActivateCatalogSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_ActivateCatalogSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).ActivateCatalogSnapshot(ctx, req.(*ActivateCatalogSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VotingService_GetCatalogTransition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCatalogTransitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VotingServiceServer).GetCatalogTransition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VotingService_GetCatalogTransition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VotingServiceServer).GetCatalogTransition(ctx, req.(*GetCatalogTransitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _VotingService_GetHumanPreferenceSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -149,6 +393,34 @@ var VotingService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "humanworth.voting.v1.VotingService",
 	HandlerType: (*VotingServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetVotingEligibility",
+			Handler:    _VotingService_GetVotingEligibility_Handler,
+		},
+		{
+			MethodName: "GetBallot",
+			Handler:    _VotingService_GetBallot_Handler,
+		},
+		{
+			MethodName: "CastVote",
+			Handler:    _VotingService_CastVote_Handler,
+		},
+		{
+			MethodName: "ViewTaskStatistics",
+			Handler:    _VotingService_ViewTaskStatistics_Handler,
+		},
+		{
+			MethodName: "PrepareCatalogChange",
+			Handler:    _VotingService_PrepareCatalogChange_Handler,
+		},
+		{
+			MethodName: "ActivateCatalogSnapshot",
+			Handler:    _VotingService_ActivateCatalogSnapshot_Handler,
+		},
+		{
+			MethodName: "GetCatalogTransition",
+			Handler:    _VotingService_GetCatalogTransition_Handler,
+		},
 		{
 			MethodName: "GetHumanPreferenceSnapshot",
 			Handler:    _VotingService_GetHumanPreferenceSnapshot_Handler,

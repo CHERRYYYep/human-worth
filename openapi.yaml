@@ -896,9 +896,10 @@ paths:
       tags: [Voting]
       operationId: getVotingEligibility
       summary: 读取当前账号在该题的投票资格
-      description: 不含票数，不改变资格；账号从认证取得，不接受 accountId 参数。
+      description: 不含票数，不改变资格；账号从认证取得，不接受 accountId 或其他查询参数。必要Content/Identity检查失败拒绝放行，失效凭据不降级匿名。
       x-scenarios: [S1, S3, S5]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       security: [{WebSession: []}, {McpToken: []}]
       responses:
         '200':
@@ -916,12 +917,13 @@ paths:
       summary: 一次获取该题全部过审作品供单选投票
       description: |
         一次返回同一目录版本下该任务全部审核通过、允许展示的作品，包含全部 human 和 agent 作品；不分页、不抽样、不做两件配对。
-        服务端生成 ballotId（响应字段 id），绑定当前账号、任务、catalogRevision 及完整候选 ID 集合；作品文件按引用另行加载，不内嵌文件字节。
+        服务端生成 ballotId（响应字段 id），绑定当前账号、任务、generation、catalogRevision 及完整候选集合摘要，有效期15分钟；作品文件按引用另行加载，不内嵌文件字节。
         用户从全部作品中单选一件最认可的；响应只含作品和本人的当前选票，不含其他人的选择、票数或得票占比。
         读取不提交选票、不改变永久资格；永久禁投返回 403。没有过审作品时仍返回 200 和空 entries，页面不能提交选票。
-        必须从内容服务核实完整集合，目录未同步或不能确认完整性时返回 503，不能以旧的部分候选成功响应。
+        必须从内容服务核实完整集合，目录未同步或不能确认完整性时返回 503，不能以旧的部分候选成功响应。最多4096项，Proto及HTTP完整响应各不超过2MiB；超限503 catalog_too_large，不截断（Agent Self-Claimed）。
       x-scenarios: [S1, H1]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       security: [{WebSession: []}]
       responses:
         '200':
@@ -941,14 +943,17 @@ paths:
       description: |
         提交一个 entryId，不接受左右选项、平票、多选或评分；跳过不发送选票。
         技术提案：每账号每任务只保留一份当前选择；未永久禁投前可以改选，替换选择而不新增一票。
-        ballotId 必须绑定当前账号、任务和完整候选集合；新写入时核实目录版本最新，entryId 仍在该题过审候选中。
+        ballotId 必须绑定当前账号、任务和完整候选集合；新写入时核实由Voting持久gate与Content目录变更冻结协议串行保证目录仍有效，entryId 仍在该题过审候选中。
         新作品过审或作品撤销通过导致目录版本变化时，新投票请求返回 409，客户端重新加载全部作品，不静默沿用旧候选。
         expectedVoteRevision 为本人当前选票版本，尚未投票时为 0；过期版本返回 409，避免迟到重试覆盖后来的选择。
         同请求最近一次成功结果的重试返回该选票，不重复计票；已永久禁投时即使重放旧票也返回 403。
+        精确回放仍要求原ballot记录存在且目录generation/hash未变；过期ballot拒绝新写，最近成功回放可在清理前找回。过期超过一天的ballot记录有界清理后不承诺旧请求找回；当前票和永久禁投事实不清理。
         投票与 statistics-access 在账号 × 任务上串行化；资格关闭后不得新增或修改选择。关闭前已提交的选择保留。
         返回本人的选票，不返回统计；管理员身份不豁免，MCP token 无权投票。版本、改选与幂等细则为 Agent Self-Claimed。
+      security: [{WebSession: [], CsrfToken: []}]
       x-scenarios: [S1, S5, H1]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       requestBody:
         required: true
         content:
@@ -978,7 +983,8 @@ paths:
         网站、MCP、榜单下钻和管理员具体反馈查看共用此流程，没有无副作用的 GET 统计旁路。
         Cookie 调用须同时提供 CSRF token；MCP Bearer 调用不使用 Cookie。响应及错误均不可缓存。
       x-scenarios: [S1, S3, S4, S5, S6]
-      x-implementation-status: planned
+      x-implementation-status: implemented
+      x-deployment-status: unpublished
       security:
         - WebSession: []
           CsrfToken: []
@@ -1995,11 +2001,13 @@ components:
     Ballot:
       type: object
       additionalProperties: false
-      required: [id, taskId, catalogRevision, entries, currentVote]
+      required: [id, taskId, catalogRevision, generation, expiresAt, entries, currentVote]
       properties:
         id: {$ref: '#/components/schemas/Id'}
         taskId: {$ref: '#/components/schemas/Id'}
         catalogRevision: {type: integer, minimum: 1}
+        generation: {type: integer, minimum: 1, description: 目录控制代际，区别于正文和展示版本}
+        expiresAt: {$ref: '#/components/schemas/Timestamp'}
         entries:
           type: array
           items: {$ref: '#/components/schemas/ApprovedEntry'}

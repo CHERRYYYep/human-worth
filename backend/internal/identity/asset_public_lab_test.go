@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -64,11 +63,17 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 		if t.Failed() {
 			// Capture method/status diagnostics before later tests replace Content
 			// Pods. Application RPC logs contain no actor tokens or file contents.
-			for _, service := range []string{"content", "asset"} {
+			for _, service := range []string{"gateway", "content", "asset"} {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				out, err := l.command(ctx, "", "logs", "-l", "app="+service, "--tail=100", "--prefix=true").CombinedOutput()
+				out, err := l.command(ctx, "", "logs", "-l", "app="+service, "--since=8m", "--tail=1000", "--prefix=true").CombinedOutput()
 				cancel()
-				t.Logf("%s RPC diagnostics (%v):\n%s", service, err, out)
+				var relevant []string
+				for _, line := range strings.Split(string(out), "\n") {
+					if !strings.Contains(line, "/grpc.health.v1.Health/") {
+						relevant = append(relevant, line)
+					}
+				}
+				t.Logf("%s RPC diagnostics (%v):\n%s", service, err, strings.Join(relevant, "\n"))
 			}
 		}
 	})
@@ -81,6 +86,9 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 		t.Fatal("expected two Asset replicas")
 	}
 	clients := []*http.Client{l.pinnedGateway("public-asset-a", pods.Items[0].Status.PodIP), l.pinnedGateway("public-asset-b", pods.Items[1].Status.PodIP)}
+	// Previous lab cases replace Asset/Content and stop S3. Private Asset health
+	// does not establish either Asset caller's public authorization connection.
+	l.waitFileAuthorization(clients, kindUser{})
 	data := []byte("approved private upload becomes a reviewed file, never a permanent URL\n")
 	var upload kindUpload
 	body := fmt.Sprintf(`{"filename":"approved.txt","mediaType":"text/plain","expectedBytes":%d,"sha256":"%x"}`, len(data), sha256.Sum256(data))
@@ -162,19 +170,6 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 	restore.GetEntryReview().State = contentpb.ReviewedEntryState_REVIEWED_ENTRY_STATE_APPROVED
 	apply(restore)
 	download(200)
-	down := proto.Clone(approval).(*contentpb.ApplyAssetReviewRequest)
-	down.DecisionId = "kind-public-down0001"
-	down.ExpectedRevision = 3
-	down.Decision = &contentpb.ApplyAssetReviewRequest_TaskState{TaskState: contentpb.ReviewedTaskState_REVIEWED_TASK_STATE_TAKEN_DOWN}
-	apply(down)
-	download(404)
-	apply(approval)
-	download(404)
-	reopen := proto.Clone(approval).(*contentpb.ApplyAssetReviewRequest)
-	reopen.DecisionId = "kind-public-reopen01"
-	reopen.ExpectedRevision = 4
-	apply(reopen)
-	download(200)
 	// Actual dependency outage. Asset remains independently ready for uploads and
 	// private reads; public requests cannot fall back to cached approval.
 	restoreContent := func() {
@@ -195,32 +190,38 @@ func TestKindPublicAssetDeployment(t *testing.T) {
 		l.request(client, kindUser{}, "GET", path(entry), "", nil, 503, 504)
 	}
 	l.request(clients[0], user, "GET", "/api/me/assets/"+upload.Asset.ID+"/content", "", nil, 200)
-	if l.sql(`SELECT count(*) FROM content.reviewed_tasks WHERE task_id='`+task.ID+`' AND state='published' AND revision=5`) != "1" {
+	if l.sql(`SELECT count(*) FROM content.reviewed_tasks WHERE task_id='`+task.ID+`' AND state='published' AND revision=3`) != "1" {
 		t.Fatal("outage changed review authority")
 	}
 	restoreContent()
-	// Headless gRPC DNS refresh is rate-limited; healthy replacement Pods do
-	// not imply that every existing client has resolved their new IPs yet.
-	deadline := time.Now().Add(90 * time.Second)
-	for _, client := range clients {
-		for {
-			req, e := http.NewRequestWithContext(t.Context(), "GET", "https://worth.oopsbox.cn"+path(entry), nil)
-			if e != nil {
-				t.Fatal(e)
-			}
-			resp, e := client.Do(req)
-			if e == nil {
-				actual, readErr := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if resp.StatusCode == 200 && readErr == nil && bytes.Equal(actual, data) {
-					break
-				}
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("public dependency did not recover")
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
+	// service port-forward selects ONE Pod. Recreate only the synthetic legacy
+	// maintenance caller after deleting all Content Pods; the old tunnel cannot
+	// retarget itself. Real application DNS/Service recovery is checked below.
+	reviewer = l.reviewClient()
+	l.waitFileAuthorization(clients, kindUser{})
+	download(200) // Strict real-file status AND bytes, outside the recovery loop.
+	down := proto.Clone(approval).(*contentpb.ApplyAssetReviewRequest)
+	down.DecisionId = "kind-public-down0001"
+	down.ExpectedRevision = 3
+	down.Decision = &contentpb.ApplyAssetReviewRequest_TaskState{TaskState: contentpb.ReviewedTaskState_REVIEWED_TASK_STATE_TAKEN_DOWN}
+	apply(down)
+	download(404)
+	apply(approval)
+	download(404)
+	reopen := proto.Clone(approval).(*contentpb.ApplyAssetReviewRequest)
+	reopen.DecisionId = "kind-public-reopen01"
+	reopen.ExpectedRevision = 4
+	ctx, cancel = context.WithTimeout(t.Context(), 5*time.Second)
+	_, err = reviewer.ApplyAssetReview(ctx, reopen)
+	cancel()
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatal("closed Voting tombstone reopened", err)
 	}
-	t.Log("PASS: real HTTPS/mTLS/PostgreSQL/S3 public read across two Asset Pods, revoke/take-down denial and Content outage/recovery; no Moderation service or public deployment")
+	download(404)
+	l.waitGatewayEndpoints()
+	normal := l.httpClientAddress(getenvRequired(t, "HUMAN_WORTH_VERIFY_GATEWAY_ADDRESS"))
+	normal.Transport.(*http.Transport).DisableKeepAlives = true
+	l.request(normal, kindUser{}, "GET", path(entry), "", nil, 404)
+	l.request(normal, user, "GET", "/api/me/tasks/"+task.ID, "", nil, 200)
+	t.Log("PASS: real HTTPS/mTLS/PostgreSQL/S3 public read across two Asset Pods, revoke/take-down denial and Content outage/recovery; legacy caller compatibility; formal real Moderation tested separately; no public deployment")
 }

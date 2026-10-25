@@ -15,6 +15,42 @@ spec.loader.exec_module(release)
 
 
 class IdentityReleaseTest(unittest.TestCase):
+    def test_catalog_activation_failure_never_restores_legacy_or_scales_voting(self):
+        sha='a'*40
+        previous=[{'kind':'Deployment','metadata':{'name':name},'spec':{'replicas':2,'template':{'spec':{'containers':[{'image':'human-worth/'+name+':previous'}]}}}} for name in ['identity','content','gateway']]
+        added={'kind':'Deployment','metadata':{'name':'voting'}}
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);state=base/'private';state.mkdir()
+            path=base/'releases'/sha/'backend/cmd/identity';path.mkdir(parents=True);(path/'main.go').write_text('package main')
+            with patch.object(release,'BASE',base),patch.object(release,'STATE',state),patch.object(release.app,'STATE',state),patch.object(release,'fetch_revision',return_value=sha),patch.object(release,'require_approved'),patch.object(release,'load_services',return_value={name:{'checks':[]} for name in ['identity','voting','content','gateway']}),patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0)),patch.object(release,'snapshot',side_effect=[previous,previous+[added]]),patch.object(release,'kube') as kube,patch.object(release,'restore') as restore,patch.object(release.app,'REPO',base),patch.object(release.app,'main',side_effect=RuntimeError('bootstrap failed')),patch.object(release,'wait_health',return_value=True):
+                with self.assertRaisesRegex(RuntimeError,'rollback refused'):release.reconcile()
+                restore.assert_not_called()
+                kube.assert_not_called()
+                self.assertTrue((state/'voting-catalog-v1.enabled').exists())
+                self.assertEqual(json.loads((base/'state.json').read_text())['failed_sha'],sha)
+
+    def test_catalog_restore_rejects_unknown_or_legacy_before_any_mutation(self):
+        for protocol in [False,True]:
+            with self.subTest(protocol=protocol),tempfile.TemporaryDirectory() as tmp,patch.object(release,'STATE',Path(tmp)),patch.object(release.app,'catalog_image_supported',return_value=protocol),patch.object(release,'kube') as kube:
+                release.app.enable_catalog(Path(tmp))
+                content={'kind':'Deployment','metadata':{'name':'content'},'spec':{'template':{'spec':{'containers':[{'image':'human-worth/content:old','env':[{'name':'VOTING_TARGET','value':'voting'}]}]}}}}
+                voting={'kind':'Deployment','metadata':{'name':'voting'},'spec':{}}
+                if protocol:
+                    release.restore([content,voting],None)
+                    self.assertEqual(kube.call_count,4)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'rollback refused'):release.restore([content,voting],None)
+                    kube.assert_not_called()
+                kube.reset_mock()
+                with self.assertRaisesRegex(RuntimeError,'rollback refused'):release.restore([content],None)
+                kube.assert_not_called()
+
+    def test_existing_voting_also_requires_compatible_restore_without_marker(self):
+        previous=[{'kind':'Deployment','metadata':{'name':'voting'},'spec':{}}]
+        with tempfile.TemporaryDirectory() as tmp,patch.object(release,'STATE',Path(tmp)),patch.object(release,'kube') as kube:
+            with self.assertRaisesRegex(RuntimeError,'rollback refused'):release.restore(previous,None)
+            kube.assert_not_called()
+
     def test_health_wait_handles_transient_failure_and_has_a_deadline(self):
         with patch.object(release,'health',side_effect=[False,False,True]),patch.object(release.time,'sleep') as sleep:
             self.assertTrue(release.wait_health('approved'))

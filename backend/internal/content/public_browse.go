@@ -55,7 +55,7 @@ func (s *Server) GetTask(ctx context.Context, r *pb.GetTaskRequest) (*pb.GetTask
 	out := &pb.PublicTask{Author: &pb.PublicAuthor{}}
 	var published *time.Time
 	err := s.DB.QueryRow(ctx, `SELECT t.task_id,t.source_revision,t.snapshot->>'title',t.snapshot->>'summary',t.snapshot->>'description',t.snapshot->>'category',d.author_id,t.published_at
- FROM content.reviewed_tasks t JOIN content.task_drafts d ON d.id=t.task_id WHERE t.task_id=$1 AND t.state='published'`, r.TaskId).Scan(&out.Id, &out.Revision, &out.Title, &out.Summary, &out.Description, &out.Category, &out.Author.Id, &published)
+ FROM content.reviewed_tasks t JOIN content.task_drafts d ON d.id=t.task_id WHERE t.task_id=$1 AND t.state='published' AND `+catalogPublic+``, r.TaskId).Scan(&out.Id, &out.Revision, &out.Title, &out.Summary, &out.Description, &out.Category, &out.Author.Id, &published)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, status.Error(codes.NotFound, "task_not_found")
 	}
@@ -140,7 +140,7 @@ func (s *Server) ListApprovedEntries(ctx context.Context, r *pb.ListApprovedEntr
  LEFT JOIN LATERAL (SELECT id,position,approved_at,author_id,content FROM content.reviewed_entries
  WHERE task_id=t.task_id AND state='approved' AND (position,id)>($2,$3)
  ORDER BY position,id LIMIT $4) e ON true
- WHERE t.task_id=$1 AND t.state='published' ORDER BY e.position,e.id`, r.TaskId, cursor.Position, cursor.ID, limit+1)
+ WHERE t.task_id=$1 AND t.state='published' AND `+catalogPublic+` ORDER BY e.position,e.id`, r.TaskId, cursor.Position, cursor.ID, limit+1)
 	if err != nil {
 		return nil, storage(err)
 	}

@@ -143,7 +143,7 @@ func (l *kindLab) request(client *http.Client, user kindUser, method, path, body
 		}
 		// Deliberately do not log bodies, file bytes or credentials.
 		_ = json.Unmarshal(data, &code)
-		l.t.Fatalf("%s %s: got %d (%s), want one of %v", method, path, response.StatusCode, code.Code, expected)
+		l.t.Fatalf("%s %s: got %d (%s), want one of %v; request_id=%s", method, path, response.StatusCode, code.Code, expected, response.Header.Get("X-Request-ID"))
 	}
 	if len(expected) > 1 {
 		l.dependencyFailure(response.StatusCode, data)
@@ -155,16 +155,9 @@ func (l *kindLab) request(client *http.Client, user kindUser, method, path, body
 // Assert the matching reason as well as the two allowed HTTP statuses.
 func (l *kindLab) dependencyFailure(code int, data []byte) {
 	l.t.Helper()
-	var failure struct {
-		Code string `json:"code"`
+	if err := dependencyFailure(code, data); err != nil {
+		l.t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &failure); err != nil {
-		l.t.Fatal("invalid dependency failure response")
-	}
-	if (code == 504 && failure.Code == "deadline_exceeded") || (code == 503 && strings.HasSuffix(failure.Code, "_unavailable")) {
-		return
-	}
-	l.t.Fatalf("invalid dependency failure: HTTP %d %s", code, failure.Code)
 }
 
 // Port-forward only to loopback, using an OS-selected port. Process and logs
@@ -195,4 +188,35 @@ func (l *kindLab) forward(resource string, remotePort int) string {
 	}
 	l.t.Fatal("loopback port-forward did not start")
 	return ""
+}
+
+// Agent Self-Claimed: recovery checkpoint AFTER an intentional dependency outage.
+// A rollout or one pinned client's success does not establish that the normal
+// Service and all long-lived headless gRPC clients have converged.
+func (l *kindLab) waitGatewayEndpoints() {
+	l.t.Helper()
+	until := time.Now().Add(90 * time.Second)
+	for {
+		var endpoints struct {
+			Items []struct {
+				Endpoints []struct{ Conditions struct{ Ready *bool } }
+			}
+		}
+		kindDecode(l.t, l.kube("", "get", "endpointslices", "-l", "kubernetes.io/service-name=gateway", "-o", "json"), &endpoints)
+		ready := 0
+		for _, slice := range endpoints.Items {
+			for _, ep := range slice.Endpoints {
+				if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
+					ready++
+				}
+			}
+		}
+		if ready == 2 {
+			return
+		}
+		if time.Now().After(until) {
+			l.t.Fatal("normal Gateway Service did not recover both endpoints after dependency outage")
+		}
+		time.Sleep(time.Second)
+	}
 }

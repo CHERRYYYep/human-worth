@@ -642,3 +642,15 @@ JSON计数见 `counts-release.json`，只计带 Test 字段的 pass/fail/skip。
 本轮未重跑专用PG/S3和kind；沿用上节与当前运行时代码逐文件一致的556项integration及完整kind证据，不能描述为2026-10-25重新运行。临时资源保持已清理状态。封存复核日志位于 `/home/cherry/.local/state/human-worth/validation/additional-entry-closeout-20261025/`。
 
 本阶段功能、契约、迁移、最小权限、部署验收脚本与文档一起提交至 `backend/feat-additional-entry-review`；不改变dev/main或旧阶段分支。封存不代表远端CI、PR合入、公网验收或生产容量/HA完成，相关未覆盖范围与Asset持锁/维护回执容量观察项不变。
+
+## 13. 第七阶段 Voting 目录栅栏（2026-10-25，Agent Self-Claimed）
+
+基线`a1556394e6b4f27101e79327c349e6c39561ca29`已含阶段六PR #32；本地分支`backend/feat-voting-lifecycle`。阶段五/六冻结投影、稳定作品ID、实际作者、分页游标和历史迁移不改。新增007只在Content schema建立heads/changes，不访问Voting数据库。
+
+所有正式任务批准、追加批准及旧ApplyAssetReview（批准、撤销、下架、恢复入口）经同一持久协议：短事务锁head，savepoint预校验确切命令与完整目标预算，回滚模拟后只保存queued意图；事务外Voting prepare冻结；短事务应用原本地业务、回执、完整目录与applied；事务外activate；持久确认completed。RPC期间无Content事务/行锁；复用原审核函数的事务借用仅限私有context，不暴露给外部调用者。原reject路径仍无目录变化。旧维护新恢复任务请求在启用Voting后不允许重开任务关闭墓碑；旧精确回执可找回但不重新应用。
+
+有active意图时，公开正文/列表及公开文件关系统一保守拒绝整个任务的新读取，包含尚未得到远端冻结回执的窗口。新增批准尚未最终同步时不提前公开；已发送字节及已进入Voting提交临界区的旧操作不追溯撤销。本人私有资产/投稿不因此转为公开。每次GetVotingCatalogSnapshot仅允许Voting mTLS，从本地RR快照读取完整白名单，固定本地查询次数，无逐作品RPC。没有目录头但任务已公开为503未引导；非公开/不存在404，不假装空集合。
+
+意图租约、阶段与结果跨实例持久；技术故障重试，业务/协议冲突持久blocked并保持收紧，不能超时自动重开。陈旧token不得确认新领取者。旧目录引导分批256项，重跑恢复已有pending；blocked/仍在租期的未完成工作明确失败，不空转成功。详情见[Voting定稿与恢复矩阵](backend-voting.md#voting-stage7)。
+
+部署先007及Content grants，所有Content支持协议后引导历史目录，最后Gateway开放；VOTING_TARGET不加入Content全局readiness，Voting故障不拖垮已无pending的公开阅读、登录或私有上传。启用后已有目录的Content若误缺Voting配置必须拒绝变更。未引导旧二进制模式只用于历史兼容/尚未开放投票的测试，禁止与已开放Voting写入混用。原005/006、时间NULL兼容及初始/追加作品审核回执保留。实际本轮验证见Voting执行记录，不能把阶段六结果充当本轮证据。

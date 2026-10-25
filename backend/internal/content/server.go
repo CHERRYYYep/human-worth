@@ -19,6 +19,7 @@ import (
 	assetpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/asset/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	identitypb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
+	votingpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,6 +32,7 @@ import (
 )
 
 type Server struct {
+	Voting votingpb.VotingServiceClient
 	pb.UnimplementedContentServiceServer
 	DB       *pgxpool.Pool
 	Identity identitypb.IdentityServiceClient
@@ -46,6 +48,8 @@ func Authorization(ctx context.Context, request any, info *grpc.UnaryServerInfo,
 }
 func contentPeer(ctx context.Context, method string) error {
 	switch method {
+	case pb.ContentService_GetVotingCatalogSnapshot_FullMethodName:
+		return requireContentCaller(ctx, "voting")
 	case pb.ContentService_CheckAssetAccess_FullMethodName, pb.ContentService_CheckReviewAssetAccess_FullMethodName:
 		return requireContentCaller(ctx, "asset")
 	case pb.ContentService_GetEntryReviewSnapshot_FullMethodName, pb.ContentService_ApplyEntryReviewDecision_FullMethodName, pb.ContentService_ApplyAssetReview_FullMethodName, pb.ContentService_GetReviewSnapshot_FullMethodName, pb.ContentService_ApplyReviewDecision_FullMethodName:

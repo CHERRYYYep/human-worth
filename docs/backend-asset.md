@@ -709,3 +709,9 @@ Content/Moderation必须先迁移/滚动支持单件协议，再开放新增Gate
 
 
 2026-10-23阶段六实际追加文件验收已通过：真实HTTPS/mTLS/PG/S3集成及完整kind（退出0，730.31秒）中，B本人上传、独立投稿/待审管理员读取、驳回重提/批准公开、撤销/下架拒绝新读取、Content Pod恢复而不删除B私有文件均验证；原Asset双副本上传与恢复专项118.47秒PASS。完整命令/失败/边界见Content第12节。未改Asset上传协议、正式Proto、存储或文件入口凭据语义，未做生产HA/容量或公网发布。
+
+## 21. 第七阶段 Voting 栅栏下的文件授权（2026-10-25，Agent Self-Claimed）
+
+Asset代码、Proto、multipart/持锁上传与存储协议不变；公开及待审权限仍由Content判断。目录变更意图尚未完成时，Content对该任务公开CheckAssetAccess保守拒绝，避免下架尚待Voting确认时继续授权，或者新批准尚未激活就公开；Asset仍在打开对象前后复核，不使用永久URL或缓存放行。Voting不连接Asset/对象存储，也不保存文件内容；ballot只返回既有公开冻结引用。本人私有下载不受永久禁投影响。
+
+Voting故障不成为Asset/Gateway全局readiness依赖。旧维护证书的文件lab回归仍验证撤销/下架/Content停机；任务关闭墓碑启用后不再以新maintenance ID重新发布同一任务，停机恢复检查放在下架之前，不降低下架后拒绝预期。正式Moderation与Voting真实Pod业务另行执行，不能把测试证书当作它们。实际命令、失败与本轮验收见[Voting记录](backend-voting.md)，无公网发布/生产HA声明。

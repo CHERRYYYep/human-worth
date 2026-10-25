@@ -13,6 +13,7 @@ import (
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	votingpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/contract"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"github.com/prometheus/client_golang/prometheus"
@@ -44,6 +45,7 @@ const FlowCookie = "__Host-human-worth-oauth"
 var web embed.FS
 
 type Options struct {
+	Voting               votingpb.VotingServiceClient
 	Moderation           moderationpb.ModerationServiceClient
 	Challenge            challengepb.ChallengeServiceClient
 	DeploymentStatusFile string
@@ -252,7 +254,7 @@ func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
 		reason = "request_cancelled"
 	case codes.InvalidArgument:
 		code = 400
-		if reason == "initial_bundle_required" {
+		if reason == "initial_bundle_required" || reason == "statistics_confirmation_required" {
 			code = 422
 		}
 		if reason == "unsupported_media_type" {
@@ -266,11 +268,13 @@ func rpcErrorFor(w http.ResponseWriter, err error, unavailable string) {
 		code = 404
 	case codes.AlreadyExists, codes.Aborted, codes.FailedPrecondition:
 		code = 409
-		if reason == "initial_bundle_required" {
+		if reason == "initial_bundle_required" || reason == "statistics_confirmation_required" {
 			code = 422
 		}
 	case codes.ResourceExhausted:
-		if reason == "too_many_requests" {
+		if reason == "catalog_too_large" {
+			code = 503
+		} else if reason == "too_many_requests" {
 			code = 429
 		} else {
 			reason = unavailable

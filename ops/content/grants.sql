@@ -17,4 +17,7 @@ GRANT UPDATE(state,reason) ON content.entry_review_requests TO content_runtime;
 GRANT UPDATE(attempts,lease_token,available_at,delivered_at,blocked) ON content.entry_review_outbox TO content_runtime;
 -- No snapshot/source/entry-identity updates or receipt rewrites.
 -- No DELETE, DDL, author/key updates or cross-schema privileges.
+GRANT SELECT,INSERT ON content.voting_catalog_heads,content.voting_catalog_changes TO content_runtime;
+GRANT UPDATE(generation,active_change) ON content.voting_catalog_heads TO content_runtime;
+GRANT UPDATE(stage,result,catalog,attempts,lease_token,available_at,completed_at) ON content.voting_catalog_changes TO content_runtime;
 COMMIT;

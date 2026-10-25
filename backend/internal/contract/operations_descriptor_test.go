@@ -24,8 +24,6 @@ type plannedMethod struct {
 // Remove each exception as soon as its service method is declared in Proto.
 var plannedMethods = []plannedMethod{
 	{contract.ListTasks, "/humanworth.discovery.v1.DiscoveryService/ListTasks", "Discovery Proto has not been added"},
-	{contract.ViewStatistics, "/humanworth.voting.v1.VotingService/ViewTaskStatistics", "Voting Proto does not yet declare the statistics operation"},
-	{contract.CastVote, "/humanworth.voting.v1.VotingService/CastVote", "Voting Proto does not yet declare the vote operation"},
 }
 
 func TestOperationMethodsMatchProtoDescriptors(t *testing.T) {

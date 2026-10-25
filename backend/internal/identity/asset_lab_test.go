@@ -451,6 +451,15 @@ func TestKindAssetDeployment(t *testing.T) {
 	l.kube("", "rollout", "status", "statefulset/asset-store", "--timeout=120s")
 	waitHealth(204)
 	storeRestored = true
+	// Recovery is not just one pinned Asset Pod: the next test uses the normal
+	// Service, whose headless gRPC clients must resolve replacement endpoints.
+	// Keep the actual HTTP/file expectation unchanged; bound convergence here.
+	normal := l.httpClientAddress(os.Getenv("HUMAN_WORTH_VERIFY_GATEWAY_ADDRESS"))
+	normal.Transport.(*http.Transport).DisableKeepAlives = true
+	l.waitGatewayEndpoints()
+	assertDownload(normal, created)
+	l.request(normal, alice, "GET", draftPath, "", nil, 200)
+	t.Log("PASS: both normal Gateway Service endpoints recovered after S3/Asset replacement; real file and Content request succeeded")
 	assertDownload(restarted, created)
 	upload(reader, alice, pending, 0, cut, 200)
 	l.request(reader, alice, "DELETE", "/api/me/assets/upload-sessions/"+pending.UploadSession.ID, "", nil, 204)

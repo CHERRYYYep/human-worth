@@ -20,6 +20,54 @@ import verify_deployment
 
 
 class ModuleDeployTest(unittest.TestCase):
+    def test_catalog_probe_uses_actual_id_limits_and_cleans_up_on_timeout(self):
+        image_id='sha256:'+'a'*64
+        for timeout in [False,True]:
+            with self.subTest(timeout=timeout),tempfile.TemporaryDirectory() as tmp,patch.object(app,'STATE',Path(tmp)),patch.object(app,'run',return_value=subprocess.CompletedProcess([],0,stdout=image_id+'\n')):
+                def command(args,**kwargs):
+                    if args[1]=='run' and timeout:raise subprocess.TimeoutExpired(args,15)
+                    return subprocess.CompletedProcess(args,0,stdout='voting-catalog-v1\n')
+                with patch.object(app.subprocess,'run',side_effect=command) as run:
+                    self.assertEqual(app.catalog_image_supported('human-worth/content:candidate',image_id),not timeout)
+                    probe=run.call_args_list[0].args[0]
+                    for flag in ['--network=none','--read-only','--pids-limit=16','--cpus=0.25','--memory=64m']:
+                        self.assertIn(flag,probe)
+                    self.assertEqual(probe[-2:],[image_id,'catalog-protocol-version'])
+                    self.assertEqual(run.call_args_list[-1].args[0],['docker','rm','-f',probe[probe.index('--name')+1]])
+                    self.assertEqual((Path(tmp)/'catalog-capabilities.json').exists(),not timeout)
+
+    def test_catalog_probe_rejects_wrong_id_output_and_retag(self):
+        image_id='sha256:'+'a'*64
+        for ids,expected,output in [([image_id],'sha256:'+'b'*64,'voting-catalog-v1'),
+                                    ([image_id],None,'unknown'),
+                                    ([image_id,'sha256:'+'b'*64],None,'voting-catalog-v1')]:
+            with self.subTest(ids=ids,output=output),tempfile.TemporaryDirectory() as tmp,patch.object(app,'STATE',Path(tmp)),patch.object(app,'run',side_effect=[subprocess.CompletedProcess([],0,stdout=value) for value in ids]),patch.object(app.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=output)):
+                self.assertFalse(app.catalog_image_supported('human-worth/content:candidate',expected))
+                self.assertFalse((Path(tmp)/'catalog-capabilities.json').exists())
+
+    def test_first_catalog_activation_drains_legacy_and_restart_still_drains(self):
+        def deployment(image):
+            return {'kind':'Deployment','metadata':{'name':'content'},'spec':{'template':{'spec':{'containers':[{'image':image,'env':[{'name':'VOTING_TARGET','value':'voting'}]}]}}}}
+        new=deployment('new');old=deployment('old')
+        with tempfile.TemporaryDirectory() as tmp,patch.object(app,'STATE',Path(tmp)),patch.object(app,'catalog_image_supported',side_effect=lambda image: image=='new'):
+            for attempt in range(2):
+                def kube(*args,**kwargs):
+                    if 'get' in args:
+                        return subprocess.CompletedProcess(args,0,stdout=json.dumps({'items':[{'spec':{'containers':[{'image':'old'}]}}]} if 'pods' in args else old))
+                    if '--for=delete' in args and attempt==0:raise RuntimeError('drain interrupted')
+                with self.subTest(attempt=attempt),patch.object(app,'kube',side_effect=kube) as command:
+                    if attempt==0:
+                        with self.assertRaisesRegex(RuntimeError,'drain interrupted'):app.prepare_catalog_activation({'content':[new],'voting':[]})
+                    else:app.prepare_catalog_activation({'content':[new],'voting':[]})
+                    self.assertTrue(app.catalog_enabled())
+                    self.assertEqual(command.call_args_list[-2].args,('-n','human-worth','scale','deployment/content','--replicas=0'))
+                    self.assertIn('--for=delete',command.call_args_list[-1].args)
+            # Compatible rolling updates do not cause a second outage.
+            with patch.object(app,'kube',side_effect=lambda *args,**kwargs:subprocess.CompletedProcess(args,0,stdout=json.dumps({'items':[{'spec':{'containers':[{'image':'new'}]}}]} if 'pods' in args else new))) as command:
+                app.prepare_catalog_activation({'content':[new],'voting':[]})
+                self.assertEqual(command.call_count,2)
+            with self.assertRaisesRegex(RuntimeError,'without Voting'):app.prepare_catalog_activation({'content':[new]})
+
     def test_catalog_orders_dependencies_and_requires_real_module_inputs(self):
         actual = services.load_services(ROOT)
         self.assertEqual(list(actual)[-1], 'gateway')
@@ -129,6 +177,8 @@ class ModuleDeployTest(unittest.TestCase):
         def response(path, options=()):
             if path == '/api/health':
                 return ready
+            if path.endswith('/voting-eligibility'):
+                return 401, {'code':'unauthenticated'}
             if path.startswith('/api/tasks/'):
                 return 404, {'code':'asset_not_found' if path.endswith('/content') else 'task_not_found'}
             return 401, {'code':'unauthenticated'}
@@ -226,7 +276,7 @@ class ModuleDeployTest(unittest.TestCase):
 
         with patch.object(check_network, 'run', side_effect=run), patch.object(check_network, 'apply', side_effect=apply), patch.object(check_network, 'kube', return_value=subprocess.CompletedProcess([], 0, stdout='Succeeded')):
             check_network.main()
-        self.assertEqual(callers, ['identity', 'content', 'asset', 'moderation', 'gateway', 'untrusted'])
+        self.assertEqual(callers, ['identity', 'content', 'asset', 'moderation', 'voting', 'gateway', 'untrusted'])
 
     def test_asset_store_bucket_owner_is_confirmed(self):
         config={'endpoint':'http://asset-store.human-worth.svc.cluster.local:8333',

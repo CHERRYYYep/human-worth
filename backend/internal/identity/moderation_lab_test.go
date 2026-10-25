@@ -142,6 +142,7 @@ func TestKindModerationDeployment(t *testing.T) {
 	}
 	l.request(l.client, user, "PUT", "/api/me/tasks/"+task.ID, `{"expectedRevision":1,"content":`+draft+`}`, nil, 409)
 	restore("moderation")
+	l.waitModerationRecovery(admin)
 	t.Log("PASS: Moderation outage preserves both ready Gateway endpoints and login/session/draft/upload/submission via real NodePort/Service; review list alone reports dependency unavailability or deadline")
 	// Tolerate bounded discovery/lease recovery, never loosen individual RPC deadline.
 	poll := func(id, want string) kindReview {
@@ -192,6 +193,8 @@ func TestKindModerationDeployment(t *testing.T) {
 	}
 	l.request(l.client, admin, "GET", assetPath, "", nil, 503, 504)
 	restore("content")
+	assetClients := l.assetRecoveryClients("review-recovery")
+	l.waitFileAuthorization(assetClients, admin)
 	// Separate clients resolve Content independently. Rollout/Moderation receipt
 	// does not imply Asset's or Gateway's gRPC resolver has recovered yet.
 	recoveredRead := func(actor kindUser, path string, expected int) {
@@ -240,6 +243,12 @@ func TestKindModerationDeployment(t *testing.T) {
 		t.Fatal("resubmit reused old case")
 	}
 	poll(secondID, "pending")
+	for _, client := range assetClients {
+		actual := l.request(client, admin, "GET", "/api/admin/reviews/"+secondID+"/assets/"+upload.Asset.ID+"/content", "", nil, 200)
+		if !bytes.Equal(actual, data) {
+			t.Fatal("pending file differs through recovered Asset caller")
+		}
+	}
 	var old struct {
 		ReviewID *string
 		State    string
@@ -296,6 +305,14 @@ func TestKindModerationDeployment(t *testing.T) {
 		t.Fatal("approved file mismatch")
 	}
 	l.request(l.client, admin, "GET", "/api/admin/reviews/"+secondID+"/assets/"+upload.Asset.ID+"/content", "", nil, 404)
+	for _, client := range assetClients {
+		l.request(client, admin, "GET", "/api/admin/reviews/"+secondID+"/assets/"+upload.Asset.ID+"/content", "", nil, 404)
+	}
+	// Release these isolated probes before the later two Content probes; keep
+	// the existing disposable namespace CPU/memory quota unchanged.
+	for i := range assetClients {
+		l.kube("", "delete", "pod", fmt.Sprintf("review-recovery-%d", i), "--wait=true")
+	}
 	if l.sql(`SELECT count(*) FROM content.review_requests WHERE task_id='`+task.ID+`'`) != "2" || l.sql(`SELECT count(*) FROM moderation.reviews WHERE task_id='`+task.ID+`'`) != "2" {
 		t.Fatal("history duplicated/lost")
 	}
@@ -389,6 +406,7 @@ func TestKindModerationDeployment(t *testing.T) {
 		}
 	}
 	restore("moderation")
+	l.waitModerationRecovery(admin)
 	// At-least-once replay via REAL Moderation workers must not revive either
 	// current task or entry visibility, even though the stored receipt is approve.
 	l.sql(`UPDATE moderation.decision_outbox SET delivered_at=NULL,available_at=clock_timestamp()-interval '1 second' WHERE id='` + secondID + `';`)

@@ -8,6 +8,7 @@ import (
 	contentpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/content/v1"
 	pb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/identity/v1"
 	moderationpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/moderation/v1"
+	votingpb "github.com/KDZZZZZZ/human-worth/backend/gen/humanworth/voting/v1"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/gateway"
 	"github.com/KDZZZZZZ/human-worth/backend/internal/platform"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -143,7 +144,16 @@ func run() error {
 		defer challengeConnection.Close()
 		challengeClient = challengepb.NewChallengeServiceClient(challengeConnection)
 	}
-	handler, err := gateway.New(pb.NewIdentityServiceClient(conn), gateway.Options{Moderation: moderationClient, Challenge: challengeClient, Content: contentClient, Asset: assetClient, DeploymentStatusFile: os.Getenv("DEPLOYMENT_STATUS_FILE"), Origin: origin, LogoPath: platform.Value("SITE_LOGO_FILE", "../public/brand/logo.png"), TrustedProxies: proxies, Logger: runtime.Log, Registry: runtime.Registry, Ready: ready})
+	var votingClient votingpb.VotingServiceClient
+	if target := os.Getenv("VOTING_TARGET"); target != "" {
+		c, e := platform.Client(target, "voting")
+		if e != nil {
+			return e
+		}
+		defer c.Close()
+		votingClient = votingpb.NewVotingServiceClient(c)
+	}
+	handler, err := gateway.New(pb.NewIdentityServiceClient(conn), gateway.Options{Voting: votingClient, Moderation: moderationClient, Challenge: challengeClient, Content: contentClient, Asset: assetClient, DeploymentStatusFile: os.Getenv("DEPLOYMENT_STATUS_FILE"), Origin: origin, LogoPath: platform.Value("SITE_LOGO_FILE", "../public/brand/logo.png"), TrustedProxies: proxies, Logger: runtime.Log, Registry: runtime.Registry, Ready: ready})
 	if err != nil {
 		return err
 	}

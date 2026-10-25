@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	ContentService_GetVotingCatalogSnapshot_FullMethodName    = "/humanworth.content.v1.ContentService/GetVotingCatalogSnapshot"
 	ContentService_GetTask_FullMethodName                     = "/humanworth.content.v1.ContentService/GetTask"
 	ContentService_ListApprovedEntries_FullMethodName         = "/humanworth.content.v1.ContentService/ListApprovedEntries"
 	ContentService_SubmitAdditionalEntry_FullMethodName       = "/humanworth.content.v1.ContentService/SubmitAdditionalEntry"
@@ -53,6 +54,8 @@ const (
 //
 // Website draft RPCs are implemented; Challenge collaboration RPCs remain dependency contracts.
 type ContentServiceClient interface {
+	// Voting mTLS only; complete allowlisted snapshot, never browsing pagination.
+	GetVotingCatalogSnapshot(ctx context.Context, in *GetVotingCatalogSnapshotRequest, opts ...grpc.CallOption) (*GetVotingCatalogSnapshotResponse, error)
 	// Gateway mTLS + method-bound Identity assertion (anonymous/web/MCP); 2s.
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
 	// Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
@@ -102,6 +105,16 @@ type contentServiceClient struct {
 
 func NewContentServiceClient(cc grpc.ClientConnInterface) ContentServiceClient {
 	return &contentServiceClient{cc}
+}
+
+func (c *contentServiceClient) GetVotingCatalogSnapshot(ctx context.Context, in *GetVotingCatalogSnapshotRequest, opts ...grpc.CallOption) (*GetVotingCatalogSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVotingCatalogSnapshotResponse)
+	err := c.cc.Invoke(ctx, ContentService_GetVotingCatalogSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *contentServiceClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error) {
@@ -370,6 +383,8 @@ func (c *contentServiceClient) GetChallengeRegistration(ctx context.Context, in 
 //
 // Website draft RPCs are implemented; Challenge collaboration RPCs remain dependency contracts.
 type ContentServiceServer interface {
+	// Voting mTLS only; complete allowlisted snapshot, never browsing pagination.
+	GetVotingCatalogSnapshot(context.Context, *GetVotingCatalogSnapshotRequest) (*GetVotingCatalogSnapshotResponse, error)
 	// Gateway mTLS + method-bound Identity assertion (anonymous/web/MCP); 2s.
 	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
 	// Read-only browsing, NOT the complete Voting ballot; 5s, keyset pagination.
@@ -421,6 +436,9 @@ type ContentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedContentServiceServer struct{}
 
+func (UnimplementedContentServiceServer) GetVotingCatalogSnapshot(context.Context, *GetVotingCatalogSnapshotRequest) (*GetVotingCatalogSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetVotingCatalogSnapshot not implemented")
+}
 func (UnimplementedContentServiceServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTask not implemented")
 }
@@ -518,6 +536,24 @@ func RegisterContentServiceServer(s grpc.ServiceRegistrar, srv ContentServiceSer
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&ContentService_ServiceDesc, srv)
+}
+
+func _ContentService_GetVotingCatalogSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVotingCatalogSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ContentServiceServer).GetVotingCatalogSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ContentService_GetVotingCatalogSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ContentServiceServer).GetVotingCatalogSnapshot(ctx, req.(*GetVotingCatalogSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ContentService_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -995,6 +1031,10 @@ var ContentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "humanworth.content.v1.ContentService",
 	HandlerType: (*ContentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetVotingCatalogSnapshot",
+			Handler:    _ContentService_GetVotingCatalogSnapshot_Handler,
+		},
 		{
 			MethodName: "GetTask",
 			Handler:    _ContentService_GetTask_Handler,

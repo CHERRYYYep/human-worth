@@ -38,6 +38,12 @@ const (
 	ListTasks                OperationID = "list_tasks"
 	ViewStatistics           OperationID = "view_statistics"
 	CastVote                 OperationID = "cast_vote"
+	GetBallot                OperationID = "get_ballot"
+	GetVotingEligibility     OperationID = "get_voting_eligibility"
+	GetVotingCatalog         OperationID = "get_voting_catalog"
+	PrepareCatalog           OperationID = "prepare_catalog"
+	ActivateCatalog          OperationID = "activate_catalog"
+	GetCatalogTransition     OperationID = "get_catalog_transition"
 	StartRun                 OperationID = "start_run"
 	GetRun                   OperationID = "get_run"
 	ListRuns                 OperationID = "list_runs"
@@ -100,6 +106,12 @@ func (route HTTPRoute) SpecOperationID() string {
 }
 
 var operations = [...]Operation{
+	{ID: GetBallot, FullMethod: "/humanworth.voting.v1.VotingService/GetBallot", Policy: IdentityPolicy{Audience: "voting"}, HasPolicy: true, RPCTimeout: 5 * time.Second},
+	{ID: GetVotingEligibility, FullMethod: "/humanworth.voting.v1.VotingService/GetVotingEligibility", Policy: IdentityPolicy{Audience: "voting", MCP: true}, HasPolicy: true},
+	{ID: GetVotingCatalog, FullMethod: "/humanworth.content.v1.ContentService/GetVotingCatalogSnapshot", RPCTimeout: 5 * time.Second},
+	{ID: PrepareCatalog, FullMethod: "/humanworth.voting.v1.VotingService/PrepareCatalogChange", RPCTimeout: 5 * time.Second},
+	{ID: ActivateCatalog, FullMethod: "/humanworth.voting.v1.VotingService/ActivateCatalogSnapshot", RPCTimeout: 5 * time.Second},
+	{ID: GetCatalogTransition, FullMethod: "/humanworth.voting.v1.VotingService/GetCatalogTransition"},
 	{ID: RequestTaskReview, FullMethod: "/humanworth.content.v1.ContentService/RequestTaskReview", Policy: IdentityPolicy{Audience: "content", Write: true}, HasPolicy: true, RPCTimeout: 5 * time.Second},
 	{ID: ListReviews, FullMethod: "/humanworth.moderation.v1.ModerationService/ListReviews", Policy: IdentityPolicy{Audience: "moderation", Admin: true}, HasPolicy: true, RPCTimeout: 5 * time.Second},
 	{ID: GetReview, FullMethod: "/humanworth.moderation.v1.ModerationService/GetReview", Policy: IdentityPolicy{Audience: "moderation", Admin: true}, HasPolicy: true},
@@ -151,6 +163,10 @@ var operations = [...]Operation{
 }
 
 var httpRoutes = [...]HTTPRoute{
+	{Name: "getVotingEligibility", Method: "GET", Path: "/api/tasks/{taskId}/voting-eligibility", Target: GetVotingEligibility, Timeout: 5 * time.Second},
+	{Name: "getBallot", Method: "GET", Path: "/api/tasks/{taskId}/ballot", Target: GetBallot, Timeout: 5 * time.Second},
+	{Name: "castVote", Method: "PUT", Path: "/api/tasks/{taskId}/vote", Target: CastVote, Timeout: 5 * time.Second},
+	{Name: "accessTaskStatistics", Method: "POST", Path: "/api/tasks/{taskId}/statistics-access", Target: ViewStatistics, Timeout: 5 * time.Second},
 	{Name: "getTask", Method: "GET", Path: "/api/tasks/{taskId}", Target: ReadTask},
 	{Name: "listApprovedEntries", Method: "GET", Path: "/api/tasks/{taskId}/entries", Target: ListApprovedEntries, Timeout: 5 * time.Second},
 	{Name: "submitAdditionalEntry", Method: "POST", Path: "/api/tasks/{taskId}/entries", Target: SubmitAdditionalEntry, Timeout: 5 * time.Second},

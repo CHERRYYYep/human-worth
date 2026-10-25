@@ -626,3 +626,17 @@ Identity 的公网迁移已完成；后续模块通过真实联调后再逐项�
 
 
 本轮完整隔离kind验收已实际退出0（730.31秒）：5项业务、正常Service故障隔离、网络允许/拒绝、失败rollout回退、同SHA迁移失败重试和重复部署通过；namespace human-worth-verify-9f072b34已删除。该镜像内容快照并非新Git提交，也不代表常驻namespace升级或公网发布。实际代码仍未暂存/提交，等待人类审查及后续授权。
+
+## Voting 第七阶段滚动与回滚边界（2026-10-25，Agent Self-Claimed）
+
+模块清单新增`voting`双副本、独立owner/runtime、mTLS、Service/PDB/NetworkPolicy/受限Pod与探针；无需新消息组件。Content和Gateway均配`VOTING_TARGET`；Voting可访问Identity/Content/本schema数据库，只有Gateway/Content可连接其业务端口，Challenge尚未自动部署。实际HTTP业务仍逐次方法断言，网络可达不代表业务授权。
+
+升级顺序：Content007与Voting001及最小grants→Voting和全部Content兼容实例→`content bootstrap-voting`成功→Gateway开放四个入口。lab app在Gateway rollout前执行引导，失败不写完整发布标记；重复运行找回意图，而非清库重建。部署顺序避免环，Content/Gateway全局就绪不依赖Voting，Voting就绪不依赖Content。
+
+第二轮审查补齐了控制器门禁：首次启用目录协议前缩旧Content至0并等待Pod删除，防止旧无栅栏写入者与新实例重叠；这次升级接受一次短暂Content中断，不承诺零停机。控制器按实际不可变镜像ID、无网络/密钥的受限容器执行 `/service catalog-protocol-version`，要求输出 `voting-catalog-v1`，并核对构建ID及探针前后tag不变；未知或失败一律拒绝。无需按每个SHA人工维护白名单，后续已核实兼容实例仍滚动更新。
+
+启用标记 `STATE/voting-catalog-v1.enabled` 在激活前持久化，重启、失败回滚和备份恢复不得丢弃；`catalog-capabilities.json`仅保留探针证据，不代替实际镜像验证。回滚检查在任何旧模板恢复、发布标记删除或新增模块缩容前执行；不兼容时保留当前Content/Voting及持久意图，要求前向恢复，不能为了恢复健康而启动旧写入者。首次失败即使尚无业务意图也可能保守拒绝旧版本回滚。兼容回滚仍不回滚SQL，不删除永久禁投事实。
+
+**发布前置条件**：上述门禁位于仓库外安装的可信 `app.py/release.py` 控制器，必须先按本文控制器安装流程更新并核对文件，再激活首次Voting版本；只合入业务代码不会自动替换已安装控制器。本轮只在隔离namespace验证仓库版本，没有安装常驻控制器或发布公网。
+
+回滚先关闭投票新写入、排空在途并核对持久frozen/active意图，不允许直接回滚到绕过栅栏的旧Content；不能删除永久禁投或以清空gate解除阻塞。blocked需要诊断修复后原命令恢复，不属于自动开放机制。限流/内存和S3生产HA仍需生产容量方案。完整隔离validator新增真实双Voting Pod业务、NodePort故障及恢复；执行结果以[Voting本轮记录](backend-voting.md)为准，不以YAML、编译或历史阶段结果声称部署通过；本轮未部署公网。

@@ -43,6 +43,7 @@ spec:
             limits: {cpu: 400m, memory: 192Mi}
           env:
             - {name: PUBLIC_ORIGIN, value: "https://worth.oopsbox.cn"}
+            - {name: VOTING_TARGET, value: "dns:///voting.human-worth.svc.cluster.local:8443"}
             - {name: IDENTITY_TARGET, value: "dns:///identity.human-worth.svc.cluster.local:8443"}
             - {name: CONTENT_TARGET, value: "dns:///content.human-worth.svc.cluster.local:8443"}
             - {name: MODERATION_TARGET, value: "dns:///moderation.human-worth.svc.cluster.local:8443"}
@@ -85,6 +86,8 @@ spec:
     # Outer NodePort is bound only to host loopback by kind.
     - ports: [{protocol: TCP, port: 8080}]
   egress:
+    - to: [{podSelector: {matchLabels: {app: voting}}}]
+      ports: [{protocol: TCP, port: 8443}]
     - to: [{podSelector: {matchLabels: {app: moderation}}}]
       ports: [{protocol: TCP, port: 8443}]
     - to: [{podSelector: {matchLabels: {app: asset}}}]

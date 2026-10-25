@@ -237,3 +237,7 @@ EntrySnapshot 校验 review/entry/task ID、账号、正版本、origin=addition
 
 
 阶段六整体最终验收（2026-10-23）：上述“联调/kind仍需验证”是模块交接时状态，现由完整Identity真实HTTPS/mTLS/PG/S3链路及5项kind业务补齐；其中新增单件闭环56.86秒、真实Moderation任务/公开浏览回归91.41秒，全量validator退出0（730.31秒），网络、故障与重复部署也通过。正常Service/NodePort验证Moderation停机不移除Gateway端点，真实Pod完成建案/决定/回执，驳回历史与旧决定重放安全。完整命令、556项计数边界、修复前失败及资源清理见Content第12节，不将本模块受控下游客户端测试冒称为该真实链路。仍未发布公网、未commit/push/PR。
+
+## 第七阶段目录投递协作（2026-10-25，Agent Self-Claimed）
+
+Moderation案件/决定/投递数据和Proto不变；只有Content完成“意图→Voting冻结→本地应用→完整目录激活→持久确认”才返回正式成功应用回执。Voting故障或Content意图未完成，原Moderation outbox保持待处理，不把决定已持久化或本地approved状态冒称最终公开完成。终态协议冲突由Content持久blocked并保留收紧，后续重试明确冲突后沿用Moderation既有blocked机制；技术故障继续原租约重投，不在事务中等待跨服务RPC。原驳回、管理员理由、待审文件授权与单件历史不变。真实Pod故障恢复及本轮实际结果见[Voting记录](backend-voting.md)，不替代或覆盖第四～六阶段历史验收。
