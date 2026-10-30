@@ -132,3 +132,45 @@ B 组仅在临时 Asset Service 发布未就绪发现地址，保持相同停机
 标准 `validate_modules.py` 已在原业务集合后单独接入新增长故障用例，600 秒总预算覆盖有意保持的 280 秒故障；不延长原 90 秒恢复判据。以上结果验证已确认的发现/就绪耦合机制修复；2026-10-28 原始历史单次失败的精确归因仍受原日志缺口限制。其他调用边尚未统一迁移，也未据此声称全套九模块业务、真实旧版本升级、所有数据库集成、真实模型推理、性能容量、生产或公网验收通过。
 
 最终补充：第三轮外层驱动退出 0，随后原网络检查 **134 项 PASS、0 FAIL**，覆盖 10 个调用方；准确命令、驱动差异、网络逐项输出和汇总见上述证据目录。最终环境核验 PASS：三轮临时 namespace/执行 namespace、相关 RBAC/PV/scoped kubectl 进程无遗留，15 个基础设施 Pod 的 UID、容器 ID、就绪和重启次数与测试前一致；专用 PostgreSQL 正常、gVisor 保留、三个私有配置仍 0600。没有清理原有卷/数据或测试镜像，未修改宿主运行时和系统参数；完整验收脚本本轮未原样重跑，前两轮 FAIL 原样保留。
+
+## 2026-10-28 第二轮关键业务、契约、MCP 与模型故障验收
+
+固定本地提交 `7c47abb123c841de0d8c37a075483c729f048bec`，分支 `backend/test-upstream-20261028`。证据持久目录 `/home/cherry/.local/state/human-worth/acceptance/20261028-round2-200343/`：`report.md`、`commands.jsonl`、`business-results.json`、54 操作矩阵 `api-operations.csv`、逐请求记录、四类问题及最小复现均已保存。历史 `/tmp` 缺失日志未恢复、不作为本轮新证据；可重复验证使用本轮新日志。
+
+- **PASS，业务与权限**：18 个选定顶层、71 个含子测试事件，最终 0 FAIL/0 SKIP；包含身份/CSRF/跨用户和服务身份、投稿/独立审核、幂等回执、永久禁投、投票/统计两种提交顺序、提交未知和恢复、管理员/挑战取消迟到结果。首批因未配 S3 而 SKIP 的项目补齐专用真实 S3 后实际执行，不以父测试 PASS 覆盖子测试 SKIP。
+- **PASS，Challenge 恢复专项**：5 个顶层、8 个含子测试事件；真实 PostgreSQL、合成依赖，不称为真实模型或 Pod 验收。
+- **PASS，模型故障**：provider/worker/relay/executor 9 个顶层、62 个含子测试事件；新增 `provider_fault_test.go` 覆盖 401/429/500/503、重定向拒绝、空/畸形/截断/超限响应、取消与超时、单次调用及错误脱敏，既有测试验证未知结算与重复派发拒绝。没有真实供应商调用。
+- **PASS，常规 Gateway/契约测试**：29 个顶层、147 个含子测试事件。路由/引用静态检查通过不等价于真实响应符合 schema。
+- **PASS，独立 MCP**：不导入项目客户端的 Python HTTP 客户端协商 `2025-11-25`；五工具清单、统计副作用明确确认、永久禁投、其他用户可投、拒绝写工具、Origin/Accept 拒绝、撤销后 401 通过。与原 Go MCP 集成证据分别记录。
+- **FAIL，API 响应契约**：Schemathesis `4.32.7` 固定依赖/哈希，仓库外独立工具环境；新隔离数据下 189 次请求、27 个 API 操作、18 个失败响应检查，归为四类已复现且未修复的问题：公开任务附件错误复用完整 Asset schema；暂存资产空哈希不符固定 64 位约束；下载真实 mediaType 不符唯一 octet-stream 声明；评论显示名 null 不符 Author string。19 个操作在采样内未发现失败、8 个操作有失败、其余 27 个操作未做独立 API 探索，不能称 54 项逐条通过。相关 OpenAPI 与响应代码在 Gateway 修复前后内容相同，属于本轮发现的既有差异。
+
+S3 补验首轮因临时存储的 4 个 volume 槽耗尽而上传 503；原失败保留，仅重建本轮 tmpfs S3 为每卷 8MiB/64 槽，保持 512MiB 上限、镜像与业务断言，五个相关顶层复验 PASS。API 驱动最初的第三方响应头/异常组适配，以及 staging 下载预期与幂等键长度错误均已修正；最终独立复验无驱动/语义断言异常，schema 检查未放宽，四类问题由最小复现再次确认。业务代码与 OpenAPI 未修改，仅新增模型故障测试及本节记录，未 commit/push/PR/merge/公网部署。
+
+独立入口使用 Go overlay 的真实 HTTPS/mTLS/PostgreSQL/FileStorage fixture，服务进程内装配，不称为九模块 Pod/S3；S3 业务补验使用独立 Docker SeaweedFS，非生产 HA。最终临时服务/测试凭据已清理，无 Docker 卷创建，数据库与角色集合、15 个基础设施 Pod 状态与测试前一致，专用 PostgreSQL 正常，三个原私有配置仍 0600。未运行真实模型推理、MCP Inspector UI、Bruno、性能/安全全扫描、备份灾备、前端最终验收或公网业务验收。第二轮整体结论为 **FAIL：四类契约问题 OPEN**，不能用其他专项 PASS 覆盖；具体建议修复方案和边界见报告。
+
+## 2026-10-29 第二轮响应契约修复与复验
+
+基线 `7c47abb123c841de0d8c37a075483c729f048bec`，当前审计 worktree 为 detached HEAD；2026-10-29 已重新获取并核对上游 dev 为 `20e1432f3bf1ce0063f09605d14ae9acf2fb578a`，上游前端任务分支在相关文件范围与 dev 一致。本次改动尚未提交、推送、PR、合并或部署。前一节的 FAIL 是保留的历史结果，本节记录修复后的新证据，不覆盖首轮失败。历史 `/tmp` 日志没有恢复，可重跑项目使用本轮持久证据。
+
+**Human Design**：用户批准修复第二轮四类响应契约问题，并重新执行第二轮验证；保护正在开发的前端与既有权限边界。**Agent Self-Claimed**：独立 `PublicAttachment`、资产状态与实际哈希条件约束、明确列举下载媒体类型、评论复用 `PublicAuthor`、回归样例及测试组织。
+
+OpenAPI 本轮明确修改：公开附件仅含现有五字段；staging 的实际哈希为空，ready 必须为64位小写十六进制，failed/deleted 可保留实际验证结果；本人/任务附件/过审作品/管理员审核四个下载入口声明现有五种支持媒体类型，同时保留原 octet-stream 声明；评论作者改用已有 nullable `PublicAuthor`。请求路径、operationId、请求格式、认证授权及实际 HTTP 响应行为保持，不用预期哈希冒充实际验证结果，不补造公开生命周期字段，不修改 `Session.Author`。公开数据和暂存语义来自现有 Proto、可信数据来源与已记录边界，不以关闭校验替代修复。
+
+前端联动：当前上游原型的任务、评论和投稿仍使用示例/内存/浏览器存储，实际探测为 `/api/health`；另有 Gateway 内置账户页真实使用 `/api/me` 和 MCP 凭据接口，本轮保持其 Session 契约。前端后续应使用公开附件类型、处理 null 显示名、按资产 state 判断可引用性；OpenAPI 类型/Mock/生成客户端仍须同步检查，不能宣称零兼容影响。可复用的全合成响应样例见 [api-response-contract.json](../tests/fixtures/api-response-contract.json)，不含真实凭据或作品。
+
+新增 [响应契约回归](../ops/lab/test_api_response_contract.py) 使用 JSON Schema 2020-12 校验正反样例，6项测试在旧契约下失败、修复后全部通过。保留 ready 非法/缺失哈希、staging 伪验证值、公开额外私有字段、错误作者类型、Session 空姓名与未支持媒体类型的拒绝。独立验收工具依赖固定在 [requirements-api-contract.txt](../ops/lab/requirements-api-contract.txt)，不是应用运行时依赖或默认 CI 隐含依赖；在仓库根目录以隔离 Python 环境运行：
+
+```sh
+python3 -m venv "$HOME/.local/share/human-worth/test-tools/api-contract"
+"$HOME/.local/share/human-worth/test-tools/api-contract/bin/python" -m pip install -r ops/lab/requirements-api-contract.txt
+"$HOME/.local/share/human-worth/test-tools/api-contract/bin/python" ops/lab/test_api_response_contract.py
+```
+
+本轮实际复用既有仓库外 Schemathesis 4.32.7 环境中的同版本依赖，无全局安装。完整命令、cwd、退出码、日志 SHA-256、首轮方法失败和复验保存在 `/home/cherry/.local/state/human-worth/acceptance/20261029-round2-contract-fix-140202/`。静态样例测试不能替代下列真实入口证据：
+
+- **PASS**：18项业务顶层/71个含子测试事件、Challenge恢复5项/8个事件、模型provider/worker/relay/executor 9项/62个事件、Gateway/内部契约29项/147个事件，全部实际重跑，0 FAIL、0 SKIP。真实 S3 从一开始即配置，未以跳过代替执行。
+- **PASS**：独立 Schemathesis 客户端195次请求、29个操作，0失败、0生成错误；保留原八个失败操作并新增过审作品/管理员审核下载、管理员/跨用户/待审文件拒绝；独立 MCP 的五工具、确认后永久禁投、其他用户不受影响、拒绝写工具、Origin/Accept和凭据撤销检查通过。仍有25个操作未做独立探索，不称全量54接口逐条验收。
+- **PASS**：11个真实 HTTP 响应符合修复后契约，同一响应对照旧契约时10个受影响响应失败，ready-only本人列表作为兼容对照仍通过。四个下载上下文实测 text/plain 字节、媒体类型、attachment、nosniff与no-store保持；其他受支持媒体类型本轮仅做契约检查，不声称全部真实下载重跑。
+- **方法问题已纠正**：附加对照驱动首轮误要求本人资产列表也必须违反旧契约；源码及实际结果确认该列表仅返回ready资产，本就兼容。首轮日志/驱动/结果保留，仅修正比较预期，未放宽新契约、业务断言或超时。前一轮叙述若包含“暂存哈希导致本人列表失败”，以原始失败记录和本轮ready-only核对为准。
+
+临时 S3 使用已有固定镜像、loopback随机端口、512MiB tmpfs、8MiB卷/64槽，未使用产品数据或 Docker 数据卷；独立 API 入口为进程内真实 HTTPS/mTLS/PostgreSQL/FileStorage，非九模块Pod/S3。临时fixture、S3和随机凭据已清理，数据库/角色集合和15个基础设施Pod的UID、容器ID、重启与就绪状态不变，三个原私有配置仍0600。没有重跑完整kind、真实E沙箱、真实供应商、性能容量、安全全扫描、备份灾备、前端最终或公网业务验收。
